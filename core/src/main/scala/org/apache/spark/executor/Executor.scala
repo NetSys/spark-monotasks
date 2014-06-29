@@ -27,6 +27,7 @@ import scala.collection.mutable.{ArrayBuffer, HashMap}
 import scala.util.control.NonFatal
 
 import org.apache.spark._
+import org.apache.spark.performance_logging.ContinuousMonitor
 import org.apache.spark.scheduler._
 import org.apache.spark.shuffle.FetchFailedException
 import org.apache.spark.storage.{StorageLevel, TaskResultBlockId}
@@ -85,6 +86,9 @@ private[spark] class Executor(
     }
   }
 
+  private val continuousMonitor = new ContinuousMonitor(conf)
+  continuousMonitor.start(env)
+
   // Create our ClassLoader
   // do this after SparkEnv creation so can access the SecurityManager
   private val urlClassLoader = createClassLoader()
@@ -121,6 +125,7 @@ private[spark] class Executor(
 
   def stop() {
     env.metricsSystem.report()
+    continuousMonitor.stop()
     isStopped = true
     threadPool.shutdown()
   }
@@ -193,6 +198,7 @@ private[spark] class Executor(
           m.executorRunTime = taskFinish - taskStart
           m.jvmGCTime = gcTime - startGCTime
           m.resultSerializationTime = afterSerialization - beforeSerialization
+          m.setUtilization()
         }
 
         val accumUpdates = Accumulators.values
