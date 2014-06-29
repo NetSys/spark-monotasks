@@ -31,6 +31,7 @@ import akka.actor.Props
 
 import org.apache.spark._
 import org.apache.spark.deploy.SparkHadoopUtil
+import org.apache.spark.performance_logging.ContinuousMonitor
 import org.apache.spark.scheduler._
 import org.apache.spark.shuffle.FetchFailedException
 import org.apache.spark.storage.{StorageLevel, TaskResultBlockId}
@@ -92,6 +93,9 @@ private[spark] class Executor(
   private val executorActor = env.actorSystem.actorOf(
     Props(new ExecutorActor(executorId)), "ExecutorActor")
 
+  private val continuousMonitor = new ContinuousMonitor(conf)
+  continuousMonitor.start(env)
+
   // Whether to load classes in user jars before those in Spark jars
   private val userClassPathFirst: Boolean = {
     conf.getBoolean("spark.executor.userClassPathFirst",
@@ -140,6 +144,7 @@ private[spark] class Executor(
   def stop() {
     env.metricsSystem.report()
     env.actorSystem.stop(executorActor)
+    continuousMonitor.stop()
     isStopped = true
     threadPool.shutdown()
     if (!isLocal) {
@@ -275,6 +280,7 @@ private[spark] class Executor(
           for (m <- metrics) {
             m.setExecutorRunTime(serviceTime)
             m.setJvmGCTime(gcTime - startGCTime)
+            m.setUtilization()
           }
           val reason = new ExceptionFailure(t, metrics)
           execBackend.statusUpdate(taskId, TaskState.FAILED, ser.serialize(reason))

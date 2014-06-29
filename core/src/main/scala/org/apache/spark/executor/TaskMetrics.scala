@@ -24,6 +24,8 @@ import org.apache.spark.executor.DataReadMethod.DataReadMethod
 import scala.collection.mutable.ArrayBuffer
 
 import org.apache.spark.annotation.DeveloperApi
+import org.apache.spark.performance_logging.{CpuCounters, CpuUtilization, DiskCounters,
+  DiskUtilization, NetworkCounters, NetworkUtilization}
 import org.apache.spark.storage.{BlockId, BlockStatus}
 
 /**
@@ -154,6 +156,28 @@ class TaskMetrics extends Serializable {
    * Storage statuses of any blocks that have been updated as a result of this task.
    */
   var updatedBlocks: Option[Seq[(BlockId, BlockStatus)]] = None
+
+  /**
+   * CPU / network / disk counters for when the task started running. These are used when the task
+   * completes to compute the utilization during the period that the task was running.
+   */
+  @transient private val startCpuCounters = new CpuCounters()
+  @transient private val startNetworkCounters = new NetworkCounters()
+  @transient private val startDiskCounters = new DiskCounters()
+
+  /**
+   * Metrics about machine utilization while the task was running.
+   */
+  var cpuUtilization: Option[CpuUtilization] = None
+  var networkUtilization: Option[NetworkUtilization] = None
+  var diskUtilization: Option[DiskUtilization] = None
+
+  /** Should be called when a macrotask completes to set metrics about the task's runtime. */
+  def setUtilization() {
+    cpuUtilization = Some(new CpuUtilization(startCpuCounters))
+    networkUtilization = Some(new NetworkUtilization(startNetworkCounters))
+    diskUtilization = Some(new DiskUtilization(startDiskCounters))
+  }
 
   /**
    * A task may have multiple shuffle readers for multiple dependencies. To avoid synchronization
