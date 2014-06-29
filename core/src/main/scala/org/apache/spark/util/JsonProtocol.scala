@@ -15,6 +15,22 @@
  * limitations under the License.
  */
 
+/*
+ * Copyright 2014 The Regents of The University California
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package org.apache.spark.util
 
 import java.util.{Properties, UUID}
@@ -29,6 +45,8 @@ import org.json4s.JsonDSL._
 import org.json4s.JsonAST._
 
 import org.apache.spark.executor._
+import org.apache.spark.performance_logging.{BlockDeviceUtilization, CpuCounters, CpuUtilization,
+  DiskUtilization, NetworkUtilization}
 import org.apache.spark.scheduler._
 import org.apache.spark.storage._
 import org.apache.spark._
@@ -281,6 +299,10 @@ private[spark] object JsonProtocol {
           ("Status" -> blockStatusToJson(status))
         })
       }.getOrElse(JNothing)
+    val cpuUtilization = taskMetrics.cpuUtilization.map(cpuUtilizationToJson).getOrElse(JNothing)
+    val diskUtilization = taskMetrics.diskUtilization.map(diskUtilizationToJson).getOrElse(JNothing)
+    val networkUtilization =
+      taskMetrics.networkUtilization.map(networkUtilizationToJson).getOrElse(JNothing)
     ("Host Name" -> taskMetrics.hostname) ~
     ("Executor Deserialize Time" -> taskMetrics.executorDeserializeTime) ~
     ("Executor Run Time" -> taskMetrics.executorRunTime) ~
@@ -293,7 +315,47 @@ private[spark] object JsonProtocol {
     ("Shuffle Write Metrics" -> shuffleWriteMetrics) ~
     ("Input Metrics" -> inputMetrics) ~
     ("Output Metrics" -> outputMetrics) ~
-    ("Updated Blocks" -> updatedBlocks)
+    ("Updated Blocks" -> updatedBlocks) ~
+    ("Updated Blocks" -> updatedBlocks) ~
+    ("Cpu Utilization" -> cpuUtilization) ~
+    ("Disk Utilization" -> diskUtilization) ~
+    ("Network Utilization" -> networkUtilization)
+  }
+
+  def cpuUtilizationToJson(cpuUtilization: CpuUtilization): JValue = {
+    ("Start Counters" -> cpuCountersToJson(cpuUtilization.startCounters)) ~
+    ("End Counters" -> cpuCountersToJson(cpuUtilization.endCounters)) ~
+    ("Process User Utilization" -> cpuUtilization.processUserUtilization) ~
+    ("Process System Utilization" -> cpuUtilization.processSystemUtilization) ~
+    ("Total User Utilization" -> cpuUtilization.totalUserUtilization) ~
+    ("Total System Utilization" -> cpuUtilization.totalSystemUtilization)
+  }
+
+  def cpuCountersToJson(cpuCounters: CpuCounters): JValue = {
+    ("Time Milliseconds" -> cpuCounters.timeMillis) ~
+    ("Process User Jiffies" -> cpuCounters.processUserJiffies) ~
+    ("Process System Jiffies" -> cpuCounters.processSystemJiffies) ~
+    ("Total User Jiffies" -> cpuCounters.totalUserJiffies) ~
+    ("Total System Jiffies" -> cpuCounters.totalSystemJiffies)
+  }
+
+  def blockDeviceUtilizationToJson(blockDeviceUtilization: BlockDeviceUtilization): JValue = {
+    ("Disk Utilization" -> blockDeviceUtilization.diskUtilization) ~
+    ("Read Throughput" -> blockDeviceUtilization.readThroughput) ~
+    ("Write Throughput" -> blockDeviceUtilization.writeThroughput)
+  }
+
+  def diskUtilizationToJson(diskUtilization: DiskUtilization): JValue = {
+    diskUtilization.deviceNameToUtilization.map { diskNameAndUtil =>
+      diskNameAndUtil._1 -> blockDeviceUtilizationToJson(diskNameAndUtil._2)
+    }
+  }
+
+  def networkUtilizationToJson(networkUtilization: NetworkUtilization): JValue = {
+    ("Bytes Received Per Second" -> networkUtilization.bytesReceivedPerSecond) ~
+    ("Bytes Transmitted Per Second" -> networkUtilization.bytesTransmittedPerSecond) ~
+    ("Packets Received Per Second" -> networkUtilization.packetsReceivedPerSecond) ~
+    ("Packets Transmitted Per Second" -> networkUtilization.packetsTransmittedPerSecond)
   }
 
   def shuffleReadMetricsToJson(shuffleReadMetrics: ShuffleReadMetrics): JValue = {

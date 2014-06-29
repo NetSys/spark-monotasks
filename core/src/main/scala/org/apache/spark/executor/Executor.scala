@@ -42,6 +42,7 @@ import org.apache.spark._
 import org.apache.spark.monotasks.LocalDagScheduler
 import org.apache.spark.monotasks.compute.PrepareMonotask
 import org.apache.spark.util.{SparkUncaughtExceptionHandler, AkkaUtils, Utils}
+import org.apache.spark.performance_logging.ContinuousMonitor
 
 /**
  * Spark executor used with Mesos, YARN, and the standalone scheduler.
@@ -91,6 +92,9 @@ private[spark] class Executor(
   private val executorActor = env.actorSystem.actorOf(
     Props(new ExecutorActor(executorId)), "ExecutorActor")
 
+  private val continuousMonitor = new ContinuousMonitor(conf)
+  continuousMonitor.start(env)
+
   // Create our DependencyManager, which manages the class loader.
   private val dependencyManager = new DependencyManager(env, conf, userClassPath, isLocal)
 
@@ -126,6 +130,7 @@ private[spark] class Executor(
   def stop() {
     env.metricsSystem.report()
     env.actorSystem.stop(executorActor)
+    continuousMonitor.stop()
     isStopped = true
   }
 }
