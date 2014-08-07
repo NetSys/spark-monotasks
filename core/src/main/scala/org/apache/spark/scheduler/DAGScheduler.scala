@@ -216,7 +216,7 @@ class DAGScheduler(
         // Then register current shuffleDep
         val stage =
           newOrUsedStage(
-            shuffleDep.rdd, shuffleDep.rdd.partitions.size, shuffleDep, jobId,
+            shuffleDep.rdd, shuffleDep.rdd.partitions.size, shuffleDep, false, jobId,
             shuffleDep.rdd.creationSite)
         shuffleToMapStage(shuffleDep.shuffleId) = stage
  
@@ -234,13 +234,14 @@ class DAGScheduler(
       rdd: RDD[_],
       numTasks: Int,
       shuffleDep: Option[ShuffleDependency[_, _, _]],
+      isRead: Boolean,
       jobId: Int,
       callSite: CallSite)
     : Stage =
   {
     val id = nextStageId.getAndIncrement()
     val stage =
-      new Stage(id, rdd, numTasks, shuffleDep, getParentStages(rdd, jobId), jobId, callSite)
+      new Stage(id, rdd, numTasks, shuffleDep, isRead, getParentStages(rdd, jobId), jobId, callSite)
     stageIdToStage(id) = stage
     updateJobIdStageIdMaps(jobId, stage)
     stage
@@ -256,11 +257,12 @@ class DAGScheduler(
       rdd: RDD[_],
       numTasks: Int,
       shuffleDep: ShuffleDependency[_, _, _],
+      isRead: Boolean,
       jobId: Int,
       callSite: CallSite)
     : Stage =
   {
-    val stage = newStage(rdd, numTasks, Some(shuffleDep), jobId, callSite)
+    val stage = newStage(rdd, numTasks, Some(shuffleDep), isRead, jobId, callSite)
     if (mapOutputTracker.containsShuffle(shuffleDep.shuffleId)) {
       val serLocs = mapOutputTracker.getSerializedMapOutputStatuses(shuffleDep.shuffleId)
       val locs = MapOutputTracker.deserializeMapStatuses(serLocs)
@@ -316,7 +318,7 @@ class DAGScheduler(
       val currentShufDep = parentsWithNoMapStage.pop()
       val stage =
         newOrUsedStage(
-          currentShufDep.rdd, currentShufDep.rdd.partitions.size, currentShufDep, jobId,
+          currentShufDep.rdd, currentShufDep.rdd.partitions.size, currentShufDep, false, jobId,
           currentShufDep.rdd.creationSite)
       shuffleToMapStage(currentShufDep.shuffleId) = stage
     }
@@ -371,6 +373,9 @@ class DAGScheduler(
                 if (!mapStage.isAvailable) {
                   missing += mapStage
                 }
+              case readDependency: ReadDependency[_] =>
+                missing += newStage(readDependency.rdd, readDependency.rdd.partitions.size,
+                  None, true, stage.jobId, stage.callSite)
               case narrowDep: NarrowDependency[_] =>
                 waitingForVisit.push(narrowDep.rdd)
             }
@@ -717,7 +722,7 @@ class DAGScheduler(
     try {
       // New stage creation may throw an exception if, for example, jobs are run on a
       // HadoopRDD whose underlying HDFS files have been deleted.
-      finalStage = newStage(finalRDD, partitions.size, None, jobId, callSite)
+      finalStage = newStage(finalRDD, partitions.size, None, false, jobId, callSite)
     } catch {
       case e: Exception =>
         logWarning("Creating new stage failed due to exception - job: " + jobId, e)
@@ -803,7 +808,9 @@ class DAGScheduler(
       // For ShuffleMapTask, serialize and broadcast (rdd, shuffleDep).
       // For ResultTask, serialize and broadcast (rdd, func).
       val taskBinaryBytes: Array[Byte] =
-        if (stage.isShuffleMap) {
+        if (stage.isRead) {
+          closureSerializer.serialize(stage.rdd : AnyRef).array()
+        } else if (stage.isShuffleMap) {
           closureSerializer.serialize((stage.rdd, stage.shuffleDep.get) : AnyRef).array()
         } else {
           closureSerializer.serialize((stage.rdd, stage.resultOfJob.get.func) : AnyRef).array()
@@ -821,7 +828,14 @@ class DAGScheduler(
         return
     }
 
-    if (stage.isShuffleMap) {
+    if (stage.isRead) {
+      // TODO(ryan): okay, these Stage flags are officially unmaintainable
+      for (p <- 0 until stage.numPartitions) {
+        val locs = getPreferredLocs(stage.rdd, p)
+        val part = stage.rdd.partitions(p)
+        tasks += new ReadTask(stage.id, taskBinary, part, locs)
+      }
+    } else if (stage.isShuffleMap) {
       for (p <- 0 until stage.numPartitions if stage.outputLocs(p) == Nil) {
         val locs = getPreferredLocs(stage.rdd, p)
         val part = stage.rdd.partitions(p)

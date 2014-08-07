@@ -18,7 +18,7 @@
 package org.apache.spark
 
 import org.apache.spark.annotation.DeveloperApi
-import org.apache.spark.rdd.RDD
+import org.apache.spark.rdd.{BlockRDD, RDD}
 import org.apache.spark.serializer.Serializer
 import org.apache.spark.shuffle.ShuffleHandle
 
@@ -49,6 +49,11 @@ abstract class NarrowDependency[T](_rdd: RDD[T]) extends Dependency[T] {
   override def rdd: RDD[T] = _rdd
 }
 
+class ReadDependency[T](_rdd: BlockRDD[T]) extends Dependency[T] {
+
+  override def rdd: BlockRDD[T] = _rdd
+
+}
 
 /**
  * :: DeveloperApi ::

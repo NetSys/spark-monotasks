@@ -49,6 +49,7 @@ private[spark] class Stage(
     val rdd: RDD[_],
     val numTasks: Int,
     val shuffleDep: Option[ShuffleDependency[_, _, _]],  // Output shuffle if stage is a map stage
+    val isRead: Boolean, // TODO(ryan): polymorphism would be nice, rather than using flags Tasks
     val parents: List[Stage],
     val jobId: Int,
     val callSite: CallSite)
