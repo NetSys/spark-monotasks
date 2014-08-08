@@ -100,6 +100,8 @@ class DAGScheduler(
   // Stages that must be resubmitted due to fetch failures
   private[scheduler] val failedStages = new HashSet[Stage]
 
+  private[scheduler] val finishedStages = new HashSet[Stage]
+
   private[scheduler] val activeJobs = new HashSet[ActiveJob]
 
   // Contains the locations that each RDD's partitions are cached on
@@ -375,12 +377,13 @@ class DAGScheduler(
                   missing += mapStage
                 }
               case dependency: PipelineDependency[_] =>
-                if (!pipelineToPipelineStage.contains(dependency)) {
-                  // TODO(ryan) above is a stop-gap to see if this stage is completed
-                  val currentStage = newStage(dependency.rdd, dependency.rdd.partitions.size,
+                val currentStage = pipelineToPipelineStage.getOrElseUpdate(dependency,
+                  newStage(dependency.rdd, dependency.rdd.partitions.size,
                     None, true, stage.jobId, stage.callSite)
+                )
+                if (!finishedStages.contains(currentStage)) {
+                  // TODO(ryan) above is a stop-gap to see if this stage is completed
                   missing += currentStage
-                  pipelineToPipelineStage(dependency) = currentStage
                 }
               case narrowDep: NarrowDependency[_] =>
                 waitingForVisit.push(narrowDep.rdd)
@@ -446,6 +449,7 @@ class DAGScheduler(
                 for ((k, v) <- pipelineToPipelineStage.find(_._2 == stage)) {
                   pipelineToPipelineStage.remove(k)
                 }
+                finishedStages.remove(stage)
                 if (waitingStages.contains(stage)) {
                   logDebug("Removing stage %d from waiting set.".format(stageId))
                   waitingStages -= stage
@@ -929,6 +933,7 @@ class DAGScheduler(
       stage.info.completionTime = Some(clock.getTime())
       listenerBus.post(SparkListenerStageCompleted(stage.info))
       runningStages -= stage
+      finishedStages += stage
     }
     event.reason match {
       case Success =>
