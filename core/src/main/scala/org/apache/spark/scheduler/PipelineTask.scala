@@ -37,26 +37,25 @@ import java.io.Externalizable
  * on.
  *
  * @param stageId id of the stage this task belongs to
- * @param taskBinary broadcast version of of the RDD and the ShuffleDependency. Once deserialized,
- *                   the type should be (RDD[_], ShuffleDependency[_, _, _]).
+ * @param taskBinary broadcast version of of the RDD
  * @param partition partition of the RDD this task is associated with
  * @param locs preferred task execution locations for locality scheduling
  */
-private[spark] class ReadTask(
+private[spark] class PipelineTask(
     stageId: Int,
     taskBinary: Broadcast[Array[Byte]],
     partition: Partition,
     @transient private var locs: Seq[TaskLocation])
-  extends Task[ReadStatus](stageId, partition.index) with Logging {
+  extends Task[PipelineStatus](stageId, partition.index) with Logging {
 
   @transient private val preferredLocs: Seq[TaskLocation] = {
     if (locs == null) Nil else locs.toSet.toSeq
   }
 
-  override def runTask(context: TaskContext): ReadStatus = {
+  override def runTask(context: TaskContext): PipelineStatus = {
     // Deserialize the RDD using the broadcast variable.
     val ser = SparkEnv.get.closureSerializer.newInstance()
-    val rdd = ser.deserialize[BlockRDD[_]] (
+    val rdd = ser.deserialize[RDD[_]] (
       ByteBuffer.wrap(taskBinary.value), Thread.currentThread.getContextClassLoader)
       // TODO(ryan) where is the ser/deser defined for this task?
 
@@ -64,7 +63,7 @@ private[spark] class ReadTask(
     try {
       val manager = SparkEnv.get.cacheManager
       manager.getOrCompute(rdd, partition, context, StorageLevel.MEMORY_ONLY_SER) // cache the partition (hopefully :)
-      new ReadStatus(SparkEnv.get.blockManager.blockManagerId, 0)
+      new PipelineStatus(SparkEnv.get.blockManager.blockManagerId, 0)
       // TODO(ryan): is blockManagerId enough to ident the machine?
       // TODO(ryan): need a way to get byte count for arg 2
     } finally {
@@ -77,4 +76,4 @@ private[spark] class ReadTask(
   override def toString = "ReadTask(%d, %d)".format(stageId, partitionId)
 }
 
-class ReadStatus(val location: BlockManagerId, val bytesTransferred: Long) extends Serializable
+class PipelineStatus(val location: BlockManagerId, val bytesTransferred: Long) extends Serializable

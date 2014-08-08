@@ -373,8 +373,8 @@ class DAGScheduler(
                 if (!mapStage.isAvailable) {
                   missing += mapStage
                 }
-              case readDependency: ReadDependency[_] =>
-                missing += newStage(readDependency.rdd, readDependency.rdd.partitions.size,
+              case dependency: PipelineDependency[_] =>
+                missing += newStage(dependency.rdd, dependency.rdd.partitions.size,
                   None, true, stage.jobId, stage.callSite)
               case narrowDep: NarrowDependency[_] =>
                 waitingForVisit.push(narrowDep.rdd)
@@ -808,7 +808,7 @@ class DAGScheduler(
       // For ShuffleMapTask, serialize and broadcast (rdd, shuffleDep).
       // For ResultTask, serialize and broadcast (rdd, func).
       val taskBinaryBytes: Array[Byte] =
-        if (stage.isRead) {
+        if (stage.isPipeline) {
           closureSerializer.serialize(stage.rdd : AnyRef).array()
         } else if (stage.isShuffleMap) {
           closureSerializer.serialize((stage.rdd, stage.shuffleDep.get) : AnyRef).array()
@@ -828,12 +828,12 @@ class DAGScheduler(
         return
     }
 
-    if (stage.isRead) {
+    if (stage.isPipeline) {
       // TODO(ryan): okay, these Stage flags are officially unmaintainable
       for (p <- 0 until stage.numPartitions) {
         val locs = getPreferredLocs(stage.rdd, p)
         val part = stage.rdd.partitions(p)
-        tasks += new ReadTask(stage.id, taskBinary, part, locs)
+        tasks += new PipelineTask(stage.id, taskBinary, part, locs)
       }
     } else if (stage.isShuffleMap) {
       for (p <- 0 until stage.numPartitions if stage.outputLocs(p) == Nil) {

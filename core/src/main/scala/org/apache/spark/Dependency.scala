@@ -49,11 +49,7 @@ abstract class NarrowDependency[T](_rdd: RDD[T]) extends Dependency[T] {
   override def rdd: RDD[T] = _rdd
 }
 
-class ReadDependency[T](_rdd: BlockRDD[T]) extends Dependency[T] {
-
-  override def rdd: BlockRDD[T] = _rdd
-
-}
+class PipelineDependency[T](rdd: RDD[T]) extends OneToOneDependency[T](rdd)
 
 /**
  * :: DeveloperApi ::
