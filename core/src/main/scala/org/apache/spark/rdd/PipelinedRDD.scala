@@ -19,7 +19,8 @@ package org.apache.spark.rdd
 
 import scala.reflect.ClassTag
 
-import org.apache.spark.{PipelineDependency, Partition, TaskContext}
+import org.apache.spark.{SparkEnv, PipelineDependency, Partition, TaskContext}
+import org.apache.spark.storage.StorageLevel
 
 private[spark] class PipelinedRDD[T: ClassTag](
     prev: RDD[T])
@@ -30,5 +31,11 @@ private[spark] class PipelinedRDD[T: ClassTag](
   override val partitioner = prev.partitioner    // Since pipeline is a logical identity function
 
   override def compute(split: Partition, context: TaskContext) =
-    firstParent[T].iterator(split, context)
+    SparkEnv.get.cacheManager.getOrCompute(prev, split, context, StorageLevel.MEMORY_ONLY_SER)
+    // Note that the above *should* be cached when compute() is called on it
+    // because PipelineTask will to the caching beforehand
+    // TODO(ryan) somehow throw exception if above is not cached, because it means either:
+    // 1. The partition failed to cache/was evicted
+    // 2. The Task calling this.compute() is on the *wrong* machine (i.e., it'll silently
+    // work, but without actually doing inter-task pipelining)
 }

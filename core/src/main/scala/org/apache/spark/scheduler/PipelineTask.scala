@@ -64,8 +64,6 @@ private[spark] class PipelineTask(
       val manager = SparkEnv.get.cacheManager
       manager.getOrCompute(rdd, partition, context, StorageLevel.MEMORY_ONLY_SER) // cache the partition (hopefully :)
       new PipelineStatus()
-      // TODO(ryan): is blockManagerId enough to ident the machine?
-      // TODO(ryan): need a way to get byte count for arg 2
     } finally {
       context.executeOnCompleteCallbacks() // TODO(ryan) what does this do?
     }
