@@ -19,17 +19,16 @@ package org.apache.spark.rdd
 
 import scala.reflect.ClassTag
 
-import org.apache.spark.{Partition, TaskContext}
+import org.apache.spark.{PipelineDependency, Partition, TaskContext}
 
 private[spark] class PipelinedRDD[T: ClassTag](
-    prev: RDD[T],
-    f: T => Boolean)
-  extends RDD[T](prev) {
+    prev: RDD[T])
+  extends RDD[T](prev.context , List(new PipelineDependency(prev))) {
 
   override def getPartitions: Array[Partition] = firstParent[T].partitions
 
-  override val partitioner = prev.partitioner    // Since filter cannot change a partition's keys
+  override val partitioner = prev.partitioner    // Since pipeline is a logical identity function
 
   override def compute(split: Partition, context: TaskContext) =
-    firstParent[T].iterator(split, context).filter(f)
+    firstParent[T].iterator(split, context)
 }

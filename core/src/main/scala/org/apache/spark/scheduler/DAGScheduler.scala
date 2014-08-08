@@ -88,6 +88,7 @@ class DAGScheduler(
   private[scheduler] val jobIdToStageIds = new HashMap[Int, HashSet[Int]]
   private[scheduler] val stageIdToStage = new HashMap[Int, Stage]
   private[scheduler] val shuffleToMapStage = new HashMap[Int, Stage]
+  private[scheduler] val pipelineToPipelineStage = new HashMap[PipelineDependency[_], Stage]
   private[scheduler] val jobIdToActiveJob = new HashMap[Int, ActiveJob]
 
   // Stages we need to run whose parents aren't done
@@ -374,8 +375,13 @@ class DAGScheduler(
                   missing += mapStage
                 }
               case dependency: PipelineDependency[_] =>
-                missing += newStage(dependency.rdd, dependency.rdd.partitions.size,
-                  None, true, stage.jobId, stage.callSite)
+                if (!pipelineToPipelineStage.contains(dependency)) {
+                  // TODO(ryan) above is a stop-gap to see if this stage is completed
+                  val currentStage = newStage(dependency.rdd, dependency.rdd.partitions.size,
+                    None, true, stage.jobId, stage.callSite)
+                  missing += currentStage
+                  pipelineToPipelineStage(dependency) = currentStage
+                }
               case narrowDep: NarrowDependency[_] =>
                 waitingForVisit.push(narrowDep.rdd)
             }
@@ -436,6 +442,9 @@ class DAGScheduler(
                 }
                 for ((k, v) <- shuffleToMapStage.find(_._2 == stage)) {
                   shuffleToMapStage.remove(k)
+                }
+                for ((k, v) <- pipelineToPipelineStage.find(_._2 == stage)) {
+                  pipelineToPipelineStage.remove(k)
                 }
                 if (waitingStages.contains(stage)) {
                   logDebug("Removing stage %d from waiting set.".format(stageId))
@@ -948,6 +957,14 @@ class DAGScheduler(
           event.taskMetrics))
         stage.pendingTasks -= task
         task match {
+          case pipelineTask: PipelineTask =>
+            // TODO(ryan): I'm not really sure what I'm doing here or if I'm missing something
+            if (runningStages.contains(stage) && stage.pendingTasks.isEmpty) {
+              markStageAsFinished(stage)
+              clearCacheLocs()
+              // TODO(ryan): I'm _not_ submitting next stages here
+          }
+
           case rt: ResultTask[_, _] =>
             stage.resultOfJob match {
               case Some(job) =>

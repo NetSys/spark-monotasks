@@ -1351,4 +1351,12 @@ abstract class RDD[T: ClassTag](
   def toJavaRDD() : JavaRDD[T] = {
     new JavaRDD(this)(elementClassTag)
   }
+
+  /**
+   * Force the computation of this RDD to be pipelined at the _task level_ instead
+   * of streamed with future composing functions on this RDD
+   * @return the new PipelinedRDD
+   */
+  def pipeline(): PipelinedRDD[T] = new PipelinedRDD[T](this)
+
 }

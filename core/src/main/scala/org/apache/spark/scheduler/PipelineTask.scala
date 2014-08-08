@@ -63,7 +63,7 @@ private[spark] class PipelineTask(
     try {
       val manager = SparkEnv.get.cacheManager
       manager.getOrCompute(rdd, partition, context, StorageLevel.MEMORY_ONLY_SER) // cache the partition (hopefully :)
-      new PipelineStatus(SparkEnv.get.blockManager.blockManagerId, 0)
+      new PipelineStatus()
       // TODO(ryan): is blockManagerId enough to ident the machine?
       // TODO(ryan): need a way to get byte count for arg 2
     } finally {
@@ -73,7 +73,7 @@ private[spark] class PipelineTask(
 
   override def preferredLocations: Seq[TaskLocation] = preferredLocs
 
-  override def toString = "ReadTask(%d, %d)".format(stageId, partitionId)
+  override def toString = "PipelineTask(%d, %d)".format(stageId, partitionId)
 }
 
-class PipelineStatus(val location: BlockManagerId, val bytesTransferred: Long) extends Serializable
+class PipelineStatus extends Serializable
