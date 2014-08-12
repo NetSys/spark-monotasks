@@ -365,7 +365,7 @@ private[spark] class TaskSetManager(
   private def findTask(execId: String, host: String, locality: TaskLocality.Value)
     : Option[(Int, TaskLocality.Value, Boolean)] =
   {
-    val indices = readyTasksIndices(execId, host).filter(copiesRunning(_) == 0)
+    val indices = readyTasksIndices(execId, host).filter(index => copiesRunning(index) == 0 && !successful.contains(index))
     if (indices.length == 0) {
       None
     } else {
