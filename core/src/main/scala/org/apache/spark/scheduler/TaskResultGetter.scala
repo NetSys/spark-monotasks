@@ -42,7 +42,10 @@ private[spark] class TaskResultGetter(sparkEnv: SparkEnv, scheduler: TaskSchedul
 
   def enqueueSuccessfulTask(
     taskSetManager: TaskSetManager, tid: Long, serializedData: ByteBuffer) {
-    getTaskResultExecutor.execute(new Runnable {
+    // TODO(ryan): following was causing a race condition where sched is not notified of a task end
+    // before resource offers are made to it. I removed spawning a new Thread for it and am not
+    // sure what unintended consequences it'll have
+    new Runnable {
       override def run(): Unit = Utils.logUncaughtExceptions {
         try {
           val result = serializer.get().deserialize[TaskResult[_]](serializedData) match {
@@ -75,7 +78,7 @@ private[spark] class TaskResultGetter(sparkEnv: SparkEnv, scheduler: TaskSchedul
             taskSetManager.abort("Exception while getting task result: %s".format(ex))
         }
       }
-    })
+    }.run()
   }
 
   def enqueueFailedTask(taskSetManager: TaskSetManager, tid: Long, taskState: TaskState,

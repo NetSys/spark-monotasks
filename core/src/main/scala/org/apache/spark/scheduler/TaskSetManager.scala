@@ -523,6 +523,11 @@ private[spark] class TaskSetManager(
     removeRunningTask(tid)
     sched.dagScheduler.taskEnded(
       tasks(index), Success, result.value(), result.accumUpdates, info, result.metrics)
+    if (copiesRunning(index) > 0) {
+      copiesRunning(index) -= 1
+    } else {
+      logWarning("Task finished but no copies of it were running?!")
+    }
     if (!successful.contains(index)) {
       tasksSuccessful += 1
       logInfo("Finished task %s in stage %s (TID %d) in %d ms on %s (%d/%d)".format(
