@@ -27,9 +27,10 @@ import org.apache.spark.rdd.{BlockRDD, RDD}
 import org.apache.spark.shuffle.ShuffleWriter
 import org.apache.spark.storage.{BlockManagerId, StorageLevel}
 import java.io.Externalizable
+import com.sun.istack.internal.NotNull
 
 /**
-* A ReadTask blindly caches the elements of a partition in memory
+* A PipelineTask blindly caches the elements of a partition in memory
 *
  * The idea is to devote a task to simply bringing in a block into memory.
  * So, we'll want to call this only on an RDD that reads blocks from disk,
@@ -43,7 +44,7 @@ import java.io.Externalizable
  */
 private[spark] class PipelineTask(
     stageId: Int,
-    taskBinary: Broadcast[Array[Byte]],
+    @NotNull taskBinary: Broadcast[Array[Byte]],
     partition: Partition,
     @transient private var locs: Seq[TaskLocation])
   extends Task[PipelineStatus](stageId, partition.index) with Logging {

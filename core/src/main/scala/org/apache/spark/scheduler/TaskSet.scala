@@ -18,6 +18,8 @@
 package org.apache.spark.scheduler
 
 import java.util.Properties
+import scala.collection.mutable.HashMap
+import org.apache.spark.scheduler.Task
 
 /**
  * A set of tasks submitted together to the low-level TaskScheduler, usually representing
@@ -31,9 +33,22 @@ private[spark] class TaskSet(
     val properties: Properties) {
     val id: String = stageId + "." + attempt
 
+  var depMap: Map[Task[_], Seq[Task[_]]] = tasks.map(x => (x, Seq[Task[_]]())).toMap
+
   def kill(interruptThread: Boolean) {
     tasks.foreach(_.kill(interruptThread))
   }
 
   override def toString: String = "TaskSet " + id
+}
+
+private[spark] object TaskSet {
+
+  def setWithDeps(tasks: Array[Task[_]], depMap: HashMap[Task[_], Seq[Task[_]]],
+                  stageId: Int, attempt: Int, priority: Int, properties: Properties) = {
+    val s = new TaskSet(tasks, stageId, attempt, priority, properties)
+    s.depMap = depMap.toMap
+    s
+  }
+
 }

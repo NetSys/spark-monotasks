@@ -88,7 +88,6 @@ class DAGScheduler(
   private[scheduler] val jobIdToStageIds = new HashMap[Int, HashSet[Int]]
   private[scheduler] val stageIdToStage = new HashMap[Int, Stage]
   private[scheduler] val shuffleToMapStage = new HashMap[Int, Stage]
-  private[scheduler] val pipelineToPipelineStage = new HashMap[PipelineDependency[_], Stage]
   private[scheduler] val jobIdToActiveJob = new HashMap[Int, ActiveJob]
 
   // Stages we need to run whose parents aren't done
@@ -99,8 +98,6 @@ class DAGScheduler(
 
   // Stages that must be resubmitted due to fetch failures
   private[scheduler] val failedStages = new HashSet[Stage]
-
-  private[scheduler] val finishedStages = new HashSet[Stage]
 
   private[scheduler] val activeJobs = new HashSet[ActiveJob]
 
@@ -376,15 +373,6 @@ class DAGScheduler(
                 if (!mapStage.isAvailable) {
                   missing += mapStage
                 }
-              case dependency: PipelineDependency[_] =>
-                val currentStage = pipelineToPipelineStage.getOrElseUpdate(dependency,
-                  newStage(dependency.rdd, dependency.rdd.partitions.size,
-                    None, true, stage.jobId, stage.callSite)
-                )
-                if (!finishedStages.contains(currentStage)) {
-                  // TODO(ryan) above is a stop-gap to see if this stage is completed
-                  missing += currentStage
-                }
               case narrowDep: NarrowDependency[_] =>
                 waitingForVisit.push(narrowDep.rdd)
             }
@@ -446,10 +434,6 @@ class DAGScheduler(
                 for ((k, v) <- shuffleToMapStage.find(_._2 == stage)) {
                   shuffleToMapStage.remove(k)
                 }
-                for ((k, v) <- pipelineToPipelineStage.find(_._2 == stage)) {
-                  pipelineToPipelineStage.remove(k)
-                }
-                finishedStages.remove(stage)
                 if (waitingStages.contains(stage)) {
                   logDebug("Removing stage %d from waiting set.".format(stageId))
                   waitingStages -= stage
@@ -789,6 +773,14 @@ class DAGScheduler(
     }
   }
 
+  private[spark] def getBinary(stuff: AnyRef): Broadcast[Array[Byte]] = {
+
+    // For ShuffleMapTask, serialize and broadcast (rdd, shuffleDep).
+    // For ResultTask, serialize and broadcast (rdd, func).
+    val taskBinaryBytes: Array[Byte] = closureSerializer.serialize(stuff: AnyRef).array()
+    sc.broadcast(taskBinaryBytes)
+  }
+
   /** Called when stage's parents are available and we can now do its task. */
   private def submitMissingTasks(stage: Stage, jobId: Int) {
     logDebug("submitMissingTasks(" + stage + ")")
@@ -816,19 +808,18 @@ class DAGScheduler(
     // task gets a different copy of the RDD. This provides stronger isolation between tasks that
     // might modify state of objects referenced in their closures. This is necessary in Hadoop
     // where the JobConf/Configuration object is not thread-safe.
-    var taskBinary: Broadcast[Array[Byte]] = null
+
+    var miniStageRoot: MiniStage = null
     try {
       // For ShuffleMapTask, serialize and broadcast (rdd, shuffleDep).
       // For ResultTask, serialize and broadcast (rdd, func).
-      val taskBinaryBytes: Array[Byte] =
-        if (stage.isPipeline) {
-          closureSerializer.serialize(stage.rdd : AnyRef).array()
-        } else if (stage.isShuffleMap) {
-          closureSerializer.serialize((stage.rdd, stage.shuffleDep.get) : AnyRef).array()
+      miniStageRoot =
+        if (stage.isShuffleMap) {
+          MiniStage.shuffleMapFromFinalRDD(stage.rdd, stage.id, stage.shuffleDep.get, this)
         } else {
-          closureSerializer.serialize((stage.rdd, stage.resultOfJob.get.func) : AnyRef).array()
+          MiniStage.resultFromFinalRDD(stage.rdd, stage.id, stage.resultOfJob.get.func, stage.resultOfJob.get, this)
         }
-      taskBinary = sc.broadcast(taskBinaryBytes)
+      //taskBinary = sc.broadcast(taskBinaryBytes)
     } catch {
       // In the case of a failure during serialization, abort the stage.
       case e: NotSerializableException =>
@@ -841,30 +832,8 @@ class DAGScheduler(
         return
     }
 
-    if (stage.isPipeline) {
-      // TODO(ryan): okay, these Stage flags are officially unmaintainable
-      for (p <- 0 until stage.numPartitions) {
-        val locs = getPreferredLocs(stage.rdd, p)
-        val part = stage.rdd.partitions(p)
-        tasks += new PipelineTask(stage.id, taskBinary, part, locs)
-      }
-    } else if (stage.isShuffleMap) {
-      for (p <- 0 until stage.numPartitions if stage.outputLocs(p) == Nil) {
-        val locs = getPreferredLocs(stage.rdd, p)
-        val part = stage.rdd.partitions(p)
-        tasks += new ShuffleMapTask(stage.id, taskBinary, part, locs)
-      }
-    } else {
-      // This is a final stage; figure out its job's missing partitions
-      val job = stage.resultOfJob.get
-      for (id <- 0 until job.numPartitions if !job.finished(id)) {
-        val p: Int = job.partitions(id)
-        val part = stage.rdd.partitions(p)
-        val locs = getPreferredLocs(stage.rdd, p)
-        tasks += new ResultTask(stage.id, taskBinary, part, locs, id)
-      }
-    }
-
+    val (newTasks, depMap) = MiniStage.sortedTasks(miniStageRoot)
+    tasks ++= newTasks
     if (tasks.size > 0) {
       // Preemptively serialize a task to make sure it can be serialized. We are catching this
       // exception here because it would be fairly hard to catch the non-serializable exception
@@ -890,7 +859,8 @@ class DAGScheduler(
       stage.pendingTasks ++= tasks
       logDebug("New pending tasks: " + stage.pendingTasks)
       taskScheduler.submitTasks(
-        new TaskSet(tasks.toArray, stage.id, stage.newAttemptId(), stage.jobId, properties))
+        TaskSet.setWithDeps(tasks.toArray, depMap, stage.id, stage.newAttemptId(), stage.jobId, properties)
+      )
       stage.info.submissionTime = Some(clock.getTime())
     } else {
       // Because we posted SparkListenerStageSubmitted earlier, we should post
@@ -933,7 +903,6 @@ class DAGScheduler(
       stage.info.completionTime = Some(clock.getTime())
       listenerBus.post(SparkListenerStageCompleted(stage.info))
       runningStages -= stage
-      finishedStages += stage
     }
     event.reason match {
       case Success =>

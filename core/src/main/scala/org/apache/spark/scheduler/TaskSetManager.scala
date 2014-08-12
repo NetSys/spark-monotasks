@@ -30,6 +30,7 @@ import org.apache.spark._
 import org.apache.spark.TaskState.TaskState
 import org.apache.spark.executor.TaskMetrics
 import org.apache.spark.util.{Clock, SystemClock}
+import scala.collection.mutable
 
 /**
  * Schedules the tasks within a single TaskSet in the TaskSchedulerImpl. This class keeps track of
@@ -73,9 +74,13 @@ private[spark] class TaskSetManager(
   val ser = env.closureSerializer.newInstance()
 
   val tasks = taskSet.tasks
+  val indexOf: Map[Task[_], Int] = tasks.zipWithIndex.toMap
+  val dependencies = taskSet.depMap
+  val dependenciesByIndex = dependencies.map { case (t, ts) => (indexOf(t), ts.map(indexOf(_))) }
+
   val numTasks = tasks.length
   val copiesRunning = new Array[Int](numTasks)
-  val successful = new Array[Boolean](numTasks)
+  val successful = new HashMap[Int, TaskInfo]()
   private val numFailures = new Array[Int](numTasks)
   // key is taskId, value is a Map of executor id to when it failed
   private val failedExecutors = new HashMap[Int, HashMap[String, Long]]()
@@ -246,7 +251,7 @@ private[spark] class TaskSetManager(
       if (!executorIsBlacklisted(execId, index)) {
         // This should almost always be list.trimEnd(1) to remove tail
         list.remove(indexOffset)
-        if (copiesRunning(index) == 0 && !successful(index)) {
+        if (copiesRunning(index) == 0 && !successful.contains(index)) {
           return Some(index)
         }
       }
@@ -282,7 +287,7 @@ private[spark] class TaskSetManager(
   private def findSpeculativeTask(execId: String, host: String, locality: TaskLocality.Value)
     : Option[(Int, TaskLocality.Value)] =
   {
-    speculatableTasks.retain(index => !successful(index)) // Remove finished tasks from set
+    speculatableTasks.retain(index => !successful.contains(index)) // Remove finished tasks from set
 
     def canRunOnHost(index: Int): Boolean =
       !hasAttemptOnHost(index, host) && !executorIsBlacklisted(execId, index)
@@ -336,6 +341,22 @@ private[spark] class TaskSetManager(
   }
 
   /**
+   * Return all pipeline tasks that are ready to run on a given executor/host
+   * @param execId
+   * @param host
+   * @return
+   */
+  private def readyTasksIndices(execId: String, host: String): Seq[Int] = {
+    (0 until tasks.length).filter(canRun(_, host))
+  }
+
+  private def canRun(taskIndex: Int, host: String) = {
+    dependenciesByIndex(taskIndex).forall {
+      index => successful.contains(index) && successful(index).host == host
+    }
+  }
+
+  /**
    * Dequeue a pending task for a given node and return its index and locality level.
    * Only search for tasks matching the given locality constraint.
    *
@@ -344,6 +365,14 @@ private[spark] class TaskSetManager(
   private def findTask(execId: String, host: String, locality: TaskLocality.Value)
     : Option[(Int, TaskLocality.Value, Boolean)] =
   {
+    val indices = readyTasksIndices(execId, host).filter(copiesRunning(_) == 0)
+    if (indices.length == 0) {
+      None
+    } else {
+      Some(indices.head, TaskLocality.PROCESS_LOCAL, false)
+    }
+
+    /*
     for (index <- findTaskFromList(execId, getPendingTasksForExecutor(execId))) {
       return Some((index, TaskLocality.PROCESS_LOCAL, false))
     }
@@ -378,6 +407,7 @@ private[spark] class TaskSetManager(
     findSpeculativeTask(execId, host, locality).map { case (taskIndex, allowedLocality) =>
       (taskIndex, allowedLocality, true)
     }
+    */
   }
 
   /**
@@ -493,12 +523,12 @@ private[spark] class TaskSetManager(
     removeRunningTask(tid)
     sched.dagScheduler.taskEnded(
       tasks(index), Success, result.value(), result.accumUpdates, info, result.metrics)
-    if (!successful(index)) {
+    if (!successful.contains(index)) {
       tasksSuccessful += 1
       logInfo("Finished task %s in stage %s (TID %d) in %d ms on %s (%d/%d)".format(
         info.id, taskSet.id, info.taskId, info.duration, info.host, tasksSuccessful, numTasks))
       // Mark successful and stop if all the tasks have succeeded.
-      successful(index) = true
+      successful(index) = info
       if (tasksSuccessful == numTasks) {
         isZombie = true
       }
@@ -530,8 +560,8 @@ private[spark] class TaskSetManager(
     reason match {
       case fetchFailed: FetchFailed =>
         logWarning(failureReason)
-        if (!successful(index)) {
-          successful(index) = true
+        if (!successful.contains(index)) {
+          successful(index) = info // TODO(ryan) why are we marking it as successful??
           tasksSuccessful += 1
         }
         // Not adding to failed executors for FetchFailed.
@@ -656,8 +686,8 @@ private[spark] class TaskSetManager(
     if (tasks(0).isInstanceOf[ShuffleMapTask]) {
       for ((tid, info) <- taskInfos if info.executorId == execId) {
         val index = taskInfos(tid).index
-        if (successful(index)) {
-          successful(index) = false
+        if (successful.contains(index)) {
+          successful -= index
           copiesRunning(index) -= 1
           tasksSuccessful -= 1
           addPendingTask(index)
@@ -700,7 +730,7 @@ private[spark] class TaskSetManager(
       logDebug("Task length threshold for speculation: " + threshold)
       for ((tid, info) <- taskInfos) {
         val index = info.index
-        if (!successful(index) && copiesRunning(index) == 1 && info.timeRunning(time) > threshold &&
+        if (!successful.contains(index) && copiesRunning(index) == 1 && info.timeRunning(time) > threshold &&
           !speculatableTasks.contains(index)) {
           logInfo(
             "Marking task %d in stage %s (on %s) as speculatable because it ran more than %.0f ms"
