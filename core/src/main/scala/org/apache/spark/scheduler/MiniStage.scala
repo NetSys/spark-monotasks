@@ -53,12 +53,16 @@ class PipelineStage(stageId: Int, rdd: RDD[_], dependencies: Seq[MiniStage], sch
 class MiniFetchStage(stageId: Int, outputRDD: MiniFetchRDD[_, _, _], dep: MiniFetchDependency[_, _, _], scheduler: DAGScheduler)
   extends MiniStage(stageId, Seq()) {
 
-  private val tasksByPartition: Map[Int, Seq[Task[_]]] = {
-    outputRDD.shuffleBlockIdsByPartition.mapValues(_.map(taskFromShuffleBlock _))
-  }
+  val statuses = SparkEnv.get.mapOutputTracker.getMapStatuses(dep.shuffleId)
+
+  // TODO(ryan): weird bug below if using mapValues where mapValues would call the function multiple times ...
+  // it seems like a bug in the implementation of Map.mapValues
+  private val tasksByPartition: Map[Int, Seq[Task[_]]] =
+    outputRDD.shuffleBlockIdsByPartition.toList.map { case (k, v) => (k, v.map(taskFromShuffleBlock _)) }.toMap
 
   private def taskFromShuffleBlock(id: ShuffleBlockId): Task[_] = {
-    new MiniFetchTask(stageId, scheduler.getBinary(id))
+    val status = statuses(id.mapId)
+    new MiniFetchTask(stageId, scheduler.getBinary(id, status.location, status.compressedSizes(id.reduceId), dep))
   }
 
   override def tasks: Seq[Task[_]] = tasksByPartition.values.flatten.toSeq
@@ -136,6 +140,9 @@ object MiniStage {
             queue.enqueue(dep)
 
             for (task <- tasks) {
+              val a = dep.dependenciesOfChild(task)
+              val b = dep.dependenciesOfChild(task)
+              assert(a eq b)
               miniTaskDependency(task) ++= dep.dependenciesOfChild(task)
             }
           }

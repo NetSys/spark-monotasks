@@ -28,6 +28,7 @@ import org.apache.spark.shuffle.ShuffleWriter
 import org.apache.spark.storage.{ShuffleBlockId, BlockManagerId, StorageLevel}
 import java.io.Externalizable
 import com.sun.istack.internal.NotNull
+import org.apache.spark.serializer.Serializer
 
 /**
  * A PipelineTask blindly caches the elements of a partition in memory
@@ -50,14 +51,16 @@ private[spark] class MiniFetchTask(stageId: Int,
   override def runTask(context: TaskContext) {
     // Deserialize the RDD using the broadcast variable.
     val ser = SparkEnv.get.closureSerializer.newInstance()
-    val blockId = ser.deserialize[ShuffleBlockId] (
+    val (blockId, manager, compSize, dep) = ser.deserialize[(ShuffleBlockId, BlockManagerId, Byte, MiniFetchDependency[_, _, _])] (
       ByteBuffer.wrap(taskBinary.value), Thread.currentThread.getContextClassLoader)
 
     metrics = Some(context.taskMetrics)
     try {
-      val bytes = SparkEnv.get.blockManager.getRemoteBytes(blockId).get
-      // TODO(ryan): look into if things are getting unnecessarily serialized/deserialized
-      SparkEnv.get.blockManager.memoryStore.putBytes(blockId, bytes, StorageLevel.MEMORY_ONLY_SER)
+      val length: Long = MapOutputTracker.decompressSize(compSize)
+      val iterator = SparkEnv.get.blockManager.getMultiple(Seq((manager, Seq((blockId, length)))),
+        Serializer.getSerializer(dep.serializer)).next()._2.get
+      // TODO(ryan): pretty sure things are getting unnecessarily serialized/deserialized
+      SparkEnv.get.blockManager.memoryStore.putIterator(blockId, iterator, StorageLevel.MEMORY_ONLY_SER, false)
     } finally {
       context.executeOnCompleteCallbacks() // TODO(ryan) what does this do?
     }

@@ -10,14 +10,18 @@ import org.apache.spark.storage.{ShuffleBlockId}
 class MiniFetchRDD[K, V, C](prev: RDD[_ <: Product2[K, V]], part: Partitioner)
   extends ShuffledRDD[K, V, C](prev, part) {
 
+  override def getDependencies: Seq[Dependency[_]] = {
+    List(new MiniFetchDependency(prev, part, serializer, keyOrdering, aggregator, mapSideCombine))
+  }
+
   /**
    * Once all parts of given partition have been fetched, it's safe to call
    * compute from a downstream task and it should behave just like a ShuffledRDD
    */
   override def compute(split: Partition, context: TaskContext): Iterator[(K, C)] = {
     shuffleBlockIdsByPartition(split.index).flatMap {
-      SparkEnv.get.blockManager.memoryStore.getValues
-    }.asInstanceOf[Iterator[(K, C)]]
+      SparkEnv.get.blockManager.memoryStore.getValues(_).get
+    }.toIterator.asInstanceOf[Iterator[(K, C)]]
   }
 
   val shuffleBlockIdsByPartition: Map[Int, Seq[ShuffleBlockId]] = {

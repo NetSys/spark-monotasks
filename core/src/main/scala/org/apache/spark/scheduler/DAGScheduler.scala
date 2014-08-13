@@ -931,14 +931,6 @@ class DAGScheduler(
           event.taskMetrics))
         stage.pendingTasks -= task
         task match {
-          case pipelineTask: PipelineTask =>
-            // TODO(ryan): I'm not really sure what I'm doing here or if I'm missing something
-            if (runningStages.contains(stage) && stage.pendingTasks.isEmpty) {
-              markStageAsFinished(stage)
-              clearCacheLocs()
-              // TODO(ryan): I'm _not_ submitting next stages here
-          }
-
           case rt: ResultTask[_, _] =>
             stage.resultOfJob match {
               case Some(job) =>
@@ -1020,8 +1012,16 @@ class DAGScheduler(
                 }
               }
             }
-          }
 
+          case _: Task[_] =>
+            // TODO(ryan): I think that the rest of this case can be removed as only Result/SMTasks can be last
+            // TODO(ryan): I'm not really sure what I'm doing here or if I'm missing something
+            if (runningStages.contains(stage) && stage.pendingTasks.isEmpty) {
+              markStageAsFinished(stage)
+              clearCacheLocs()
+              // TODO(ryan): I'm _not_ submitting next stages here
+            }
+        }
       case Resubmitted =>
         logInfo("Resubmitted " + task + ", so marking it as still running")
         stage.pendingTasks += task

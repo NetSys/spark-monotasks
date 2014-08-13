@@ -88,7 +88,7 @@ class MiniFetchDependency[K, V, C](_rdd: RDD[_ <: Product2[K, V]],
                                    keyOrdering: Option[Ordering[K]] = None,
                                    aggregator: Option[Aggregator[K, V, C]] = None,
                                    mapSideCombine: Boolean = false)
-  extends ShuffleDependency(_rdd, partitioner, serializer, keyOrdering, aggregator, mapSideCombine)
+  extends ShuffleDependency(_rdd, partitioner, serializer, keyOrdering, aggregator, mapSideCombine) with Serializable
 
 /**
  * :: DeveloperApi ::
