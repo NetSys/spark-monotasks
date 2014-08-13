@@ -1,26 +1,36 @@
 package org.apache.spark.scheduler
 
-import org.apache.spark.rdd.RDD
+import org.apache.spark.rdd.{MiniFetchRDD, RDD}
 import org.apache.spark._
 import scala.collection.mutable
 import scala.collection.mutable.HashMap
+import org.apache.spark.storage.{ShuffleBlockId, BlockId}
 
 /**
  * Created by ryan on 8/11/14.
  */
-abstract class MiniStage(val stageId: Int, val rdd: RDD[_], val dependencies: Seq[MiniStage], val scheduler: DAGScheduler) {
+abstract class MiniStage(val stageId: Int, val dependencies: Seq[MiniStage]) {
+
+  def tasks: Seq[Task[_]]
+
+  def dependenciesOfChild(task: Task[_]): Seq[Task[_]]
+
+}
+
+abstract class OneToOneStage(stageId: Int, val rdd: RDD[_], dependencies: Seq[MiniStage], val scheduler: DAGScheduler)
+  extends MiniStage(stageId, dependencies) {
 
   lazy val taskByPartitionMap: Map[Partition, Task[_]] = rdd.partitions.map(part => (part, taskByPartition(part))).toMap
   // TODO(ryan): if it isn't lazy, then there is some problem with bin serialization (prob happens too early?)
 
   def taskByPartition(partition: Partition): Task[_]
 
-  def tasks: Seq[Task[_]] = rdd.partitions.map {taskByPartitionMap(_)}
+  override def tasks: Seq[Task[_]] = rdd.partitions.map {taskByPartitionMap(_)}
 
   /*
   For a task of the next stage, find the tasks of this stage that are dependencies for it
    */
-  def dependencies(task: Task[_]): Seq[Task[_]] = Seq(taskByPartitionMap(rdd.partitions(task.partitionId)))
+  def dependenciesOfChild(task: Task[_]): Seq[Task[_]] = Seq(taskByPartitionMap(rdd.partitions(task.partitionId)))
   // TODO(ryan) assuming that partitionId is an index into rdd.partitions -- is it?
   // TODO(ryan) assuming that deps are all 1-1 for now...
   // TODO(ryan): Tasks all have the same StageId regardless of what MiniStage they are in, which could lead to conflicts
@@ -30,7 +40,7 @@ abstract class MiniStage(val stageId: Int, val rdd: RDD[_], val dependencies: Se
 }
 
 class PipelineStage(stageId: Int, rdd: RDD[_], dependencies: Seq[MiniStage], scheduler: DAGScheduler)
-  extends MiniStage(stageId, rdd, dependencies, scheduler) {
+  extends OneToOneStage(stageId, rdd, dependencies, scheduler) {
 
   val binary = scheduler.getBinary(rdd)
 
@@ -40,10 +50,27 @@ class PipelineStage(stageId: Int, rdd: RDD[_], dependencies: Seq[MiniStage], sch
 
 }
 
+class MiniFetchStage(stageId: Int, outputRDD: MiniFetchRDD, dep: MiniFetchDependency[_, _, _], scheduler: DAGScheduler)
+  extends MiniStage(stageId, Seq()) {
+
+  private val tasksByPartition: Map[Int, Seq[Task[_]]] = {
+    outputRDD.shuffleBlockIdsByPartition.mapValues(_.map(taskFromShuffleBlock _))
+  }
+
+  private def taskFromShuffleBlock(id: ShuffleBlockId): Task[_] = {
+    new MiniFetchTask(stageId, scheduler.getBinary(id))
+  }
+
+  override def tasks: Seq[Task[_]] = tasksByPartition.values.flatten.toSeq
+
+  override def dependenciesOfChild(child: Task[_]): Seq[Task[_]] = tasksByPartition(child.partitionId)
+
+}
+
 
 class ShuffleMapStage(stageId: Int, rdd: RDD[_], dependencies: Seq[MiniStage], shuffleDep: ShuffleDependency[_, _, _],
                       scheduler: DAGScheduler)
-  extends MiniStage(stageId, rdd, dependencies, scheduler) {
+  extends OneToOneStage(stageId, rdd, dependencies, scheduler) {
 
   val binary = scheduler.getBinary((rdd, shuffleDep))
 
@@ -56,7 +83,7 @@ class ShuffleMapStage(stageId: Int, rdd: RDD[_], dependencies: Seq[MiniStage], s
 class ResultStage(stageId: Int, rdd: RDD[_], dependencies: Seq[MiniStage],
                   func: (TaskContext, scala.Iterator[_]) => (_$1) forSome {type _$1},
                    job: ActiveJob, scheduler: DAGScheduler)
-  extends MiniStage(stageId, rdd, dependencies, scheduler) {
+  extends OneToOneStage(stageId, rdd, dependencies, scheduler) {
 
   val binary = scheduler.getBinary((rdd, func))
 
@@ -75,6 +102,8 @@ object MiniStage {
       x => x match {
         case pipeline: PipelineDependency[_] =>
           Seq(new PipelineStage(stageId, pipeline.rdd, miniStages(stageId, pipeline.rdd, scheduler), scheduler))
+        case miniFetch: MiniFetchDependency[_, _, _] =>
+          Seq(new MiniFetchStage(stageId, rdd.asInstanceOf[MiniFetchRDD], miniFetch, scheduler))
         case shuffle: ShuffleDependency[_, _, _] => Seq()
         case other: Dependency[_] => miniStages(stageId, other.rdd, scheduler)
       }
@@ -107,7 +136,7 @@ object MiniStage {
             queue.enqueue(dep)
 
             for (task <- tasks) {
-              miniTaskDependency(task) ++= dep.dependencies(task)
+              miniTaskDependency(task) ++= dep.dependenciesOfChild(task)
             }
           }
         }

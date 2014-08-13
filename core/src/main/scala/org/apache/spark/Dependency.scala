@@ -82,6 +82,13 @@ class ShuffleDependency[K, V, C](
   _rdd.sparkContext.cleaner.foreach(_.registerShuffleForCleanup(this))
 }
 
+class MiniFetchDependency[K, V, C](_rdd: RDD[_ <: Product2[K, V]],
+                                   partitioner: Partitioner,
+                                   serializer: Option[Serializer] = None,
+                                   keyOrdering: Option[Ordering[K]] = None,
+                                   aggregator: Option[Aggregator[K, V, C]] = None,
+                                   mapSideCombine: Boolean = false)
+  extends ShuffleDependency(_rdd, partitioner, serializer, keyOrdering, aggregator, mapSideCombine)
 
 /**
  * :: DeveloperApi ::
