@@ -50,7 +50,7 @@ class PipelineStage(stageId: Int, rdd: RDD[_], dependencies: Seq[MiniStage], sch
 
 }
 
-class MiniFetchStage(stageId: Int, outputRDD: MiniFetchRDD, dep: MiniFetchDependency[_, _, _], scheduler: DAGScheduler)
+class MiniFetchStage(stageId: Int, outputRDD: MiniFetchRDD[_, _, _], dep: MiniFetchDependency[_, _, _], scheduler: DAGScheduler)
   extends MiniStage(stageId, Seq()) {
 
   private val tasksByPartition: Map[Int, Seq[Task[_]]] = {
@@ -103,7 +103,7 @@ object MiniStage {
         case pipeline: PipelineDependency[_] =>
           Seq(new PipelineStage(stageId, pipeline.rdd, miniStages(stageId, pipeline.rdd, scheduler), scheduler))
         case miniFetch: MiniFetchDependency[_, _, _] =>
-          Seq(new MiniFetchStage(stageId, rdd.asInstanceOf[MiniFetchRDD], miniFetch, scheduler))
+          Seq(new MiniFetchStage(stageId, rdd.asInstanceOf[MiniFetchRDD[_, _, _]], miniFetch, scheduler))
         case shuffle: ShuffleDependency[_, _, _] => Seq()
         case other: Dependency[_] => miniStages(stageId, other.rdd, scheduler)
       }
