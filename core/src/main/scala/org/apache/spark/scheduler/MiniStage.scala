@@ -7,16 +7,25 @@ import scala.collection.mutable.HashMap
 import org.apache.spark.storage.{ShuffleBlockId, BlockId}
 
 /**
- * Created by ryan on 8/11/14.
+ * A MiniStage allows tracking of dependencies between tasks in the same Stage.
+ * That is, multiple MiniStages run in a given stage and there are dependencies
+ * from tasks in one MiniStage to those of another.
+ *
+ * MiniStages should be constructed in two ways, as defined in the MiniStage object.
  */
 abstract class MiniStage(val stageId: Int, val dependencies: Seq[MiniStage]) {
 
+  /** all tasks in this MiniStage */
   def tasks: Seq[Task[_]]
 
+  /** For a task of the next stage, find the tasks of this stage that are dependencies for it */
   def dependenciesOfChild(task: Task[_]): Seq[Task[_]]
 
 }
 
+/**
+ * A MiniStage whose dependent Tasks have OneToOneDependencies to this MiniStage
+ */
 abstract class OneToOneStage(stageId: Int, val rdd: RDD[_], dependencies: Seq[MiniStage], val scheduler: DAGScheduler)
   extends MiniStage(stageId, dependencies) {
 
@@ -27,9 +36,6 @@ abstract class OneToOneStage(stageId: Int, val rdd: RDD[_], dependencies: Seq[Mi
 
   override def tasks: Seq[Task[_]] = rdd.partitions.map {taskByPartitionMap(_)}
 
-  /*
-  For a task of the next stage, find the tasks of this stage that are dependencies for it
-   */
   def dependenciesOfChild(task: Task[_]): Seq[Task[_]] = Seq(taskByPartitionMap(rdd.partitions(task.partitionId)))
   // TODO(ryan) assuming that partitionId is an index into rdd.partitions -- is it?
   // TODO(ryan) assuming that deps are all 1-1 for now...
@@ -39,6 +45,9 @@ abstract class OneToOneStage(stageId: Int, val rdd: RDD[_], dependencies: Seq[Mi
 
 }
 
+/**
+ * A type of MiniStage holding PipelineTasks
+ */
 class PipelineStage(stageId: Int, rdd: RDD[_], dependencies: Seq[MiniStage], scheduler: DAGScheduler)
   extends OneToOneStage(stageId, rdd, dependencies, scheduler) {
 
@@ -50,6 +59,9 @@ class PipelineStage(stageId: Int, rdd: RDD[_], dependencies: Seq[MiniStage], sch
 
 }
 
+/**
+ * A type of MiniStage holding MiniFetchTasks
+ */
 class MiniFetchStage(stageId: Int, outputRDD: MiniFetchRDD[_, _, _], dep: MiniFetchDependency[_, _, _], scheduler: DAGScheduler)
   extends MiniStage(stageId, Seq()) {
 
@@ -71,7 +83,10 @@ class MiniFetchStage(stageId: Int, outputRDD: MiniFetchRDD[_, _, _], dep: MiniFe
 
 }
 
-
+/**
+ * A type of MiniStage holding ShuffleMapTasks (this MiniStage is always the last to be run in
+ * a given Stage)
+ */
 class ShuffleMapStage(stageId: Int, rdd: RDD[_], dependencies: Seq[MiniStage], shuffleDep: ShuffleDependency[_, _, _],
                       scheduler: DAGScheduler)
   extends OneToOneStage(stageId, rdd, dependencies, scheduler) {
@@ -84,6 +99,10 @@ class ShuffleMapStage(stageId: Int, rdd: RDD[_], dependencies: Seq[MiniStage], s
 
 }
 
+/**
+ * A type of MiniStage holding ShuffleMapTasks (this MiniStage is always the last to be run in
+ * a given Stage)
+ */
 class ResultStage(stageId: Int, rdd: RDD[_], dependencies: Seq[MiniStage],
                   func: (TaskContext, scala.Iterator[_]) => (_$1) forSome {type _$1},
                    job: ActiveJob, scheduler: DAGScheduler)
@@ -161,15 +180,14 @@ object MiniStage {
   }
 
 
-  /*
-  Create a mini-stage from a final RDD
-  */
+  /** Create a mini-stage from a final RDD. The MiniStage should hold ResultTasks */
   def resultFromFinalRDD(rdd: RDD[_], stageId: Int,
                         func: (TaskContext, scala.Iterator[_]) => (_$1) forSome {type _$1},
                           job: ActiveJob, scheduler: DAGScheduler): MiniStage = {
     new ResultStage(stageId, rdd, miniStages(stageId, rdd, scheduler), func, job, scheduler)
   }
 
+  /** Create a mini-stage from a final RDD. The MiniStage should hold ShuffleMapTasks */
   def shuffleMapFromFinalRDD(rdd: RDD[_], stageId: Int, shuffleDependency: ShuffleDependency[_, _, _], scheduler: DAGScheduler) = {
     new ShuffleMapStage(stageId, rdd, miniStages(stageId, rdd, scheduler), shuffleDependency, scheduler)
   }
