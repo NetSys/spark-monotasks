@@ -121,11 +121,7 @@ private[spark] abstract class MapOutputTracker(conf: SparkConf) extends Logging 
     }
   }
 
-  /**
-   * Called from executors to get the server URIs and output sizes of the map outputs of
-   * a given shuffle.
-   */
-  def getServerStatuses(shuffleId: Int, reduceId: Int): Array[(BlockManagerId, Long)] = {
+  def getMapStatuses(shuffleId: Int): Array[MapStatus] = {
     val statuses = mapStatuses.get(shuffleId).orNull
     if (statuses == null) {
       logInfo("Don't have map outputs for shuffle " + shuffleId + ", fetching them")
@@ -168,18 +164,25 @@ private[spark] abstract class MapOutputTracker(conf: SparkConf) extends Logging 
           }
         }
       }
-      if (fetchedStatuses != null) {
-        fetchedStatuses.synchronized {
-          return MapOutputTracker.convertMapStatuses(shuffleId, reduceId, fetchedStatuses)
-        }
-      } else {
-        throw new MetadataFetchFailedException(
-          shuffleId, reduceId, "Missing all output locations for shuffle " + shuffleId)
+      return fetchedStatuses
+    } else {
+      return statuses
+    }
+  }
+
+  /**
+   * Called from executors to get the server URIs and output sizes of the map outputs of
+   * a given shuffle.
+   */
+  def getServerStatuses(shuffleId: Int, reduceId: Int): Array[(BlockManagerId, Long)] = {
+    val statuses = getMapStatuses(shuffleId)
+    if (statuses != null) {
+      statuses.synchronized {
+          return MapOutputTracker.convertMapStatuses(shuffleId, reduceId, statuses)
       }
     } else {
-      statuses.synchronized {
-        return MapOutputTracker.convertMapStatuses(shuffleId, reduceId, statuses)
-      }
+      throw new MetadataFetchFailedException(
+        shuffleId, reduceId, "Missing all output locations for shuffle " + shuffleId)
     }
   }
 
