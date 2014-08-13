@@ -22,6 +22,15 @@ import scala.reflect.ClassTag
 import org.apache.spark.{SparkEnv, PipelineDependency, Partition, TaskContext}
 import org.apache.spark.storage.StorageLevel
 
+/**
+ * A PipelinedRDD represents a soft-barrier between the parent RDD and the
+ * calling RDD. The scheduler will create a PipelineTask that caches the
+ * parent's RDD partitions to memory. Then, when compute() is called here, the
+ * partition will already be in memory.
+ *
+ * The pipelining is intended to happen within a stage, between tasks of different
+ * MiniStages
+ */
 private[spark] class PipelinedRDD[T: ClassTag](
     prev: RDD[T])
   extends RDD[T](prev.context , List(new PipelineDependency(prev))) {

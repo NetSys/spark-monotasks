@@ -819,7 +819,6 @@ class DAGScheduler(
         } else {
           MiniStage.resultFromFinalRDD(stage.rdd, stage.id, stage.resultOfJob.get.func, stage.resultOfJob.get, this)
         }
-      //taskBinary = sc.broadcast(taskBinaryBytes)
     } catch {
       // In the case of a failure during serialization, abort the stage.
       case e: NotSerializableException =>

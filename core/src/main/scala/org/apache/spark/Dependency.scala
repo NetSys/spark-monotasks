@@ -49,6 +49,13 @@ abstract class NarrowDependency[T](_rdd: RDD[T]) extends Dependency[T] {
   override def rdd: RDD[T] = _rdd
 }
 
+
+/**
+ * Represents a dependency on forcing an RDD's computation to memory. The forcing happens
+ * one partition at a time and can be pipelined with other types of tasks in the same
+ * stage
+ * @param rdd the RDD whose computation will be forced to memory
+ */
 class PipelineDependency[T](rdd: RDD[T]) extends OneToOneDependency[T](rdd)
 
 /**
@@ -82,12 +89,17 @@ class ShuffleDependency[K, V, C](
   _rdd.sparkContext.cleaner.foreach(_.registerShuffleForCleanup(this))
 }
 
+/**
+ * Equivalent to a shuffle dependency, but will cause the scheduler to produce MiniFetchTask's
+ * to compute the shuffle instead of computing the shuffle in the RDD's compute function. Currently,
+ * it must only be used from a MiniFetchRDD.
+ */
 class MiniFetchDependency[K, V, C](_rdd: RDD[_ <: Product2[K, V]],
-                                   partitioner: Partitioner,
-                                   serializer: Option[Serializer] = None,
-                                   keyOrdering: Option[Ordering[K]] = None,
-                                   aggregator: Option[Aggregator[K, V, C]] = None,
-                                   mapSideCombine: Boolean = false)
+    partitioner: Partitioner,
+    serializer: Option[Serializer] = None,
+    keyOrdering: Option[Ordering[K]] = None,
+    aggregator: Option[Aggregator[K, V, C]] = None,
+    mapSideCombine: Boolean = false)
   extends ShuffleDependency(_rdd, partitioner, serializer, keyOrdering, aggregator, mapSideCombine)
 
 /**

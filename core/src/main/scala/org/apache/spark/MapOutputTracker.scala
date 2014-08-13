@@ -121,6 +121,10 @@ private[spark] abstract class MapOutputTracker(conf: SparkConf) extends Logging 
     }
   }
 
+  /**
+   * Retrieve all MapStatuses for a given shuffle that has completed.
+   */
+  // TODO(ryan) pretty sure index of MapStatus is its MapId
   def getMapStatuses(shuffleId: Int): Array[MapStatus] = {
     val statuses = mapStatuses.get(shuffleId).orNull
     if (statuses == null) {
@@ -178,7 +182,7 @@ private[spark] abstract class MapOutputTracker(conf: SparkConf) extends Logging 
     val statuses = getMapStatuses(shuffleId)
     if (statuses != null) {
       statuses.synchronized {
-          return MapOutputTracker.convertMapStatuses(shuffleId, reduceId, statuses)
+        return MapOutputTracker.convertMapStatuses(shuffleId, reduceId, statuses)
       }
     } else {
       throw new MetadataFetchFailedException(
