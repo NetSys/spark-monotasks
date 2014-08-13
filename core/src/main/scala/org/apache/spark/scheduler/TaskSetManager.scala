@@ -340,16 +340,12 @@ private[spark] class TaskSetManager(
     None
   }
 
-  /**
-   * Return all pipeline tasks that are ready to run on a given executor/host
-   * @param execId
-   * @param host
-   * @return
-   */
+  /** Return all pipeline tasks that are ready to run on a given executor/host */
   private def readyTasksIndices(execId: String, host: String): Seq[Int] = {
     (0 until tasks.length).filter(canRun(_, host))
   }
 
+  /** Can a task run on a given host? (wrt previous tasks it depends on) */
   private def canRun(taskIndex: Int, host: String) = {
     dependenciesByIndex(taskIndex).forall {
       index => successful.contains(index) && successful(index).host == host
