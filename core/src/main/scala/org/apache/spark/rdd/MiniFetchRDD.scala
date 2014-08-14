@@ -62,7 +62,9 @@ class MiniFetchRDD[K, V, C](prev: RDD[_ <: Product2[K, V]], part: Partitioner)
     }
   }
 
-  val shuffleBlockIdsByPartition: Map[Int, Seq[ShuffleBlockId]] = {
+  // TODO(ryan): if isn't lazy, the this.dependencies will be called too early and
+  // not capture added deps
+  lazy val shuffleBlockIdsByPartition: Map[Int, Seq[ShuffleBlockId]] = {
     val shuffleId = dependencies.head.asInstanceOf[ShuffleDependency[_, _, _]].shuffleId
     (0 until this.partitions.length).map {
       reduceId =>
