@@ -75,8 +75,7 @@ private[spark] class TaskSetManager(
 
   val tasks = taskSet.tasks
   val indexOf: Map[Task[_], Int] = tasks.zipWithIndex.toMap
-  val dependencies = taskSet.depMap
-  val dependenciesByIndex = dependencies.map { case (t, ts) => (indexOf(t), ts.map(indexOf(_))) }
+  val miniStageByTask = taskSet.miniStageByTask
 
   val numTasks = tasks.length
   val copiesRunning = new Array[Int](numTasks)
@@ -346,10 +345,16 @@ private[spark] class TaskSetManager(
   }
 
   /** Can a task run on a given host? (wrt previous tasks it depends on) */
-  private def canRun(taskIndex: Int, host: String) = {
+  private def canRun(taskIndex: Int, host: String): Boolean = {
     dependenciesByIndex(taskIndex).forall {
       index => successful.contains(index) && successful(index).host == host
     }
+  }
+
+  private def dependenciesByIndex(index: Int): Seq[Int] = {
+    val task = tasks(index)
+    val dependentStages: Seq[MiniStage] = miniStageByTask(task).dependencies
+    dependentStages.flatMap(_.dependenciesOfChild(task)).map(indexOf)
   }
 
   /**

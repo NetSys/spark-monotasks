@@ -33,7 +33,8 @@ private[spark] class TaskSet(
     val properties: Properties) {
     val id: String = stageId + "." + attempt
 
-  var depMap: Map[Task[_], Seq[Task[_]]] = tasks.map(x => (x, Seq[Task[_]]())).toMap
+  // TODO(ryan): this should be a constructor arg, but I'm worried about other usages
+  var miniStageByTask: Map[Task[_], MiniStage] = null
 
   def kill(interruptThread: Boolean) {
     tasks.foreach(_.kill(interruptThread))
@@ -44,10 +45,10 @@ private[spark] class TaskSet(
 
 private[spark] object TaskSet {
 
-  def setWithDeps(tasks: Array[Task[_]], depMap: HashMap[Task[_], Seq[Task[_]]],
+  def setWithMiniStages(tasks: Array[Task[_]], depMap: HashMap[Task[_], MiniStage],
                   stageId: Int, attempt: Int, priority: Int, properties: Properties) = {
     val s = new TaskSet(tasks, stageId, attempt, priority, properties)
-    s.depMap = depMap.toMap
+    s.miniStageByTask = depMap.toMap
     s
   }
 

@@ -136,10 +136,10 @@ object MiniStage {
   /**
    * Do a BFS starting at the the MiniStage root and return a list of the tasks
    * in order of depth from the root
-   * @return the sorted list of tasks and a map of the task dependencies
+   * @return the sorted list of tasks and a map of the task to its MiniStage
    */
-  def sortedTasks(root: MiniStage): (List[Task[_]], HashMap[Task[_], Seq[Task[_]]]) = {
-    val miniTaskDependency = new mutable.HashMap[Task[_], Seq[Task[_]]]()
+  def sortedTasks(root: MiniStage): (List[Task[_]], HashMap[Task[_], MiniStage]) = {
+    val miniStageByTask = new mutable.HashMap[Task[_], MiniStage]()
 
     val bfsSorted = {
         val queue = new mutable.Queue[MiniStage]()
@@ -148,15 +148,11 @@ object MiniStage {
         def bfs(stage: MiniStage) {
           val tasks: Seq[Task[_]] = stage.tasks
           for (task <- tasks) {
-            miniTaskDependency(task) = Nil
+            miniStageByTask(task) = stage
             output.enqueue(task)
           }
           for (dep: MiniStage <- stage.dependencies) {
             queue.enqueue(dep)
-
-            for (task <- tasks) {
-              miniTaskDependency(task) ++= dep.dependenciesOfChild(task)
-            }
           }
         }
 
@@ -166,7 +162,7 @@ object MiniStage {
         }
         output
     }
-    return (bfsSorted.toList, miniTaskDependency)
+    return (bfsSorted.toList, miniStageByTask)
   }
 
 

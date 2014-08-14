@@ -858,7 +858,7 @@ class DAGScheduler(
       stage.pendingTasks ++= tasks
       logDebug("New pending tasks: " + stage.pendingTasks)
       taskScheduler.submitTasks(
-        TaskSet.setWithDeps(tasks.toArray, depMap, stage.id, stage.newAttemptId(), stage.jobId, properties)
+        TaskSet.setWithMiniStages(tasks.toArray, depMap, stage.id, stage.newAttemptId(), stage.jobId, properties)
       )
       stage.info.submissionTime = Some(clock.getTime())
     } else {
