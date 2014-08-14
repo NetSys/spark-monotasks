@@ -33,13 +33,19 @@ case class WorkerOffer(executorId: String, host: String, resources: Resources) {
 /** A wrapper for the actual resource types */
 case class Resources(cores: Int, networkSlots: Int, disks: Set[Int]) {
 
+   assert(isSane())
+
   def +(other: Resources) = {
     Resources(cores + other.cores, networkSlots + other.networkSlots, disks ++ other.disks)
   }
 
   def -(other: Resources) = {
-    Resources(cores - other.cores, networkSlots - other.networkSlots, disks -- other.disks)
+    val ret = Resources(cores - other.cores, networkSlots - other.networkSlots, disks -- other.disks)
+    assert(other.disks.subsetOf(disks))
+    ret
   }
+
+  private def isSane() = (cores >= 0 && networkSlots >= 0)
 
 }
 
