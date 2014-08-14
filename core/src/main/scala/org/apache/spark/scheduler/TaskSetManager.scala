@@ -344,11 +344,30 @@ private[spark] class TaskSetManager(
     (0 until tasks.length).filter(canRun(_, host))
   }
 
-  /** Can a task run on a given host? (wrt previous tasks it depends on) */
+  /** Can a task run on a given host? */
   private def canRun(taskIndex: Int, host: String): Boolean = {
-    dependenciesByIndex(taskIndex).forall {
+    // TODO(ryan): the foreaches are slow (especially with many tasks),
+    // and there should be a (likely painful) way to forgo a lot of the computation
+    val satisfiedDependencies = dependenciesByIndex(taskIndex).forall {
       index => successful.contains(index) && successful(index).host == host
     }
+    val cotasks = cotasksByIndex(taskIndex)
+    assert(allSameMachine(cotasks))
+    lazy val onSameMachineAsCotasks = cotasks.forall {
+      index => !successful.contains(index) || successful(index).host == host
+    }
+    satisfiedDependencies && onSameMachineAsCotasks
+  }
+
+  private def allSameMachine(taskIndices: Seq[Int]): Boolean = {
+    val hosts = taskIndices.flatMap(successful.get(_).map(_.host))
+    hosts.toSet.size < 2 // there is either 0 or 1 unique host(s)
+  }
+
+  // TODO(ryan): below methods can be precomputed into a Map
+  private def cotasksByIndex(index: Int): Seq[Int] = {
+    val task = tasks(index)
+    miniStageByTask(task).cotasks(task).map(indexOf)
   }
 
   private def dependenciesByIndex(index: Int): Seq[Int] = {

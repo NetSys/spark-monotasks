@@ -31,20 +31,17 @@ import com.sun.istack.internal.NotNull
 import org.apache.spark.serializer.Serializer
 
 /**
- * A PipelineTask blindly caches the elements of a partition in memory
- *
- * The idea is to devote a task to simply bringing in a block into memory.
- * So, we'll want to call this only on an RDD that reads blocks from disk,
- * and will want to ideally call it on the same node that the data resides
- * on.
+ * A MiniFetchTasks fetches _one_ partition of a ShuffleMapTask output for one
+ * partition of a downstream RDD. This is in contrast to an ordinary shuffle
+ * that fetches _all_ parts of ShuffleMapTasks for one downstream RDD partition.
  *
  * @param stageId id of the stage this task belongs to
  * @param taskBinary broadcast version of of the RDD
- * @param partition partition of the RDD this task is associated with
- * @param locs preferred task execution locations for locality scheduling
  */
-private[spark] class MiniFetchTask(stageId: Int,
-                                   taskBinary: Broadcast[Array[Byte]])
+private[spark] class MiniFetchTask(
+    stageId: Int,
+    taskBinary: Broadcast[Array[Byte]],
+    val shuffleBlockId: ShuffleBlockId)
   extends Task[Unit](stageId, -1) with Logging {
   // TODO(ryan) partition doesn't make sense, using -1 for now ...
 

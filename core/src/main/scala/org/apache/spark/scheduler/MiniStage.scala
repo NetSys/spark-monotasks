@@ -18,8 +18,11 @@ abstract class MiniStage(val stageId: Int, val dependencies: Seq[MiniStage]) {
   /** all tasks in this MiniStage */
   def tasks: Seq[Task[_]]
 
-  /** For a task of the next stage, find the tasks of this stage that are dependencies for it */
+  /** For a task of the _next_ (child) MiniStage, find the tasks of this stage that are dependencies for it */
   def dependenciesOfChild(task: Task[_]): Seq[Task[_]]
+
+  /** For a task of _this_ MiniStage, what other tasks must run on the same machine */
+  def cotasks(task: Task[_]): Seq[Task[_]]
 
 }
 
@@ -35,6 +38,8 @@ abstract class OneToOneStage(stageId: Int, val rdd: RDD[_], dependencies: Seq[Mi
   def taskByPartition(partition: Partition): Task[_]
 
   override def tasks: Seq[Task[_]] = rdd.partitions.map {taskByPartitionMap(_)}
+
+  override def cotasks(task: Task[_]) = Seq(task)
 
   def dependenciesOfChild(task: Task[_]): Seq[Task[_]] = Seq(taskByPartitionMap(rdd.partitions(task.partitionId)))
   // TODO(ryan) assuming that partitionId is an index into rdd.partitions -- is it?
@@ -74,12 +79,15 @@ class MiniFetchStage(stageId: Int, outputRDD: MiniFetchRDD[_, _, _], dep: MiniFe
 
   private def taskFromShuffleBlock(id: ShuffleBlockId): Task[_] = {
     val status = statuses(id.mapId)
-    new MiniFetchTask(stageId, scheduler.getBinary(id, status.location, status.compressedSizes(id.reduceId), dep))
+    new MiniFetchTask(stageId, scheduler.getBinary(id, status.location, status.compressedSizes(id.reduceId), dep), id)
   }
 
   override def tasks: Seq[Task[_]] = tasksByPartition.values.flatten.toSeq
 
   override def dependenciesOfChild(child: Task[_]): Seq[Task[_]] = tasksByPartition(child.partitionId)
+
+  override def cotasks(task: Task[_]) = tasksByPartition(task.asInstanceOf[MiniFetchTask].shuffleBlockId.reduceId)
+  // TODO(ryan): is there a way around the cast above?
 
 }
 
@@ -120,7 +128,7 @@ class ResultStage(stageId: Int, rdd: RDD[_], dependencies: Seq[MiniStage],
 object MiniStage {
 
   private[spark] def miniStages(stageId: Int, rdd: RDD[_], scheduler: DAGScheduler): Seq[MiniStage] = {
-    // TODO(ryan): cache results because it's a DAG and not nec a tree
+    // TODO(ryan): cache results because it's a DAG and not nec a tree ? -> actually maybe it has to be a tree...
     rdd.dependencies flatMap {
       x => x match {
         case pipeline: PipelineDependency[_] =>
