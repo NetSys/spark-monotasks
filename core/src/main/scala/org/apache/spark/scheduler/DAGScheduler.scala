@@ -1012,14 +1012,7 @@ class DAGScheduler(
               }
             }
 
-          case _: Task[_] =>
-            // TODO(ryan): I think that the rest of this case can be removed as only Result/SMTasks can be last
-            // TODO(ryan): I'm not really sure what I'm doing here or if I'm missing something
-            if (runningStages.contains(stage) && stage.pendingTasks.isEmpty) {
-              markStageAsFinished(stage)
-              clearCacheLocs()
-              // TODO(ryan): I'm _not_ submitting next stages here
-            }
+          case _: Task[_] => () // TODO(ryan): this case can be empty as only Result/SMTasks can be last
         }
       case Resubmitted =>
         logInfo("Resubmitted " + task + ", so marking it as still running")
