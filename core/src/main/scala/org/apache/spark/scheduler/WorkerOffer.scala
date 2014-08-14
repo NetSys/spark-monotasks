@@ -21,4 +21,32 @@ package org.apache.spark.scheduler
  * Represents free resources available on an executor.
  */
 private[spark]
-case class WorkerOffer(executorId: String, host: String, cores: Int)
+case class WorkerOffer(executorId: String, host: String, resources: Resources) {
+
+  def this(executorId: String, host: String, cores: Int) {
+    // TODO(ryan): will want to warn/depricate this to make sure we don't miss its usages
+    this(executorId, host, Resources.fromCores(cores))
+  }
+
+}
+
+/** A wrapper for the actual resource types */
+case class Resources(cores: Int, networkSlots: Int, disks: Set[Int]) {
+
+  def +(other: Resources) = {
+    Resources(cores + other.cores, networkSlots + other.networkSlots, disks ++ other.disks)
+  }
+
+  def -(other: Resources) = {
+    Resources(cores - other.cores, networkSlots - other.networkSlots, disks -- other.disks)
+  }
+
+}
+
+object Resources {
+
+  /** To ease backward compatibility, pretend that only cores are required*/
+  def fromCores(cores: Int) = Resources(cores, 0, Set())
+
+}
+// TODO(ryan): network slots are all the same, so its just a count, but disks need an id (using an int for now...)

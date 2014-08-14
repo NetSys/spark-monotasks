@@ -154,6 +154,10 @@ private[spark] class TaskSchedulerImpl(
     waitBackendReady()
   }
 
+  def claimedResources(taskId: Long): Resources = {
+    activeTaskSets(taskIdToTaskSetId(taskId)).claimedResources(taskId)
+  }
+
   override def submitTasks(taskSet: TaskSet) {
     val tasks = taskSet.tasks
     logInfo("Adding task set " + taskSet.id + " with " + tasks.length + " tasks")
@@ -236,8 +240,9 @@ private[spark] class TaskSchedulerImpl(
     // Randomly shuffle offers to avoid always placing tasks on the same set of workers.
     val shuffledOffers = Random.shuffle(offers)
     // Build a list of tasks to assign to each worker.
-    val tasks = shuffledOffers.map(o => new ArrayBuffer[TaskDescription](o.cores))
-    val availableCpus = shuffledOffers.map(o => o.cores).toArray
+    // TODO(ryan) need to encode more than just cores here
+    val tasks = shuffledOffers.map(o => new ArrayBuffer[TaskDescription](o.resources.cores))
+    val availableCpus = shuffledOffers.map(o => o.resources.cores).toArray
     val sortedTaskSets = rootPool.getSortedTaskSetQueue
     for (taskSet <- sortedTaskSets) {
       logDebug("parentName: %s, name: %s, runningTasks: %s".format(

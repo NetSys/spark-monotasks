@@ -339,6 +339,11 @@ private[spark] class TaskSetManager(
     None
   }
 
+  /** What resources does the task require? */
+  def claimedResources(taskId: Long): Resources = {
+    miniStageByIndex(taskInfos(taskId).index).resourceRequirements
+  }
+
   /** Return all pipeline tasks that are ready to run on a given executor/host */
   private def readyTasksIndices(execId: String, host: String): Seq[Int] = {
     (0 until tasks.length).filter(canRun(_, host))
@@ -365,6 +370,10 @@ private[spark] class TaskSetManager(
   }
 
   // TODO(ryan): below methods can be precomputed into a Map
+  private def miniStageByIndex(index: Int): MiniStage = {
+    miniStageByTask(tasks(index))
+  }
+
   private def cotasksByIndex(index: Int): Seq[Int] = {
     val task = tasks(index)
     miniStageByTask(task).cotasks(task).map(indexOf)

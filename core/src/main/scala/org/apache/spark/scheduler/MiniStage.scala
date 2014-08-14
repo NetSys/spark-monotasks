@@ -24,6 +24,9 @@ abstract class MiniStage(val stageId: Int, val dependencies: Seq[MiniStage]) {
   /** For a task of _this_ MiniStage, what other tasks must run on the same machine */
   def cotasks(task: Task[_]): Seq[Task[_]]
 
+  /** What resources do tasks of this stage require? */
+  def resourceRequirements: Resources = Resources(1, 0, Set()) // TODO(ryan): !!! change
+
 }
 
 /**
