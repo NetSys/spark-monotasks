@@ -154,6 +154,7 @@ private[spark] class TaskSchedulerImpl(
     waitBackendReady()
   }
 
+  /** What resources does the task require? */
   def claimedResources(taskId: Long): Resources = {
     activeTaskSets(taskIdToTaskSetId(taskId)).claimedResources(taskId)
   }
