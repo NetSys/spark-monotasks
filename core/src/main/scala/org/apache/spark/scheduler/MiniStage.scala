@@ -139,13 +139,9 @@ object MiniStage {
    * @return the sorted list of tasks and a map of the task dependencies
    */
   def sortedTasks(root: MiniStage): (List[Task[_]], HashMap[Task[_], Seq[Task[_]]]) = {
-    // TODO(ryan) I'm assuming that the entire thing is 1-1 dependencies for now
-    val roots = Seq(root)
-
     val miniTaskDependency = new mutable.HashMap[Task[_], Seq[Task[_]]]()
 
-    val bfsSorted = roots match {
-      case root :: Nil =>
+    val bfsSorted = {
         val queue = new mutable.Queue[MiniStage]()
         val output = new mutable.Queue[Task[_]]()
 
@@ -172,9 +168,6 @@ object MiniStage {
           bfs(queue.dequeue())
         }
         output
-
-      case Nil => Nil // No pipeline tasks
-      case _ => throw new IllegalStateException // not ready for this (yet?)
     }
     return (bfsSorted.toList, miniTaskDependency)
   }
