@@ -155,9 +155,6 @@ object MiniStage {
             queue.enqueue(dep)
 
             for (task <- tasks) {
-              val a = dep.dependenciesOfChild(task)
-              val b = dep.dependenciesOfChild(task)
-              assert(a eq b)
               miniTaskDependency(task) ++= dep.dependenciesOfChild(task)
             }
           }
