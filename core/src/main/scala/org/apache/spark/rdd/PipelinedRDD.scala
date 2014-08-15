@@ -47,4 +47,6 @@ private[spark] class PipelinedRDD[T: ClassTag](
     // 1. The partition failed to cache/was evicted
     // 2. The Task calling this.compute() is on the *wrong* machine (i.e., it'll silently
     // work, but without actually doing inter-task pipelining)
+
+  override def resource = RDDResourceTypes.None
 }

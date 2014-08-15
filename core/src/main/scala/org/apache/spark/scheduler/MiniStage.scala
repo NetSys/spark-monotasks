@@ -1,6 +1,6 @@
 package org.apache.spark.scheduler
 
-import org.apache.spark.rdd.{MiniFetchRDD, RDD}
+import org.apache.spark.rdd.{RDDResourceTypes, MiniFetchRDD, RDD}
 import org.apache.spark._
 import scala.collection.mutable
 import scala.collection.mutable.HashMap
@@ -25,7 +25,7 @@ abstract class MiniStage(val stageId: Int, val dependencies: Seq[MiniStage]) {
   def cotasks(task: Task[_]): Seq[Task[_]]
 
   /** What resources do _one_ task of this stage require? */
-  def resourceRequirements: Resources = Resources.computeOnly // TODO(ryan): !!! change
+  def resourceRequirements: Resources
 
 }
 
@@ -63,6 +63,12 @@ class PipelineStage(stageId: Int, rdd: RDD[_], dependencies: Seq[MiniStage], sch
 
   override def taskByPartition(partition: Partition): PipelineTask = {
     new PipelineTask(stageId, binary, partition, scheduler.getPreferredLocs(rdd, partition.index))
+  }
+
+  override def resourceRequirements: Resources = rdd.resource match {
+    case RDDResourceTypes.Compute => Resources.computeOnly
+    case RDDResourceTypes.Read => Resources.diskOnly
+    case _ => throw new IllegalArgumentException
   }
 
 }
@@ -128,6 +134,9 @@ class ResultStage(stageId: Int, rdd: RDD[_], dependencies: Seq[MiniStage],
   override def taskByPartition(partition: Partition): Task[_] = {
     new ResultTask(stageId, binary, partition, scheduler.getPreferredLocs(rdd, partition.index), rdd.partitions.indexOf(partition))
   }
+
+  override def resourceRequirements: Resources = Resources.networkOnly
+  // TODO(ryan) 1. what should go above? 2. if it really is network, then need to coordinate xfer with master?
 
 }
 

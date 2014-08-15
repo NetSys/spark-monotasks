@@ -73,4 +73,5 @@ class MiniFetchRDD[K, V, C](prev: RDD[_ <: Product2[K, V]], part: Partitioner)
     }.toMap
   }
 
+  override def resource = RDDResourceTypes.None
 }
