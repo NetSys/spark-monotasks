@@ -28,21 +28,27 @@ case class WorkerOffer(executorId: String, host: String, resources: Resources) {
     this(executorId, host, Resources.fromCores(cores))
   }
 
+  def without(resources: Resources) = WorkerOffer(executorId, host, this.resources - resources)
+
 }
 
 /** A wrapper for the actual resource types */
 case class Resources(cores: Int, networkSlots: Int, disks: Set[Int]) {
 
-   assert(isSane())
+   assert(isSane(), "cores is %d, slots is %d" format (cores, networkSlots))
 
   def +(other: Resources) = {
     Resources(cores + other.cores, networkSlots + other.networkSlots, disks ++ other.disks)
   }
 
   def -(other: Resources) = {
-    val ret = Resources(cores - other.cores, networkSlots - other.networkSlots, disks -- other.disks)
-    assert(other.disks.subsetOf(disks))
-    ret
+    assert(canFulfill(other), "%s can't fulfill %s" format (this, other))
+    Resources(cores - other.cores, networkSlots - other.networkSlots, disks -- other.disks)
+  }
+
+  /** Can this resource offer fulfill all the requirements of another? */
+  def canFulfill(other: Resources): Boolean = {
+    cores >= other.cores && networkSlots >= other.networkSlots && other.disks.subsetOf(disks)
   }
 
   private def isSane() = (cores >= 0 && networkSlots >= 0)

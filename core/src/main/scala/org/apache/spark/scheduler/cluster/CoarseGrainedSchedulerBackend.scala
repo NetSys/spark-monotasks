@@ -104,10 +104,13 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, actorSystem: A
         }
 
       case StatusUpdate(executorId, taskId, state, data) =>
+        val resources = scheduler.claimedResources(taskId)
+        // TODO(ryan): below will remove taskId from scheduler, but we need it to get resources
+        // so we have this ugly ordering issue
         scheduler.statusUpdate(taskId, state, data.value)
         if (TaskState.isFinished(state)) {
           if (executorActor.contains(executorId)) {
-            freeResources(executorId) += scheduler.claimedResources(taskId)
+            freeResources(executorId) += resources
             makeOffers(executorId)
           } else {
             // Ignoring the update since we don't know about the executor.

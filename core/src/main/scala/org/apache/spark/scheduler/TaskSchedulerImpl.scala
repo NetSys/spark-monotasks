@@ -239,7 +239,7 @@ private[spark] class TaskSchedulerImpl(
     }
 
     // Randomly shuffle offers to avoid always placing tasks on the same set of workers.
-    val shuffledOffers = Random.shuffle(offers)
+    val shuffledOffers = Random.shuffle(offers).toBuffer
     // Build a list of tasks to assign to each worker.
     // TODO(ryan) need to encode more than just cores here
     val tasks = shuffledOffers.map(o => new ArrayBuffer[TaskDescription](o.resources.cores))
@@ -261,7 +261,7 @@ private[spark] class TaskSchedulerImpl(
         for (i <- 0 until shuffledOffers.size) {
           val execId = shuffledOffers(i).executorId
           val host = shuffledOffers(i).host
-          for (task <- taskSet.resourceOffer(execId, host, maxLocality)) {
+          for (task <- taskSet.resourceOffer(shuffledOffers(i), maxLocality)) {
             tasks(i) += task
             val tid = task.taskId
             taskIdToTaskSetId(tid) = taskSet.taskSet.id
@@ -269,7 +269,9 @@ private[spark] class TaskSchedulerImpl(
             activeExecutorIds += execId
             executorsByHost(host) += execId
             launchedTask = true
+            shuffledOffers(i) = shuffledOffers(i).without(taskSet.claimedResources(tid))
           }
+
         }
       } while (launchedTask)
     }

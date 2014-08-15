@@ -344,24 +344,26 @@ private[spark] class TaskSetManager(
     miniStageByIndex(taskInfos(taskId).index).resourceRequirements
   }
 
-  /** Return all pipeline tasks that are ready to run on a given executor/host */
-  private def readyTasksIndices(execId: String, host: String): Seq[Int] = {
-    (0 until tasks.length).filter(canRun(_, host))
+  /** Return all pipeline tasks that are ready to run for a given WorkerOffer */
+  private def readyTasksIndices(offer: WorkerOffer): Seq[Int] = {
+    (0 until tasks.length).filter(canRun(_, offer))
   }
 
-  /** Can a task run on a given host? */
-  private def canRun(taskIndex: Int, host: String): Boolean = {
+  /** Can a task run on a given offer? */
+  private def canRun(taskIndex: Int, offer: WorkerOffer): Boolean = {
     // TODO(ryan): the foreaches are slow (especially with many tasks),
     // and there should be a (likely painful) way to forgo a lot of the computation
-    val satisfiedDependencies = dependenciesByIndex(taskIndex).forall {
-      index => successful.contains(index) && successful(index).host == host
+    val sufficientResources = offer.resources.canFulfill(miniStageByIndex(taskIndex).resourceRequirements)
+
+    lazy val satisfiedDependencies = dependenciesByIndex(taskIndex).forall {
+      index => successful.contains(index) && successful(index).host == offer.host
     }
     val cotasks = cotasksByIndex(taskIndex)
     assert(allSameMachine(cotasks))
     lazy val onSameMachineAsCotasks = cotasks.forall {
-      index => !successful.contains(index) || successful(index).host == host
+      index => !successful.contains(index) || successful(index).host == offer.host
     }
-    satisfiedDependencies && onSameMachineAsCotasks
+    sufficientResources && satisfiedDependencies && onSameMachineAsCotasks
   }
 
   private def allSameMachine(taskIndices: Seq[Int]): Boolean = {
@@ -391,10 +393,10 @@ private[spark] class TaskSetManager(
    *
    * @return An option containing (task index within the task set, locality, is speculative?)
    */
-  private def findTask(execId: String, host: String, locality: TaskLocality.Value)
+  private def findTask(offer: WorkerOffer, locality: TaskLocality.Value)
     : Option[(Int, TaskLocality.Value, Boolean)] =
   {
-    val indices = readyTasksIndices(execId, host).filter(index => copiesRunning(index) == 0 && !successful.contains(index))
+    val indices = readyTasksIndices(offer).filter(index => copiesRunning(index) == 0 && !successful.contains(index))
     if (indices.length == 0) {
       None
     } else {
@@ -443,11 +445,12 @@ private[spark] class TaskSetManager(
    * Respond to an offer of a single executor from the scheduler by finding a task
    */
   def resourceOffer(
-      execId: String,
-      host: String,
+      offer: WorkerOffer,
       maxLocality: TaskLocality.TaskLocality)
     : Option[TaskDescription] =
   {
+    val execId = offer.executorId
+    val host = offer.host
     if (!isZombie) {
       val curTime = clock.getTime()
 
@@ -456,7 +459,7 @@ private[spark] class TaskSetManager(
         allowedLocality = maxLocality   // We're not allowed to search for farther-away tasks
       }
 
-      findTask(execId, host, allowedLocality) match {
+      findTask(offer, allowedLocality) match {
         case Some((index, taskLocality, speculative)) => {
           // Found a task; do some bookkeeping and return a task description
           val task = tasks(index)

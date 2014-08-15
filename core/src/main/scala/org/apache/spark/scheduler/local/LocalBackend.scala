@@ -24,7 +24,7 @@ import akka.actor.{Actor, ActorRef, Props}
 import org.apache.spark.{Logging, SparkEnv, TaskState}
 import org.apache.spark.TaskState.TaskState
 import org.apache.spark.executor.{TaskMetrics, Executor, ExecutorBackend}
-import org.apache.spark.scheduler.{SchedulerBackend, TaskSchedulerImpl, WorkerOffer}
+import org.apache.spark.scheduler.{Resources, SchedulerBackend, TaskSchedulerImpl, WorkerOffer}
 import org.apache.spark.storage.BlockManagerId
 
 private case class ReviveOffers()
@@ -45,7 +45,7 @@ private[spark] class LocalActor(
   executorBackend: LocalBackend,
   private val totalCores: Int) extends Actor with Logging {
 
-  private var freeCores = totalCores
+  private var freeResources = Resources.fromCores(totalCores)
 
   private val localExecutorId = "localhost"
   private val localExecutorHostname = "localhost"
@@ -58,9 +58,12 @@ private[spark] class LocalActor(
       reviveOffers()
 
     case StatusUpdate(taskId, state, serializedData) =>
+      val resources = scheduler.claimedResources(taskId)
+      // TODO(ryan): below will remove taskId from scheduler, but we need it to get resources
+      // so we have this ugly ordering issue
       scheduler.statusUpdate(taskId, state, serializedData)
       if (TaskState.isFinished(state)) {
-        freeCores += scheduler.CPUS_PER_TASK
+        freeResources += resources
         reviveOffers()
       }
 
@@ -72,9 +75,9 @@ private[spark] class LocalActor(
   }
 
   def reviveOffers() {
-    val offers = Seq(new WorkerOffer(localExecutorId, localExecutorHostname, freeCores))
+    val offers = Seq(WorkerOffer(localExecutorId, localExecutorHostname, freeResources))
     for (task <- scheduler.resourceOffers(offers).flatten) {
-      freeCores -= scheduler.CPUS_PER_TASK
+      freeResources -= scheduler.claimedResources(task.taskId)
       executor.launchTask(executorBackend, task.taskId, task.name, task.serializedTask)
     }
   }
