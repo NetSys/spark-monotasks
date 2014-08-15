@@ -33,32 +33,38 @@ case class WorkerOffer(executorId: String, host: String, resources: Resources) {
 }
 
 /** A wrapper for the actual resource types */
-case class Resources(cores: Int, networkSlots: Int, disks: Set[Int]) {
+case class Resources(cores: Int, networkSlots: Int, disks: Int) {
 
    assert(isSane(), "cores is %d, slots is %d" format (cores, networkSlots))
 
   def +(other: Resources) = {
-    Resources(cores + other.cores, networkSlots + other.networkSlots, disks ++ other.disks)
+    Resources(cores + other.cores, networkSlots + other.networkSlots, disks + other.disks)
   }
 
   def -(other: Resources) = {
     assert(canFulfill(other), "%s can't fulfill %s" format (this, other))
-    Resources(cores - other.cores, networkSlots - other.networkSlots, disks -- other.disks)
+    Resources(cores - other.cores, networkSlots - other.networkSlots, disks - other.disks)
   }
 
   /** Can this resource offer fulfill all the requirements of another? */
   def canFulfill(other: Resources): Boolean = {
-    cores >= other.cores && networkSlots >= other.networkSlots && other.disks.subsetOf(disks)
+    cores >= other.cores && networkSlots >= other.networkSlots && disks >= other.disks
   }
 
-  private def isSane() = (cores >= 0 && networkSlots >= 0)
+  private def isSane() = (cores >= 0 && networkSlots >= 0 && disks >= 0)
 
 }
 
 object Resources {
 
   /** To ease backward compatibility, pretend that have cores, 1 NIC, 2 disks */
-  def fromCores(cores: Int) = Resources(cores, 1, Set(0, 1))
+  def fromCores(cores: Int) = Resources(cores, 1, 2)
+
+  def networkOnly = Resources(0, 1, 0)
+
+  def computeOnly = Resources(1, 0, 0)
+
+  def diskOnly = Resources(0, 0, 1)
 
 }
 // TODO(ryan): network slots are all the same, so its just a count, but disks need an id (using an int for now...)

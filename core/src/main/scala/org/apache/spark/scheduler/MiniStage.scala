@@ -24,8 +24,8 @@ abstract class MiniStage(val stageId: Int, val dependencies: Seq[MiniStage]) {
   /** For a task of _this_ MiniStage, what other tasks must run on the same machine */
   def cotasks(task: Task[_]): Seq[Task[_]]
 
-  /** What resources do tasks of this stage require? */
-  def resourceRequirements: Resources = Resources(1, 0, Set()) // TODO(ryan): !!! change
+  /** What resources do _one_ task of this stage require? */
+  def resourceRequirements: Resources = Resources.computeOnly // TODO(ryan): !!! change
 
 }
 
@@ -92,6 +92,8 @@ class MiniFetchStage(stageId: Int, outputRDD: MiniFetchRDD[_, _, _], dep: MiniFe
   override def cotasks(task: Task[_]) = tasksByPartition(task.asInstanceOf[MiniFetchTask].shuffleBlockId.reduceId)
   // TODO(ryan): is there a way around the cast above?
 
+  override def resourceRequirements: Resources = Resources.networkOnly
+
 }
 
 /**
@@ -107,6 +109,8 @@ class ShuffleMapStage(stageId: Int, rdd: RDD[_], dependencies: Seq[MiniStage], s
   override def taskByPartition(partition: Partition): ShuffleMapTask = {
     new ShuffleMapTask(stageId, binary, partition, scheduler.getPreferredLocs(rdd, partition.index))
   }
+
+  override def resourceRequirements: Resources = Resources.diskOnly
 
 }
 
