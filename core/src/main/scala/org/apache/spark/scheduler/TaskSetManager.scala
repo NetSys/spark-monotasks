@@ -361,7 +361,9 @@ private[spark] class TaskSetManager(
     val cotasks = cotasksByIndex(taskIndex)
     assert(allSameMachine(cotasks))
     lazy val onSameMachineAsCotasks = cotasks.forall {
-      index => !successful.contains(index) || successful(index).host == offer.host
+      index => !successful.contains(index) || successful(index).host == offer.host &&
+        taskAttempts(index).headOption.forall(_.host == offer.host) // edge case: task launched, but not finished
+        // TODO(ryan): what if there are multiple attempts for the task on different machines?
     }
     sufficientResources && satisfiedDependencies && onSameMachineAsCotasks
   }
