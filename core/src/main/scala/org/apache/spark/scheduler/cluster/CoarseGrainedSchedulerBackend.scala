@@ -90,7 +90,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, actorSystem: A
           executorActor(executorId) = sender
           executorHost(executorId) = Utils.parseHostPort(hostPort)._1
           totalCores(executorId) = cores
-          freeResources(executorId) = Resources(cores, 1, Set(0, 1)) // TODO(ryan) find a way to get network/disk count
+          freeResources(executorId) = Resources.fromCores(cores) // TODO(ryan) find a way to get network/disk count
           executorAddress(executorId) = sender.path.address
           addressToExecutorId(sender.path.address) = executorId
           totalCoreCount.addAndGet(cores)
