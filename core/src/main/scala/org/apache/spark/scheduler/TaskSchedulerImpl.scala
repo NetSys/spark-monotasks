@@ -241,8 +241,7 @@ private[spark] class TaskSchedulerImpl(
     // Randomly shuffle offers to avoid always placing tasks on the same set of workers.
     val shuffledOffers = Random.shuffle(offers).toBuffer
     // Build a list of tasks to assign to each worker.
-    // TODO(ryan) need to encode more than just cores here
-    val tasks = shuffledOffers.map(o => new ArrayBuffer[TaskDescription](o.resources.cores))
+    val tasks = shuffledOffers.map(o => new ArrayBuffer[TaskDescription]())
     val sortedTaskSets = rootPool.getSortedTaskSetQueue
     for (taskSet <- sortedTaskSets) {
       logDebug("parentName: %s, name: %s, runningTasks: %s".format(
