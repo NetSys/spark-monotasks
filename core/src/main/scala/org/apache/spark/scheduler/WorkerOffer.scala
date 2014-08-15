@@ -57,8 +57,8 @@ case class Resources(cores: Int, networkSlots: Int, disks: Set[Int]) {
 
 object Resources {
 
-  /** To ease backward compatibility, pretend that only cores are required*/
-  def fromCores(cores: Int) = Resources(cores, 0, Set())
+  /** To ease backward compatibility, pretend that have cores, 1 NIC, 2 disks */
+  def fromCores(cores: Int) = Resources(cores, 1, Set(0, 1))
 
 }
 // TODO(ryan): network slots are all the same, so its just a count, but disks need an id (using an int for now...)
