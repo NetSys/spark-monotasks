@@ -59,7 +59,7 @@ private[spark] class MiniFetchTask(
       // TODO(ryan): pretty sure things are getting unnecessarily serialized/deserialized
       SparkEnv.get.blockManager.memoryStore.putIterator(blockId, iterator, StorageLevel.MEMORY_ONLY_SER, false)
     } finally {
-      context.executeOnCompleteCallbacks() // TODO(ryan) what does this do?
+      context.executeOnCompleteCallbacks()
     }
   }
 

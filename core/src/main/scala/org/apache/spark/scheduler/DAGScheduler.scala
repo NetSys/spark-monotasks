@@ -216,7 +216,7 @@ class DAGScheduler(
         // Then register current shuffleDep
         val stage =
           newOrUsedStage(
-            shuffleDep.rdd, shuffleDep.rdd.partitions.size, shuffleDep, false, jobId,
+            shuffleDep.rdd, shuffleDep.rdd.partitions.size, shuffleDep, jobId,
             shuffleDep.rdd.creationSite)
         shuffleToMapStage(shuffleDep.shuffleId) = stage
  
@@ -234,14 +234,13 @@ class DAGScheduler(
       rdd: RDD[_],
       numTasks: Int,
       shuffleDep: Option[ShuffleDependency[_, _, _]],
-      isRead: Boolean,
       jobId: Int,
       callSite: CallSite)
     : Stage =
   {
     val id = nextStageId.getAndIncrement()
     val stage =
-      new Stage(id, rdd, numTasks, shuffleDep, isRead, getParentStages(rdd, jobId), jobId, callSite)
+      new Stage(id, rdd, numTasks, shuffleDep, getParentStages(rdd, jobId), jobId, callSite)
     stageIdToStage(id) = stage
     updateJobIdStageIdMaps(jobId, stage)
     stage
@@ -257,12 +256,11 @@ class DAGScheduler(
       rdd: RDD[_],
       numTasks: Int,
       shuffleDep: ShuffleDependency[_, _, _],
-      isRead: Boolean,
       jobId: Int,
       callSite: CallSite)
     : Stage =
   {
-    val stage = newStage(rdd, numTasks, Some(shuffleDep), isRead, jobId, callSite)
+    val stage = newStage(rdd, numTasks, Some(shuffleDep), jobId, callSite)
     if (mapOutputTracker.containsShuffle(shuffleDep.shuffleId)) {
       val serLocs = mapOutputTracker.getSerializedMapOutputStatuses(shuffleDep.shuffleId)
       val locs = MapOutputTracker.deserializeMapStatuses(serLocs)
@@ -318,7 +316,7 @@ class DAGScheduler(
       val currentShufDep = parentsWithNoMapStage.pop()
       val stage =
         newOrUsedStage(
-          currentShufDep.rdd, currentShufDep.rdd.partitions.size, currentShufDep, false, jobId,
+          currentShufDep.rdd, currentShufDep.rdd.partitions.size, currentShufDep, jobId,
           currentShufDep.rdd.creationSite)
       shuffleToMapStage(currentShufDep.shuffleId) = stage
     }
@@ -719,7 +717,7 @@ class DAGScheduler(
     try {
       // New stage creation may throw an exception if, for example, jobs are run on a
       // HadoopRDD whose underlying HDFS files have been deleted.
-      finalStage = newStage(finalRDD, partitions.size, None, false, jobId, callSite)
+      finalStage = newStage(finalRDD, partitions.size, None, jobId, callSite)
     } catch {
       case e: Exception =>
         logWarning("Creating new stage failed due to exception - job: " + jobId, e)
@@ -1012,7 +1010,7 @@ class DAGScheduler(
               }
             }
 
-          case _: Task[_] => () // TODO(ryan): this case can be empty as only Result/SMTasks can be last
+          case _: Task[_] => () // this case can be empty as only Result/SMTasks can be last
         }
       case Resubmitted =>
         logInfo("Resubmitted " + task + ", so marking it as still running")

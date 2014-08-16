@@ -57,7 +57,7 @@ private[spark] class MiniFetchWarmTask(
       // TODO(ryan): NEED TO MODIFY BLOCKMANAGER TO LOOK FOR THE SHUFFLE BLOCK IN MEMORY (instead of disk)
       SparkEnv.get.blockManager.memoryStore.putIterator(blockId, iterator, StorageLevel.MEMORY_ONLY_SER, false)
     } finally {
-      context.executeOnCompleteCallbacks() // TODO(ryan) what does this do?
+      context.executeOnCompleteCallbacks()
     }
   }
 
