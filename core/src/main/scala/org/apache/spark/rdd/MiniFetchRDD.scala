@@ -74,4 +74,10 @@ class MiniFetchRDD[K, V, C](prev: RDD[_ <: Product2[K, V]], part: Partitioner)
   }
 
   override def resource = RDDResourceTypes.None
+
+  override def free(partition: Partition) {
+    for (id <- shuffleBlockIdsByPartition(partition.index)) {
+      SparkEnv.get.blockManager.memoryStore.remove(id)
+    }
+  }
 }

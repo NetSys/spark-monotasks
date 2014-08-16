@@ -20,7 +20,7 @@ package org.apache.spark.rdd
 import scala.reflect.ClassTag
 
 import org.apache.spark.{SparkEnv, PipelineDependency, Partition, TaskContext}
-import org.apache.spark.storage.StorageLevel
+import org.apache.spark.storage.{RDDBlockId, StorageLevel}
 
 /**
  * A PipelinedRDD represents a soft-barrier between the parent RDD and the
@@ -39,14 +39,17 @@ private[spark] class PipelinedRDD[T: ClassTag](
 
   override val partitioner = prev.partitioner    // Since pipeline is a logical identity function
 
-  override def compute(split: Partition, context: TaskContext) =
-    SparkEnv.get.cacheManager.getOrCompute(prev, split, context, StorageLevel.MEMORY_ONLY_SER)
-    // Note that the above *should* be cached when compute() is called on it
-    // because PipelineTask will to the caching beforehand
-    // TODO(ryan) somehow throw exception if above is not cached, because it means either:
-    // 1. The partition failed to cache/was evicted
-    // 2. The Task calling this.compute() is on the *wrong* machine (i.e., it'll silently
-    // work, but without actually doing inter-task pipelining)
+  private def blockId(partition: Partition) = RDDBlockId(id, partition.index)
+
+  override def compute(split: Partition, context: TaskContext) = {
+    SparkEnv.get.blockManager.memoryStore.getValues(blockId(split)).get.asInstanceOf[Iterator[T]]
+  }
 
   override def resource = RDDResourceTypes.None
+
+  override def free(partition: Partition) {
+    SparkEnv.get.blockManager.memoryStore.remove(blockId(partition))
+    // Note that we _don't_ continue the recursive frees to our dependency because it should have been freed
+    // already, if it needed to be
+  }
 }

@@ -74,6 +74,7 @@ private[spark] class ShuffleMapTask(
         }
         throw e
     } finally {
+      rdd.free(partition)
       context.executeOnCompleteCallbacks()
     }
   }

@@ -66,6 +66,7 @@ private[spark] class PipelineTask(
       manager.getOrCompute(rdd, partition, context, StorageLevel.MEMORY_ONLY_SER) // cache the partition (hopefully :)
       new PipelineStatus()
     } finally {
+      rdd.free(partition)
       context.executeOnCompleteCallbacks() // TODO(ryan) what does this do?
     }
   }

@@ -61,6 +61,7 @@ private[spark] class ResultTask[T, U](
     try {
       func(context, rdd.iterator(partition, context))
     } finally {
+      rdd.free(partition)
       context.executeOnCompleteCallbacks()
     }
   }
