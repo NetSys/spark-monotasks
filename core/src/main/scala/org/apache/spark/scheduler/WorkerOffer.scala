@@ -57,14 +57,13 @@ case class Resources(cores: Int, networkSlots: Int, disks: Int) {
 
 object Resources {
 
-  /** To ease backward compatibility, pretend that have cores, 1 NIC, 2 disks */
-  def fromCores(cores: Int) = Resources(cores, 1, 2)
+  /** To ease backward compatibility, pretend that have cores, 10 concurrent transfers, 2 disks */
+  def fromCores(cores: Int) = Resources(cores, 10, 2)
 
   def networkOnly = Resources(0, 1, 0)
 
   def computeOnly = Resources(1, 0, 0)
 
-  def diskOnly = Resources(0, 0, 1)
+  def diskOnly = Resources(0, 0, 1) // TODO(ryan): disks need to be differentiable
 
 }
-// TODO(ryan): network slots are all the same, so its just a count, but disks need an id (using an int for now...)
