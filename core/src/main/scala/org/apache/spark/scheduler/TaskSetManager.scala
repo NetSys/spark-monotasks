@@ -353,7 +353,7 @@ private[spark] class TaskSetManager(
   private def canRun(taskIndex: Int, offer: WorkerOffer): Boolean = {
     // TODO(ryan): the foreaches are slow (especially with many tasks),
     // and there should be a (likely painful) way to forgo a lot of the computation
-    val sufficientResources = offer.resources.canFulfill(miniStageByIndex(taskIndex).resourceRequirements)
+    val sufficientResources = miniStageByIndex(taskIndex).canRun(tasks(taskIndex), offer)
 
     lazy val satisfiedDependencies = dependenciesByIndex(taskIndex).forall {
       index => successful.contains(index) && successful(index).host == offer.host
