@@ -26,6 +26,7 @@ import org.apache.spark.TaskState.TaskState
 import org.apache.spark.executor.{TaskMetrics, Executor, ExecutorBackend}
 import org.apache.spark.scheduler.{Resources, SchedulerBackend, TaskSchedulerImpl, WorkerOffer}
 import org.apache.spark.storage.BlockManagerId
+import org.apache.spark.util.Utils
 
 private case class ReviveOffers()
 
@@ -47,8 +48,8 @@ private[spark] class LocalActor(
 
   private var freeResources = Resources.fromCores(totalCores)
 
-  private val localExecutorId = "localhost"
-  private val localExecutorHostname = "localhost"
+  private val localExecutorId = SparkEnv.get.executorId
+  private val localExecutorHostname = Utils.localHostName
 
   val executor = new Executor(
     localExecutorId, localExecutorHostname, scheduler.conf.getAll, isLocal = true)
