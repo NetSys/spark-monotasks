@@ -27,6 +27,12 @@ abstract class MiniStage(val stageId: Int, val dependencies: Seq[MiniStage]) {
   /** What resources do _one_ task of this stage require? */
   def resourceRequirements: Resources
 
+  /** Can a task from this MiniStage run on a given offer (finished dependencies/cotasks aside)? */
+  // TODO(ryan): ideally this would be done in some kind of task object, but that object would also
+  // have to point to its MiniStage and pose a serialization problem
+  // maybe the best solution is to create a Task wrapper to put additional information about a task?
+  def canRun(task: Task[_], offer: WorkerOffer): Boolean = offer.resources.canFulfill(resourceRequirements)
+
 }
 
 /**
@@ -46,7 +52,6 @@ abstract class OneToOneStage(stageId: Int, val rdd: RDD[_], dependencies: Seq[Mi
 
   def dependenciesOfChild(task: Task[_]): Seq[Task[_]] = Seq(taskByPartitionMap(rdd.partitions(task.partitionId)))
   // TODO(ryan) assuming that partitionId is an index into rdd.partitions -- is it?
-  // TODO(ryan) assuming that deps are all 1-1 for now...
   // TODO(ryan): Tasks all have the same StageId regardless of what MiniStage they are in, which could lead to conflicts
   // where tasks look the same (they have same StageId, Partition), but they in fact are on different RDDs
   // I'm using the taskByPartitionMap do equality based on references which is a brittle stop-gap
@@ -67,27 +72,76 @@ class PipelineStage(stageId: Int, rdd: RDD[_], dependencies: Seq[MiniStage], sch
 
   override def resourceRequirements: Resources = rdd.resource match {
     case RDDResourceTypes.Compute => Resources.computeOnly
-    case RDDResourceTypes.Read => Resources.diskOnly
+    case RDDResourceTypes.Read =>
+      assert(dependencies.isEmpty) // if it's a read RDD, then this should be the first task and have no deps
+      Resources.diskOnly
     case _ => throw new IllegalArgumentException
   }
+
+  override def canRun(task: Task[_], offer: WorkerOffer): Boolean = {
+    super.canRun(task, offer) && isLocalRead(task.partitionId, offer.host)
+  }
+
+  private def isLocalRead(partitionId: Int, host: String) = {
+    lazy val preferredLocations = rdd.preferredLocations(rdd.partitions(partitionId))
+    assert(rdd.resource != RDDResourceTypes.Read || !preferredLocations.isEmpty) // read implies has a preferred loc
+    rdd.resource == RDDResourceTypes.Read && preferredLocations.contains(host)
+  }
+
+}
+
+class MiniFetchWarmStage(
+    stageId: Int,
+    val outputRDD: MiniFetchRDD[_, _, _],
+    dep: MiniFetchDependency[_, _, _],
+    scheduler: DAGScheduler)
+  extends MiniStage(stageId, Seq()) {
+
+  val statuses = SparkEnv.get.mapOutputTracker.getMapStatuses(dep.shuffleId)
+
+  private val taskFromShuffleBlock: Map[ShuffleBlockId, MiniFetchWarmTask] = {
+    val ids = outputRDD.shuffleBlockIdsByPartition.values.flatten
+    ids.map { id =>
+      val status = statuses(id.mapId)
+      val binary = scheduler.getBinary((id, dep))
+      val task = new MiniFetchWarmTask(stageId, binary, id, status.location)
+      (id, task)
+    }.toMap
+  }
+
+  private val tasksByPartition: Map[Int, Seq[MiniFetchWarmTask]] =
+    outputRDD.shuffleBlockIdsByPartition.toList.map { case (k, v) => (k, v.map(taskFromShuffleBlock(_))) }.toMap
+
+  override val tasks: Seq[MiniFetchWarmTask] = tasksByPartition.values.flatten.toSeq
+
+  override def dependenciesOfChild(task: Task[_]): Seq[Task[_]] = {
+    val id = task.asInstanceOf[MiniFetchTask].shuffleBlockId
+    Seq(taskFromShuffleBlock(id))
+  }
+
+  override def cotasks(task: Task[_]) = Seq(task)
+
+  override def resourceRequirements = Resources.diskOnly
+
+  override def canRun(task: Task[_], offer: WorkerOffer) =
+    offer.host == task.asInstanceOf[MiniFetchWarmTask].blockManagerId.host &&
+    super.canRun(task, offer)
 
 }
 
 /**
  * A type of MiniStage holding MiniFetchTasks
  */
-class MiniFetchStage(stageId: Int, outputRDD: MiniFetchRDD[_, _, _], dep: MiniFetchDependency[_, _, _], scheduler: DAGScheduler)
-  extends MiniStage(stageId, Seq()) {
-
-  val statuses = SparkEnv.get.mapOutputTracker.getMapStatuses(dep.shuffleId)
+class MiniFetchStage(stageId: Int, val warmer: MiniFetchWarmStage, dep: MiniFetchDependency[_, _, _], scheduler: DAGScheduler)
+  extends MiniStage(stageId, Seq(warmer)) {
 
   // TODO(ryan): weird bug below if using mapValues where mapValues would call the function multiple times ...
   // it seems like a bug in the implementation of Map.mapValues
   private val tasksByPartition: Map[Int, Seq[Task[_]]] =
-    outputRDD.shuffleBlockIdsByPartition.toList.map { case (k, v) => (k, v.map(taskFromShuffleBlock _)) }.toMap
+    warmer.outputRDD.shuffleBlockIdsByPartition.toList.map { case (k, v) => (k, v.map(taskFromShuffleBlock _)) }.toMap
 
   private def taskFromShuffleBlock(id: ShuffleBlockId): Task[_] = {
-    val status = statuses(id.mapId)
+    val status = warmer.statuses(id.mapId)
     new MiniFetchTask(stageId, scheduler.getBinary(id, status.location, status.compressedSizes(id.reduceId), dep), id)
   }
 
@@ -144,13 +198,15 @@ class ResultStage(stageId: Int, rdd: RDD[_], dependencies: Seq[MiniStage],
 object MiniStage {
 
   private[spark] def miniStages(stageId: Int, rdd: RDD[_], scheduler: DAGScheduler): Seq[MiniStage] = {
-    // TODO(ryan): cache results because it's a DAG and not nec a tree ? -> actually maybe it has to be a tree...
+    // TODO(ryan): cache results because it's a DAG and not nec a tree ?
+    // TODO(ryan) actually maybe it has to be a tree AND it actually is just a list
     rdd.dependencies flatMap {
       x => x match {
         case pipeline: PipelineDependency[_] =>
           Seq(new PipelineStage(stageId, pipeline.rdd, miniStages(stageId, pipeline.rdd, scheduler), scheduler))
         case miniFetch: MiniFetchDependency[_, _, _] =>
-          Seq(new MiniFetchStage(stageId, rdd.asInstanceOf[MiniFetchRDD[_, _, _]], miniFetch, scheduler))
+          val warmer = new MiniFetchWarmStage(stageId, rdd.asInstanceOf[MiniFetchRDD[_, _, _]], miniFetch, scheduler)
+          Seq(new MiniFetchStage(stageId, warmer, miniFetch, scheduler))
         case shuffle: ShuffleDependency[_, _, _] => Seq()
         case other: Dependency[_] => miniStages(stageId, other.rdd, scheduler)
       }
