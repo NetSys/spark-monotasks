@@ -39,6 +39,7 @@ sealed abstract class BlockId {
   def isRDD = isInstanceOf[RDDBlockId]
   def isShuffle = isInstanceOf[ShuffleBlockId]
   def isBroadcast = isInstanceOf[BroadcastBlockId]
+  def isWarmShuffle = isInstanceOf[WarmedShuffleBlockId]
 
   override def toString = name
   override def hashCode = name.hashCode
@@ -56,6 +57,16 @@ case class RDDBlockId(rddId: Int, splitIndex: Int) extends BlockId {
 @DeveloperApi
 case class ShuffleBlockId(shuffleId: Int, mapId: Int, reduceId: Int) extends BlockId {
   def name = "shuffle_" + shuffleId + "_" + mapId + "_" + reduceId
+}
+
+object WarmedShuffleBlockId {
+  def fromShuffle(shuffleBlockId: ShuffleBlockId): WarmedShuffleBlockId = shuffleBlockId match {
+    case ShuffleBlockId(s, m, r) => WarmedShuffleBlockId(s, m, r)
+  }
+}
+
+case class WarmedShuffleBlockId(shuffleId: Int, mapId: Int, reduceId: Int) extends BlockId {
+  def name = "warmedshuffle_" + shuffleId + "_" + mapId + "_" + reduceId
 }
 
 @DeveloperApi
@@ -92,6 +103,7 @@ private[spark] case class TestBlockId(id: String) extends BlockId {
 object BlockId {
   val RDD = "rdd_([0-9]+)_([0-9]+)".r
   val SHUFFLE = "shuffle_([0-9]+)_([0-9]+)_([0-9]+)".r
+  val WARMED_SHUFFLE = "warmedshuffle_([0-9]+)_([0-9]+)_([0-9]+)".r
   val SHUFFLE_INDEX = "shuffle_([0-9]+)_([0-9]+)_([0-9]+).index".r
   val BROADCAST = "broadcast_([0-9]+)([_A-Za-z0-9]*)".r
   val TASKRESULT = "taskresult_([0-9]+)".r
@@ -104,6 +116,8 @@ object BlockId {
       RDDBlockId(rddId.toInt, splitIndex.toInt)
     case SHUFFLE(shuffleId, mapId, reduceId) =>
       ShuffleBlockId(shuffleId.toInt, mapId.toInt, reduceId.toInt)
+    case WARMED_SHUFFLE(shuffleId, mapId, reduceId) =>
+      WarmedShuffleBlockId(shuffleId.toInt, mapId.toInt, reduceId.toInt)
     case SHUFFLE_INDEX(shuffleId, mapId, reduceId) =>
       ShuffleIndexBlockId(shuffleId.toInt, mapId.toInt, reduceId.toInt)
     case BROADCAST(broadcastId, field) =>

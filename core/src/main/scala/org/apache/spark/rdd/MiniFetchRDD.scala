@@ -1,7 +1,7 @@
 package org.apache.spark.rdd
 
 import org.apache.spark._
-import org.apache.spark.storage.{ShuffleBlockId}
+import org.apache.spark.storage.{WarmedShuffleBlockId, ShuffleBlockId}
 import org.apache.spark.util.collection.ExternalSorter
 import org.apache.spark.serializer.Serializer
 
@@ -21,8 +21,11 @@ class MiniFetchRDD[K, V, C](prev: RDD[_ <: Product2[K, V]], part: Partitioner)
    * compute from a downstream task and it should behave just like a ShuffledRDD
    */
   override def compute(split: Partition, context: TaskContext): Iterator[(K, C)] = {
-    val iter = shuffleBlockIdsByPartition(split.index).flatMap {
-      SparkEnv.get.blockManager.memoryStore.getValues(_).get
+    val dep = dependencies.head.asInstanceOf[ShuffleDependency[K, V, C]]
+    val iter = shuffleBlockIdsByPartition(split.index).flatMap { id =>
+      val warmedId = WarmedShuffleBlockId.fromShuffle(id)
+      val bytes = SparkEnv.get.blockManager.memoryStore.getBytes(warmedId).get
+      SparkEnv.get.blockManager.dataDeserialize(warmedId, bytes, Serializer.getSerializer(dep.serializer))
     }.toIterator.asInstanceOf[Iterator[Product2[K, C]]]
     aggregateAndStuff(iter, context).asInstanceOf[Iterator[(K, C)]]
   }

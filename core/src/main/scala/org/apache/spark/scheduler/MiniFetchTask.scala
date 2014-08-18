@@ -25,7 +25,7 @@ import org.apache.spark._
 import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.rdd.{BlockRDD, RDD}
 import org.apache.spark.shuffle.ShuffleWriter
-import org.apache.spark.storage.{ShuffleBlockId, BlockManagerId, StorageLevel}
+import org.apache.spark.storage.{WarmedShuffleBlockId, ShuffleBlockId, BlockManagerId, StorageLevel}
 import java.io.Externalizable
 import com.sun.istack.internal.NotNull
 import org.apache.spark.serializer.Serializer
@@ -53,11 +53,10 @@ private[spark] class MiniFetchTask(
 
     metrics = Some(context.taskMetrics)
     try {
+      val warmedId = WarmedShuffleBlockId.fromShuffle(blockId)
       val length: Long = MapOutputTracker.decompressSize(compSize)
-      val iterator = SparkEnv.get.blockManager.getMultiple(Seq((manager, Seq((blockId, length)))),
-        Serializer.getSerializer(dep.serializer)).next()._2.get
-      // TODO(ryan): pretty sure things are getting unnecessarily serialized/deserialized
-      SparkEnv.get.blockManager.memoryStore.putIterator(blockId, iterator, StorageLevel.MEMORY_ONLY_SER, false)
+      val bytes = SparkEnv.get.blockManager.getSingle(manager, warmedId, length).get
+      SparkEnv.get.blockManager.memoryStore.putBytesDirect(warmedId, bytes)
     } finally {
       context.executeOnCompleteCallbacks()
     }

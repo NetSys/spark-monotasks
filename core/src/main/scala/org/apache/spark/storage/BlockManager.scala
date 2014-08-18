@@ -34,6 +34,7 @@ import org.apache.spark.io.CompressionCodec
 import org.apache.spark.network._
 import org.apache.spark.serializer.Serializer
 import org.apache.spark.util._
+import org.apache.spark.storage.BlockFetcherIterator.FetchRequest
 
 private[spark] sealed trait BlockValues
 private[spark] case class ByteBufferValues(buffer: ByteBuffer) extends BlockValues
@@ -322,9 +323,10 @@ private[spark] class BlockManager(
    * never deletes (recent) items.
    */
   def getLocalFromDisk(blockId: BlockId, serializer: Serializer): Option[Iterator[Any]] = {
-    diskStore.getValues(blockId, serializer).orElse {
+    val bytes = getLocalBytes(blockId).getOrElse {
       throw new BlockException(blockId, s"Block $blockId not found on disk, though it should be")
     }
+    Some(dataDeserialize(blockId, bytes, serializer)) // TODO(ryan) change method interface to not return option
   }
 
   /**
@@ -342,13 +344,18 @@ private[spark] class BlockManager(
     logDebug(s"Getting local block $blockId as bytes")
     // As an optimization for map output fetches, if the block is for a shuffle, return it
     // without acquiring a lock; the disk store never deletes (recent) items so this should work
-    if (blockId.isShuffle) {
-      diskStore.getBytes(blockId) match {
+    if (blockId.isShuffle || blockId.isWarmShuffle) {
+      val store = if (blockId.isShuffle) diskStore else memoryStore
+      val bytes = store.getBytes(blockId)
+      if (blockId.isWarmShuffle) {
+        store.remove(blockId) // we should only need to keep the fetch results 1 time, so lets free the mem now
+      }
+      bytes match {
         case Some(bytes) =>
           Some(bytes)
         case None =>
           throw new BlockException(
-            blockId, s"Block $blockId not found on disk, though it should be")
+            blockId, s"Block $blockId not found, though it should be")
       }
     } else {
       doGetLocal(blockId, asBlockResult = false).asInstanceOf[Option[ByteBuffer]]
@@ -546,6 +553,39 @@ private[spark] class BlockManager(
       }
     iter.initialize()
     iter
+  }
+
+  /**
+   * Get a single remote (shuffle) block as serialized bytes
+   */
+  // TODO(ryan): too much copy paste from BlockFetchIterator, need to refactor both to use common method
+  def getSingle(address: BlockManagerId, blockId: BlockId,size: Long): Option[ByteBuffer] = {
+    val req = new FetchRequest(address, Seq((blockId, size)))
+    val connectionManager = new ConnectionManager(0, conf, securityManager)
+    val cmId = new ConnectionManagerId(req.address.host, req.address.port)
+    val blockMessageArray = new BlockMessageArray(req.blocks.map {
+      case (blockId, size) => BlockMessage.fromGetBlock(GetBlock(blockId))
+    })
+    val maybeMessage = connectionManager.sendMessageReliablySync(cmId, blockMessageArray.toBufferMessage)
+
+    maybeMessage match {
+      case Some(message) => {
+        val bufferMessage = message.asInstanceOf[BufferMessage]
+        val blockMessageArray = BlockMessageArray.fromBufferMessage(bufferMessage)
+        assert(blockMessageArray.length == 1)
+        val blockMessage = blockMessageArray(0)
+        if (blockMessage.getType != BlockMessage.TYPE_GOT_BLOCK) {
+          throw new SparkException(
+          "Unexpected message " + blockMessage.getType + " received from " + cmId)
+        }
+        val blockId = blockMessage.getId
+        Some(blockMessage.getData)
+      }
+      case None => {
+       logError("Could not get block(s) from " + cmId)
+        None
+      }
+    }
   }
 
   def putIterator(

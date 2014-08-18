@@ -80,6 +80,11 @@ private[spark] class MemoryStore(blockManager: BlockManager, maxMemory: Long)
     }
   }
 
+  /** Put bytes directly in the memory store without copying or deserialization. */
+  def putBytesDirect(blockId: BlockId, bytes: ByteBuffer) {
+    tryToPut(blockId, bytes, bytes.limit, deserialized = false)
+  }
+
   override def putArray(
       blockId: BlockId,
       values: Array[Any],
