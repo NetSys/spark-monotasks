@@ -22,6 +22,7 @@ import scala.reflect.ClassTag
 import org.apache.spark._
 import org.apache.spark.storage.{BlockId, BlockManager}
 import scala.Some
+import java.nio.ByteBuffer
 
 private[spark] class BlockRDDPartition(val blockId: BlockId, idx: Int) extends Partition {
   val index = idx
@@ -88,3 +89,29 @@ class BlockRDD[T: ClassTag](@transient sc: SparkContext, @transient val blockIds
   override def resource = RDDResourceTypes.Read
 }
 
+/** An RDD whose compute is raw ByteBuffers, meant to be chained with a PipelineRDD and then deserialized */
+private class RawBlockRDD(sc: SparkContext, blockIds: Array[BlockId])
+  extends BlockRDD[(BlockId, ByteBuffer)](sc, blockIds) {
+
+  override def compute(split: Partition, context: TaskContext): Iterator[(BlockId, ByteBuffer)] = {
+    assertValid()
+    val blockManager = SparkEnv.get.blockManager
+    val blockId = split.asInstanceOf[BlockRDDPartition].blockId
+    blockManager.getLocalBytes(blockId) match {
+      case Some(bytes) => Iterator((blockId, bytes))
+      case None => throw new Exception("Could not compute split, block " + blockId + " not found")
+    }
+  }
+}
+
+
+/** Helper object to create a block RDD whose serialization is forced after a Pipeline Task */
+object PipelinedBlockRDD {
+
+  def apply[T: ClassTag](sc: SparkContext, blockIds: Array[BlockId]): RDD[T] = {
+    val manager = SparkEnv.get.blockManager
+    new RawBlockRDD(sc, blockIds).pipeline().flatMap {
+      case(blockId, bytes) => manager.dataDeserialize(blockId, bytes).asInstanceOf[Iterator[T]]
+    }
+  }
+}
