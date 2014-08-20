@@ -85,7 +85,7 @@ class PipelineStage(stageId: Int, rdd: RDD[_], dependencies: Seq[MiniStage], sch
   private def isLocalRead(partitionId: Int, host: String) = {
     lazy val preferredLocations = rdd.preferredLocations(rdd.partitions(partitionId))
     assert(rdd.resource != RDDResourceTypes.Read || !preferredLocations.isEmpty) // read implies has a preferred loc
-    rdd.resource == RDDResourceTypes.Read && preferredLocations.contains(host)
+    rdd.resource != RDDResourceTypes.Read || preferredLocations.contains(host)
   }
 
 }
