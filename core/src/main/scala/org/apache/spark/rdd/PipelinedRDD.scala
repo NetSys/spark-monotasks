@@ -39,7 +39,7 @@ private[spark] class PipelinedRDD[T: ClassTag](
 
   override val partitioner = prev.partitioner    // Since pipeline is a logical identity function
 
-  private def blockId(partition: Partition) = RDDBlockId(id, partition.index)
+  private def blockId(partition: Partition) = RDDBlockId(prev.id, partition.index)
 
   override def compute(split: Partition, context: TaskContext) = {
     SparkEnv.get.blockManager.memoryStore.getValues(blockId(split)).get.asInstanceOf[Iterator[T]]
