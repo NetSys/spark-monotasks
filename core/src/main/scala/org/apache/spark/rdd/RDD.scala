@@ -1375,6 +1375,17 @@ abstract class RDD[T: ClassTag](
       }
     }
   }
+
+  /** Map a partition with a function that also takes a value local to that partition.
+    *
+    * Useful for bringing a non-serializable value that can be initialized from a serializable closure.
+    */
+  def mapWithUninitializedValue[X: ClassTag, U: ClassTag](initValue: => X, fn: (X, T) => U): RDD[U] = {
+    this.mapPartitions { iter =>
+      val value = initValue
+      iter.map(fn(value, _))
+    }
+  }
 }
 
 object RDD {

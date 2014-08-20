@@ -3,7 +3,7 @@ package org.apache.spark.rdd
 import org.apache.spark._
 import org.apache.spark.storage.{WarmedShuffleBlockId, ShuffleBlockId}
 import org.apache.spark.util.collection.ExternalSorter
-import org.apache.spark.serializer.Serializer
+import org.apache.spark.serializer.{SerializerInstance, Serializer}
 import java.nio.ByteBuffer
 
 /**
@@ -59,24 +59,25 @@ class MiniFetchRDD[K, V, C](prev: RDD[_ <: Product2[K, V]], part: Partitioner)
  * c) shuffle read
  * d) combine
  */
-
 object MiniFetchPipelinedRDD {
 
-  /** A MiniFetchRDD without an aggregator */
+  /** A MiniFetchRDD without an aggregator; it opaquely performs the serialization and deserialization
+    *
+    * TODO(ryan) In reality, it serializes a record at a time and the ShuffleWriter will again serialize those
+    * records -- will need to do a better ShuffleWriter that can write out raw bytes
+    */
   def apply[K, V](prev: RDD[_ <: Product2[K, V]], part: Partitioner, serializer: Serializer): RDD[(K, V)] = {
 
+    val serialized: RDD[(K, Array[Byte])] = prev.mapWithUninitializedValue[SerializerInstance, (K, Array[Byte])](
+        Serializer.getSerializer(serializer).newInstance(),
+        (ser, kv) => (kv._1, ser.serialize((kv._1, kv._2)).array())) // TODO(ryan): can key just be partition # (maybe not if want sorted)
 
-    val serialized: RDD[(K, Array[Byte])] = prev.map[(K, Array[Byte])] { kv =>
-        val ser = Serializer.getSerializer(serializer).newInstance() //TODO(ryan) don't make a new one for each record!
-        (kv._1, ser.serialize((kv._1, kv._2)).array()) // TODO(ryan): can key just be partition # (maybe not if want sorted)
-    }
     val pipelined = serialized.pipeline()
     val fetched: RDD[(K, Array[Byte])] = new MiniFetchRDD(pipelined, part) // note the lack of aggregator, we can add
                                                                            // it with the other utility functions
-    fetched.map {kv =>
-      val ser = Serializer.getSerializer(serializer).newInstance()
-      ser.deserialize[(K, V)](ByteBuffer.wrap(kv._2))
-    }
+    fetched.mapWithUninitializedValue[SerializerInstance, (K, V)](
+        Serializer.getSerializer(serializer).newInstance(),
+        (ser, kv) => ser.deserialize[(K, V)](ByteBuffer.wrap(kv._2)))
   }
 
   /** A MiniFetchRDD with an aggregator */
