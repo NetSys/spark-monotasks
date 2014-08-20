@@ -4,6 +4,7 @@ import org.apache.spark._
 import org.apache.spark.storage.{WarmedShuffleBlockId, ShuffleBlockId}
 import org.apache.spark.util.collection.ExternalSorter
 import org.apache.spark.serializer.Serializer
+import java.nio.ByteBuffer
 
 /**
  * Like ShuffledRDD, but instead requires Fetch mini-tasks to first fetch all parts of
@@ -22,47 +23,11 @@ class MiniFetchRDD[K, V, C](prev: RDD[_ <: Product2[K, V]], part: Partitioner)
    */
   override def compute(split: Partition, context: TaskContext): Iterator[(K, C)] = {
     val dep = dependencies.head.asInstanceOf[ShuffleDependency[K, V, C]]
-    val iter = shuffleBlockIdsByPartition(split.index).flatMap { id =>
+    shuffleBlockIdsByPartition(split.index).flatMap { id =>
       val warmedId = WarmedShuffleBlockId.fromShuffle(id)
       val bytes = SparkEnv.get.blockManager.memoryStore.getBytes(warmedId).get
       SparkEnv.get.blockManager.dataDeserialize(warmedId, bytes, Serializer.getSerializer(dep.serializer))
-    }.toIterator.asInstanceOf[Iterator[Product2[K, C]]]
-    aggregateAndStuff(iter, context).asInstanceOf[Iterator[(K, C)]]
-  }
-
-  // TODO(ryan): this is copied from HashShuffleReader (it doesn't seem easy to refactor
-  // that code to avoid the copy paste)
-  private def aggregateAndStuff(iter: Iterator[Product2[K, C]],
-                                context: TaskContext): Iterator[Product2[K, C]] = {
-    val dep = dependencies.head.asInstanceOf[ShuffleDependency[K, V, C]]
-    val ser = Serializer.getSerializer(dep.serializer)
-    val aggregatedIter: Iterator[Product2[K, C]] = if (dep.aggregator.isDefined) {
-      if (dep.mapSideCombine) {
-        new InterruptibleIterator(context, dep.aggregator.get.combineCombinersByKey(iter, context))
-      } else {
-        new InterruptibleIterator(context,
-          dep.aggregator.get.combineValuesByKey(iter.asInstanceOf[Iterator[Product2[K, V]]], context))
-      }
-    } else if (dep.aggregator.isEmpty && dep.mapSideCombine) {
-      throw new IllegalStateException("Aggregator is empty for map-side combine")
-    } else {
-      // Convert the Product2s to pairs since this is what downstream RDDs currently expect
-      iter.asInstanceOf[Iterator[Product2[K, C]]].map(pair => (pair._1, pair._2))
-    }
-
-    // Sort the output if there is a sort ordering defined.
-    dep.keyOrdering match {
-      case Some(keyOrd: Ordering[K]) =>
-        // Create an ExternalSorter to sort the data. Note that if spark.shuffle.spill is disabled,
-        // the ExternalSorter won't spill to disk.
-        val sorter = new ExternalSorter[K, C, C](ordering = Some(keyOrd), serializer = Some(ser))
-        sorter.write(aggregatedIter)
-        context.taskMetrics.memoryBytesSpilled += sorter.memoryBytesSpilled
-        context.taskMetrics.diskBytesSpilled += sorter.diskBytesSpilled
-        sorter.iterator
-      case None =>
-        aggregatedIter
-    }
+    }.toIterator.asInstanceOf[Iterator[(K, C)]] // TODO(ryan): sort order is not respected
   }
 
   // TODO(ryan): if isn't lazy, the this.dependencies will be called too early and
@@ -82,5 +47,64 @@ class MiniFetchRDD[K, V, C](prev: RDD[_ <: Product2[K, V]], part: Partitioner)
     for (id <- shuffleBlockIdsByPartition(partition.index)) {
       SparkEnv.get.blockManager.memoryStore.remove(id)
     }
+  }
+}
+
+/**
+ * A MiniFetchRDD which carefully separates the (de)serialization with pipeline tasks
+ *
+ * The Goal is to seperate out:
+ * a) (optionally combine on map side) and serialize before the shuffle write
+ * b) shuffle write
+ * c) shuffle read
+ * d) combine
+ */
+
+object MiniFetchPipelinedRDD {
+
+  /** A MiniFetchRDD without an aggregator */
+  def apply[K, V](prev: RDD[_ <: Product2[K, V]], part: Partitioner, serializer: Serializer): RDD[(K, V)] = {
+
+
+    val serialized: RDD[(K, Array[Byte])] = prev.map[(K, Array[Byte])] { kv =>
+        val ser = Serializer.getSerializer(serializer).newInstance() //TODO(ryan) don't make a new one for each record!
+        (kv._1, ser.serialize((kv._1, kv._2)).array()) // TODO(ryan): can key just be partition # (maybe not if want sorted)
+    }
+    val fetched: RDD[(K, Array[Byte])] = new MiniFetchRDD(serialized, part) // note the lack of aggregator, we can add
+                                                                           // it with the other utility functions
+    fetched.map {kv =>
+      val ser = Serializer.getSerializer(serializer).newInstance()
+      ser.deserialize[(K, V)](ByteBuffer.wrap(kv._2))
+    }
+  }
+
+  /** A MiniFetchRDD with an aggregator */
+  def apply[K, V, C](prev: RDD[_ <: Product2[K, V]],
+      part: Partitioner,
+      serializer: Serializer,
+      aggregator: Aggregator[K, V, C],
+      mapSideCombine: Boolean): RDD[(K, C)] = {
+    if (mapSideCombine) {
+      aggregateWithCombine[K, V, C](prev, part, serializer, aggregator)
+    } else {
+      aggregateWithoutCombine(prev, part, serializer, aggregator)
+    }
+  }
+
+  private def aggregateWithoutCombine[K, V, C](prev: RDD[_ <: Product2[K, V]],
+       part: Partitioner,
+       serializer: Serializer,
+       aggregator: Aggregator[K, V, C]): RDD[(K, C)] = {
+    val fetched = MiniFetchPipelinedRDD(prev, part, serializer)
+    RDD.aggregate(fetched, aggregator)
+  }
+
+  private def aggregateWithCombine[K, V, C](prev: RDD[_ <: Product2[K, V]],
+      part: Partitioner,
+      serializer: Serializer,
+      aggregator: Aggregator[K, V, C]): RDD[(K, C)] = {
+     val combined = RDD.aggregate(prev.asInstanceOf[RDD[(K, V)]], aggregator)
+     val fetched = MiniFetchPipelinedRDD(combined, part, serializer)
+     RDD.combine(fetched, aggregator)
   }
 }

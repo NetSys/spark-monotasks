@@ -1376,3 +1376,13 @@ abstract class RDD[T: ClassTag](
     }
   }
 }
+
+object RDD {
+
+  def aggregate[K, V, C](rdd: RDD[(K, V)], aggregator: Aggregator[K, V, C]): RDD[(K, C)] =
+    rdd.mapPartitionsWithContext((context, iterator) => aggregator.combineValuesByKey(iterator, context))
+
+  def combine[K, C](rdd: RDD[(K, C)], aggregator: Aggregator[K, _, C]): RDD[(K, C)] =
+    rdd.mapPartitionsWithContext((context, iterator) => aggregator.combineCombinersByKey(iterator, context))
+
+}

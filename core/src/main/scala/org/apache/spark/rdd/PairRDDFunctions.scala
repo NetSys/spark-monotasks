@@ -90,10 +90,7 @@ class PairRDDFunctions[K, V](self: RDD[(K, V)])
         new InterruptibleIterator(context, aggregator.combineValuesByKey(iter, context))
       }, preservesPartitioning = true)
     } else {
-      new MiniFetchRDD[K, V, C](self, partitioner)
-        .setSerializer(serializer)
-        .setAggregator(aggregator)
-        .setMapSideCombine(mapSideCombine)
+      MiniFetchPipelinedRDD[K, V, C](self, partitioner, serializer, aggregator, mapSideCombine)
     }
   }
 
