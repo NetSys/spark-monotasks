@@ -33,6 +33,9 @@ abstract class MiniStage(val stageId: Int, val dependencies: Seq[MiniStage]) {
   // maybe the best solution is to create a Task wrapper to put additional information about a task?
   def canRun(task: Task[_], offer: WorkerOffer): Boolean = offer.resources.canFulfill(resourceRequirements)
 
+  /** Do I need to be scheduled on the same machine as my dependencies? */
+  def requiresColocationWithParent: Boolean = true
+  
 }
 
 /**
@@ -154,6 +157,7 @@ class MiniFetchStage(stageId: Int, val warmer: MiniFetchWarmStage, dep: MiniFetc
 
   override def resourceRequirements: Resources = Resources.networkOnly
 
+  override def requiresColocationWithParent: Boolean = false
 }
 
 /**

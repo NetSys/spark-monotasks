@@ -355,17 +355,25 @@ private[spark] class TaskSetManager(
     // and there should be a (likely painful) way to forgo a lot of the computation
     val sufficientResources = miniStageByIndex(taskIndex).canRun(tasks(taskIndex), offer)
 
-    lazy val satisfiedDependencies = dependenciesByIndex(taskIndex).forall {
-      index => successful.contains(index) && successful(index).host == offer.host
+    sufficientResources && satisfiedDependencies(offer, taskIndex) && onSameMachineAsCotasks(offer, taskIndex)
+  }
+
+  private def satisfiedDependencies(offer: WorkerOffer, taskIndex: Int) = {
+      dependenciesByIndex(taskIndex).forall {
+      index => successful.contains(index) &&
+        (!miniStageByIndex(taskIndex).requiresColocationWithParent || successful(index).host == offer.host)
+      // requiresColocation ==> location of success is this machine
     }
+  }
+
+  private def onSameMachineAsCotasks(offer: WorkerOffer, taskIndex: Int) = {
     val cotasks = cotasksByIndex(taskIndex)
-    assert(allSameMachine(cotasks))
-    lazy val onSameMachineAsCotasks = cotasks.forall {
-      index => !successful.contains(index) || successful(index).host == offer.host &&
+    assert(allSameMachine(cotasks), "cotask machines : " + cotasks.flatMap(successful.get(_).map(_.host)))
+    cotasks.forall {
+      index => (!successful.contains(index) || successful(index).host == offer.host) &&
         taskAttempts(index).headOption.forall(_.host == offer.host) // edge case: task launched, but not finished
-        // TODO(ryan): what if there are multiple attempts for the task on different machines?
+      // TODO(ryan): what if there are multiple attempts for the task on different machines?
     }
-    sufficientResources && satisfiedDependencies && onSameMachineAsCotasks
   }
 
   private def allSameMachine(taskIndices: Seq[Int]): Boolean = {
