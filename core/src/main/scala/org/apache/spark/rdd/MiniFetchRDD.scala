@@ -70,7 +70,8 @@ object MiniFetchPipelinedRDD {
         val ser = Serializer.getSerializer(serializer).newInstance() //TODO(ryan) don't make a new one for each record!
         (kv._1, ser.serialize((kv._1, kv._2)).array()) // TODO(ryan): can key just be partition # (maybe not if want sorted)
     }
-    val fetched: RDD[(K, Array[Byte])] = new MiniFetchRDD(serialized, part) // note the lack of aggregator, we can add
+    val pipelined = serialized.pipeline()
+    val fetched: RDD[(K, Array[Byte])] = new MiniFetchRDD(pipelined, part) // note the lack of aggregator, we can add
                                                                            // it with the other utility functions
     fetched.map {kv =>
       val ser = Serializer.getSerializer(serializer).newInstance()
