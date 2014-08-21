@@ -25,6 +25,7 @@ import org.apache.spark._
 import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.rdd.RDD
 import org.apache.spark.shuffle.ShuffleWriter
+import org.apache.spark.storage.{BlockManagerId, StorageLevel, ShuffleBlockId}
 
 /**
 * A ShuffleMapTask divides the elements of an RDD into multiple buckets (based on a partitioner
@@ -57,22 +58,21 @@ private[spark] class ShuffleMapTask(
   override def runTask(context: TaskContext): MapStatus = {
     // Deserialize the RDD using the broadcast variable.
     val ser = SparkEnv.get.closureSerializer.newInstance()
-    val (rdd, dep) = ser.deserialize[(RDD[_], ShuffleDependency[_, _, _])](
+    val (rdd, dep) = ser.deserialize[(RDD[(Int, ByteBuffer)], ShuffleDependency[_, _, _])](
       ByteBuffer.wrap(taskBinary.value), Thread.currentThread.getContextClassLoader)
 
     metrics = Some(context.taskMetrics)
-    var writer: ShuffleWriter[Any, Any] = null
     try {
-      val manager = SparkEnv.get.shuffleManager
-      writer = manager.getWriter[Any, Any](dep.shuffleHandle, partitionId, context)
-      writer.write(rdd.iterator(partition, context).asInstanceOf[Iterator[_ <: Product2[Any, Any]]])
-      return writer.stop(success = true).get
-    } catch {
-      case e: Exception =>
-        if (writer != null) {
-          writer.stop(success = false)
-        }
-        throw e
+      val store = SparkEnv.get.blockManager.diskStore
+      val compressedSizes = new Array[Byte](dep.partitioner.numPartitions)
+
+      for ((outPartitionId, bytes) <- rdd.iterator(partition, context)) {
+        val outBlockId = ShuffleBlockId(dep.shuffleId, partitionId, outPartitionId)
+        store.putBytes(outBlockId, bytes, StorageLevel.DISK_ONLY)
+        assert(compressedSizes(outPartitionId) == 0) // only write 1 output per output partition
+        compressedSizes(outPartitionId) = MapOutputTracker.compressSize(bytes.limit()) //TODO(ryan): not sure on limit() validity
+      }
+      new MapStatus(SparkEnv.get.blockManager.blockManagerId, compressedSizes)
     } finally {
       rdd.free(partition)
       context.executeOnCompleteCallbacks()

@@ -3,36 +3,40 @@ package org.apache.spark.rdd
 import org.apache.spark._
 import org.apache.spark.storage.{WarmedShuffleBlockId, ShuffleBlockId}
 import org.apache.spark.util.collection.ExternalSorter
-import org.apache.spark.serializer.{SerializerInstance, Serializer}
+import org.apache.spark.serializer.{SerializationStream, SerializerInstance, Serializer}
 import java.nio.ByteBuffer
+import java.io.ByteArrayOutputStream
 
 /**
- * Like ShuffledRDD, but instead requires Fetch mini-tasks to first fetch all parts of
- * it to the local machine; only then can compute() be called on it by a downstream task
+ * All MiniFetchRDD does is pull together shuffled ByteBuffers that were serialized from a
+ * previous ShuffleMap task
+ *
+ * It's intended only for private use. Use the MiniFetchPipelinedRDD to get functionality
+ * similiar to ShuffledRDD
  */
-class MiniFetchRDD[K, V, C](prev: RDD[_ <: Product2[K, V]], part: Partitioner)
-  extends ShuffledRDD[K, V, C](prev, part) {
+private[spark] class MiniFetchRDD[K, V, C](prev: RDD[_ <: Product2[K, V]], val part: Partitioner)
+  extends RDD[ByteBuffer](prev) {
+
+  override def getPartitions: Array[Partition] = {
+    Array.tabulate[Partition](part.numPartitions)(i => new ShuffledRDDPartition(i))
+  }
 
   override def getDependencies: Seq[Dependency[_]] = {
-    List(new MiniFetchDependency(prev, part, serializer, keyOrdering, aggregator, mapSideCombine))
+    List(new MiniFetchDependency(prev, part, None, None, None, false)) // TODO(ryan) MiniFetchDependency needs a refactor
   }
 
   /**
    * Once all parts of given partition have been fetched, it's safe to call
    * compute from a downstream task and it should behave just like a ShuffledRDD
    */
-  override def compute(split: Partition, context: TaskContext): Iterator[(K, C)] = {
-    val dep = dependencies.head.asInstanceOf[ShuffleDependency[K, V, C]]
-    shuffleBlockIdsByPartition(split.index).flatMap { id =>
+  override def compute(split: Partition, context: TaskContext): Iterator[ByteBuffer] = {
+    shuffleBlockIdsByPartition(split.index).iterator.map { id =>
       val warmedId = WarmedShuffleBlockId.fromShuffle(id)
-      val bytes = SparkEnv.get.blockManager.memoryStore.getBytes(warmedId).get
-      SparkEnv.get.blockManager.dataDeserialize(warmedId, bytes, Serializer.getSerializer(dep.serializer))
-    }.toIterator.asInstanceOf[Iterator[(K, C)]] // TODO(ryan): sort order is not respected
+      SparkEnv.get.blockManager.memoryStore.getBytes(warmedId).get
+    } // TODO(ryan): sort order is not respected
   }
 
-  // TODO(ryan): if isn't lazy, the this.dependencies will be called too early and
-  // not capture added deps
-  lazy val shuffleBlockIdsByPartition: Map[Int, Seq[ShuffleBlockId]] = {
+	val shuffleBlockIdsByPartition: Map[Int, Seq[ShuffleBlockId]] = {
     val shuffleId = dependencies.head.asInstanceOf[ShuffleDependency[_, _, _]].shuffleId
     (0 until this.partitions.length).map {
       reduceId =>
@@ -68,16 +72,37 @@ object MiniFetchPipelinedRDD {
     */
   def apply[K, V](prev: RDD[_ <: Product2[K, V]], part: Partitioner, serializer: Serializer): RDD[(K, V)] = {
 
-    val serialized: RDD[(K, Array[Byte])] = prev.mapWithUninitializedValue[SerializerInstance, (K, Array[Byte])](
-        Serializer.getSerializer(serializer).newInstance(),
-        (ser, kv) => (kv._1, ser.serialize((kv._1, kv._2)).array())) // TODO(ryan): can key just be partition # (maybe not if want sorted)
+    val serialized: RDD[(Int, ByteBuffer)] = prev.mapPartitionsWithContext {
+        (context, iter) => partitionIterator(iter.asInstanceOf[Iterator[(K, V)]], part, serializer)
+    }
 
     val pipelined = serialized.pipeline()
-    val fetched: RDD[(K, Array[Byte])] = new MiniFetchRDD(pipelined, part) // note the lack of aggregator, we can add
+    val fetched: RDD[ByteBuffer] = new MiniFetchRDD(pipelined, part) // note the lack of aggregator, we can add
                                                                            // it with the other utility functions
-    fetched.mapWithUninitializedValue[SerializerInstance, (K, V)](
-        Serializer.getSerializer(serializer).newInstance(),
-        (ser, kv) => ser.deserialize[(K, V)](ByteBuffer.wrap(kv._2)))
+    lazy val ser = Serializer.getSerializer(serializer).newInstance() // ser is not serializable, if it's lazy, then
+                                                                      // the idea is that it'll get created on remote machine
+    fetched.flatMap(ser.deserializeMany(_).asInstanceOf[Iterator[(K, V)]])
+  }
+
+  // TODO(ryan): this should go somewhere else -> probably in the shuffle package
+  private def partitionIterator(iter: Iterator[(_, _)], part: Partitioner, serializer: Serializer): Iterator[(Int, ByteBuffer)] = {
+    val ser = Serializer.getSerializer(serializer).newInstance()
+    val streams = Array.tabulate[BufferableByteArrayOutputStream](part.numPartitions) {
+      unused => new BufferableByteArrayOutputStream
+    }
+    val outputs = Array.tabulate[SerializationStream](part.numPartitions)(i => ser.serializeStream(streams(i)))
+
+    for ((k, v) <- iter) {
+      outputs(part.getPartition(k)).writeObject((k, v))
+    }
+    streams.zipWithIndex.map{ case(stream, index) => (index, stream.toByteBuffer()) }.toIterator
+  }
+
+  class BufferableByteArrayOutputStream extends ByteArrayOutputStream {
+
+    /** Create a ByteBuffer backed by the array backing this ByteArrayOutputStream */
+    def toByteBuffer() = ByteBuffer.wrap(buf, 0, size())
+
   }
 
   /** A MiniFetchRDD with an aggregator */

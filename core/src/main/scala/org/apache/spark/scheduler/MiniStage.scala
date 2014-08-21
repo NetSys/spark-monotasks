@@ -1,10 +1,11 @@
 package org.apache.spark.scheduler
 
-import org.apache.spark.rdd.{RDDResourceTypes, MiniFetchRDD, RDD}
+import org.apache.spark.rdd.{RDD, RDDResourceTypes, MiniFetchRDD}
 import org.apache.spark._
 import scala.collection.mutable
 import scala.collection.mutable.HashMap
 import org.apache.spark.storage.{ShuffleBlockId, BlockId}
+import java.nio.ByteBuffer
 
 /**
  * A MiniStage allows tracking of dependencies between tasks in the same Stage.
@@ -164,7 +165,7 @@ class MiniFetchStage(stageId: Int, val warmer: MiniFetchWarmStage, dep: MiniFetc
  * A type of MiniStage holding ShuffleMapTasks (this MiniStage is always the last to be run in
  * a given Stage)
  */
-class ShuffleMapStage(stageId: Int, rdd: RDD[_], dependencies: Seq[MiniStage], shuffleDep: ShuffleDependency[_, _, _],
+class ShuffleMapStage(stageId: Int, rdd: RDD[(Int, ByteBuffer)], dependencies: Seq[MiniStage], shuffleDep: ShuffleDependency[_, _, _],
                       scheduler: DAGScheduler)
   extends OneToOneStage(stageId, rdd, dependencies, scheduler) {
 
@@ -259,7 +260,8 @@ object MiniStage {
 
   /** Create a mini-stage from a final RDD. The MiniStage should hold ShuffleMapTasks */
   def shuffleMapFromFinalRDD(rdd: RDD[_], stageId: Int, shuffleDependency: ShuffleDependency[_, _, _], scheduler: DAGScheduler) = {
-    new ShuffleMapStage(stageId, rdd, miniStages(stageId, rdd, scheduler), shuffleDependency, scheduler)
+    val realRDD = rdd.asInstanceOf[RDD[(Int, ByteBuffer)]]
+    new ShuffleMapStage(stageId, realRDD, miniStages(stageId, rdd, scheduler), shuffleDependency, scheduler)
   }
 
 }

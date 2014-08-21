@@ -51,12 +51,9 @@ private[spark] class MiniFetchWarmTask(
 
     metrics = Some(context.taskMetrics)
     try {
-      val ser = Serializer.getSerializer(dep.serializer)
-      val iterator = SparkEnv.get.blockManager.getLocalFromDisk(blockId, ser).get
-      // TODO(ryan): pretty sure things are getting unnecessarily serialized/deserialized
-      // TODO(ryan): NEED TO MODIFY BLOCKMANAGER TO LOOK FOR THE SHUFFLE BLOCK IN MEMORY (instead of disk)
+      val bytes = SparkEnv.get.blockManager.getLocalBytes(blockId).get
       val warmedId = WarmedShuffleBlockId.fromShuffle(blockId)
-      SparkEnv.get.blockManager.memoryStore.putIterator(warmedId, iterator, StorageLevel.MEMORY_ONLY_SER, false)
+      SparkEnv.get.blockManager.memoryStore.putBytesDirect(warmedId, bytes)
     } finally {
       context.executeOnCompleteCallbacks()
     }
