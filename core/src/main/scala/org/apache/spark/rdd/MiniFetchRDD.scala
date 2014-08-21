@@ -65,23 +65,18 @@ private[spark] class MiniFetchRDD[K, V, C](prev: RDD[_ <: Product2[K, V]], val p
  */
 object MiniFetchPipelinedRDD {
 
-  /** A MiniFetchRDD without an aggregator; it opaquely performs the serialization and deserialization
-    *
-    * TODO(ryan) In reality, it serializes a record at a time and the ShuffleWriter will again serialize those
-    * records -- will need to do a better ShuffleWriter that can write out raw bytes
-    */
+  /** A MiniFetchRDD without an aggregator; it opaquely performs the serialization and deserialization */
   def apply[K, V](prev: RDD[_ <: Product2[K, V]], part: Partitioner, serializer: Serializer): RDD[(K, V)] = {
 
-    val serialized: RDD[(Int, ByteBuffer)] = prev.mapPartitionsWithContext {
+    val serialized: RDD[(Int, ByteBuffer)] = prev.mapPartitionsWithContext { // step 1 serialize
         (context, iter) => partitionIterator(iter.asInstanceOf[Iterator[(K, V)]], part, serializer)
     }
 
-    val pipelined = serialized.pipeline()
-    val fetched: RDD[ByteBuffer] = new MiniFetchRDD(pipelined, part) // note the lack of aggregator, we can add
-                                                                           // it with the other utility functions
-    lazy val ser = Serializer.getSerializer(serializer).newInstance() // ser is not serializable, if it's lazy, then
-                                                                      // the idea is that it'll get created on remote machine
-    fetched.flatMap(ser.deserializeMany(_).asInstanceOf[Iterator[(K, V)]])
+    val pipelined = serialized.pipeline() // step 2 force computation
+    val fetched: RDD[ByteBuffer] = new MiniFetchRDD(pipelined, part) // step 3 will cause a write and then a shuffle
+    lazy val ser = Serializer.getSerializer(serializer).newInstance() // (ser is not serializable, if it's lazy, then
+                                                                      // the idea is that it'll get created on remote machine)
+    fetched.flatMap(ser.deserializeMany(_).asInstanceOf[Iterator[(K, V)]]) // step 4 deserialize
   }
 
   // TODO(ryan): this should go somewhere else -> probably in the shuffle package
@@ -112,26 +107,13 @@ object MiniFetchPipelinedRDD {
       aggregator: Aggregator[K, V, C],
       mapSideCombine: Boolean): RDD[(K, C)] = {
     if (mapSideCombine) {
-      aggregateWithCombine[K, V, C](prev, part, serializer, aggregator)
+      val combined = RDD.aggregate(prev.asInstanceOf[RDD[(K, V)]], aggregator) // aggregate map side
+      val fetched = MiniFetchPipelinedRDD(combined, part, serializer)
+      RDD.combine(fetched, aggregator) // combine the aggregated records
     } else {
-      aggregateWithoutCombine(prev, part, serializer, aggregator)
+      val fetched = MiniFetchPipelinedRDD(prev, part, serializer)
+      RDD.aggregate(fetched, aggregator) // after we've done the shuffle, we explicitly aggregate
     }
   }
 
-  private def aggregateWithoutCombine[K, V, C](prev: RDD[_ <: Product2[K, V]],
-       part: Partitioner,
-       serializer: Serializer,
-       aggregator: Aggregator[K, V, C]): RDD[(K, C)] = {
-    val fetched = MiniFetchPipelinedRDD(prev, part, serializer)
-    RDD.aggregate(fetched, aggregator)
-  }
-
-  private def aggregateWithCombine[K, V, C](prev: RDD[_ <: Product2[K, V]],
-      part: Partitioner,
-      serializer: Serializer,
-      aggregator: Aggregator[K, V, C]): RDD[(K, C)] = {
-     val combined = RDD.aggregate(prev.asInstanceOf[RDD[(K, V)]], aggregator)
-     val fetched = MiniFetchPipelinedRDD(combined, part, serializer)
-     RDD.combine(fetched, aggregator)
-  }
 }
