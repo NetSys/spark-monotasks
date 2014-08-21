@@ -28,11 +28,15 @@ import org.apache.spark.shuffle.ShuffleWriter
 import org.apache.spark.storage.{BlockManagerId, StorageLevel, ShuffleBlockId}
 
 /**
-* A ShuffleMapTask divides the elements of an RDD into multiple buckets (based on a partitioner
-* specified in the ShuffleDependency).
-*
-* See [[org.apache.spark.scheduler.Task]] for more information.
-*
+ * A ShuffleMapTask (SMT) divides the elements of an RDD into multiple buckets (based on a partitioner
+ * specified in the ShuffleDependency). Note that the unitask changes to SMT have made it so that
+ * SMT _must_ operate on an RDD of type RDD[(Int, ByteBuffer)] -- pairs of (reducePartitionId,
+ * serializedBytes) and that it requires that all bytes for one partition already be grouped together
+ * (i.e., reducePartitionId must be unique). SMT will then write out the serialized bytes to the shuffle
+ * block store directly.
+ *
+  * See [[org.apache.spark.scheduler.Task]] for more information.
+  *
  * @param stageId id of the stage this task belongs to
  * @param taskBinary broadcast version of of the RDD and the ShuffleDependency. Once deserialized,
  *                   the type should be (RDD[_], ShuffleDependency[_, _, _]).

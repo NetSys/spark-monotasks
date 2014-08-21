@@ -22,7 +22,14 @@ private[spark] class MiniFetchRDD[K, V, C](prev: RDD[_ <: Product2[K, V]], val p
   }
 
   override def getDependencies: Seq[Dependency[_]] = {
-    List(new MiniFetchDependency(prev, part, None, None, None, false)) // TODO(ryan) MiniFetchDependency needs a refactor
+    List(new MiniFetchDependency(prev, part, None, None, None, false)) // Note all of the 'None' args; it's because
+                                                                       // aggregation, etc. is done explicitly in the
+                                                                       // MiniFetchPipelinedRDD
+    // TODO(ryan) MiniFetchDependency needs a refactor. In reality, prev should be of type RDD[ByteBuffer], but
+    // there is a lot of code depending on ShuffleDependency that I can't deal with right now, so we make it
+    // of type RDD[(Int, ByteBuffer)]. That is, each record is of type (reducePartitionIndex, serializedBytes) but
+    // it would be cleaner to just make it serializedBytes and the partition index would just be the index of the bytes
+    // within the iterator
   }
 
   /**
@@ -69,7 +76,7 @@ object MiniFetchPipelinedRDD {
   def apply[K, V](prev: RDD[_ <: Product2[K, V]], part: Partitioner, serializer: Serializer): RDD[(K, V)] = {
 
     val serialized: RDD[(Int, ByteBuffer)] = prev.mapPartitionsWithContext { // step 1 serialize
-        (context, iter) => partitionIterator(iter.asInstanceOf[Iterator[(K, V)]], part, serializer)
+        (context, iter) => partitionIterator(iter.asInstanceOf[Iterator[(K, V)]], part, serializer).toIterator
     }
 
     val pipelined = serialized.pipeline() // step 2 force computation
@@ -80,7 +87,8 @@ object MiniFetchPipelinedRDD {
   }
 
   // TODO(ryan): this should go somewhere else -> probably in the shuffle package
-  private def partitionIterator(iter: Iterator[(_, _)], part: Partitioner, serializer: Serializer): Iterator[(Int, ByteBuffer)] = {
+  /** Partition and serialize an iterator */
+  private def partitionIterator(iter: Iterator[(_, _)], part: Partitioner, serializer: Serializer): Seq[(Int, ByteBuffer)] = {
     val ser = Serializer.getSerializer(serializer).newInstance()
     val streams = Array.tabulate[BufferableByteArrayOutputStream](part.numPartitions) {
       unused => new BufferableByteArrayOutputStream
@@ -90,7 +98,7 @@ object MiniFetchPipelinedRDD {
     for ((k, v) <- iter) {
       outputs(part.getPartition(k)).writeObject((k, v))
     }
-    streams.zipWithIndex.map{ case(stream, index) => (index, stream.toByteBuffer()) }.toIterator
+    streams.zipWithIndex.map{ case(stream, index) => (index, stream.toByteBuffer()) }
   }
 
   class BufferableByteArrayOutputStream extends ByteArrayOutputStream {
