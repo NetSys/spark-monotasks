@@ -876,7 +876,7 @@ class DAGScheduler(
   private[scheduler] def handleTaskCompletion(event: CompletionEvent) {
     val task = event.task
     val stageId = task.stageId
-    val taskType = Utils.getFormattedClassName(task)
+    val taskType = task.toString
 
     // The success case is dealt with separately below, since we need to compute accumulator
     // updates before posting.
