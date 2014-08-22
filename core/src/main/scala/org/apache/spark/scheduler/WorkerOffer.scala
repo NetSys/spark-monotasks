@@ -20,7 +20,7 @@ package org.apache.spark.scheduler
 import org.apache.spark.SparkEnv
 
 /**
- * Represents free resources available on an executor.
+ * Tracks resources on an executor.
  */
 private[spark]
 case class WorkerOffer(executorId: String, host: String, resources: Resources) {
@@ -62,7 +62,9 @@ object Resources {
   /** To ease backward compatibility, pretend that have cores, 10 concurrent transfers, 2 disks */
   def fromCores(cores: Int) = {
     val conf = SparkEnv.get.conf
-    Resources(conf.getInt("spark.resource.overrideCoreSlots", cores), conf.getInt("spark.resource.networkSlots", 10), conf.getInt("spark.resource.diskSlots", 2))
+    Resources(conf.getInt("spark.resource.overrideCoreSlots", cores),
+        conf.getInt("spark.resource.networkSlots", 10),
+        conf.getInt("spark.resource.diskSlots", 2))
   }
 
   def networkOnly = Resources(0, 1, 0)
