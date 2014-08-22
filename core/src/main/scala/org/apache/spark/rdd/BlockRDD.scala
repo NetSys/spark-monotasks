@@ -101,12 +101,7 @@ private class RawBlockRDD(sc: SparkContext, blockIds: Array[BlockId])
 
     val blockManager = SparkEnv.get.blockManager
     val blockId = split.asInstanceOf[BlockRDDPartition].blockId
-    blockManager.getLocalBytes(blockId) match {
-      case Some(bytes) =>
-        context.taskMetrics.inputMetrics.get.bytesRead = bytes.limit()
-        Iterator((blockId, bytes))
-      case None => throw new Exception("Could not compute split, block " + blockId + " not found")
-    }
+    Iterator((blockId, blockManager.getLocalBytesFromDisk(blockId)))
   }
 }
 

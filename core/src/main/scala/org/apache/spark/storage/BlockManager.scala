@@ -337,6 +337,15 @@ private[spark] class BlockManager(
     doGetLocal(blockId, asBlockResult = true).asInstanceOf[Option[BlockResult]]
   }
 
+  def getLocalBytesFromDisk(blockId: BlockId): ByteBuffer = {
+    diskStore.getBytes(blockId) match {
+      case Some(b) => b
+      case None =>
+        throw new BlockException(
+          blockId, s"Block $blockId not found on disk, though it should be")
+    }
+  }
+
   /**
    * Get block from the local block manager as serialized bytes.
    */
@@ -423,12 +432,7 @@ private[spark] class BlockManager(
         // Look for block on disk, potentially storing it back in memory if required
         if (level.useDisk) {
           logDebug(s"Getting block $blockId from disk")
-          val bytes: ByteBuffer = diskStore.getBytes(blockId) match {
-            case Some(b) => b
-            case None =>
-              throw new BlockException(
-                blockId, s"Block $blockId not found on disk, though it should be")
-          }
+          val bytes: ByteBuffer = getLocalBytesFromDisk(blockId)
           assert(0 == bytes.position())
 
           if (!level.useMemory) {
