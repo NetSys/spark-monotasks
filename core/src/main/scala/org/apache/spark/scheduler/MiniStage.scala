@@ -108,8 +108,7 @@ class MiniFetchWarmStage(
     val ids = outputRDD.shuffleBlockIdsByPartition.values.flatten
     ids.map { id =>
       val status = statuses(id.mapId)
-      val binary = scheduler.getBinary((id, dep))
-      val task = new MiniFetchWarmTask(stageId, binary, id, status.location)
+      val task = new MiniFetchWarmTask(stageId, id, status.location)
       (id, task)
     }.toMap
   }
@@ -147,7 +146,7 @@ class MiniFetchStage(stageId: Int, val warmer: MiniFetchWarmStage, dep: MiniFetc
 
   private def taskFromShuffleBlock(id: ShuffleBlockId): Task[_] = {
     val status = warmer.statuses(id.mapId)
-    new MiniFetchTask(stageId, scheduler.getBinary(id, status.location, status.compressedSizes(id.reduceId), dep), id)
+    new MiniFetchTask(stageId, id, status.location, status.compressedSizes(id.reduceId))
   }
 
   override def tasks: Seq[Task[_]] = tasksByPartition.values.flatten.toSeq

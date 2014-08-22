@@ -33,11 +33,9 @@ import org.apache.spark.serializer.Serializer
  * written by a previous ShuffleMapTask
  *
  * @param stageId id of the stage this task belongs to
- * @param taskBinary broadcast version of of the RDD
  */
 private[spark] class MiniFetchWarmTask(
     stageId: Int,
-    taskBinary: Broadcast[Array[Byte]],
     val shuffleBlockId: ShuffleBlockId,
     val blockManagerId: BlockManagerId)
   extends Task[Unit](stageId, -1) with Logging {
@@ -45,14 +43,10 @@ private[spark] class MiniFetchWarmTask(
 
   override def runTask(context: TaskContext) {
     // Deserialize the RDD using the broadcast variable.
-    val ser = SparkEnv.get.closureSerializer.newInstance()
-    val (blockId, dep) = ser.deserialize[(ShuffleBlockId, ShuffleDependency[_, _, _])] (
-      ByteBuffer.wrap(taskBinary.value), Thread.currentThread.getContextClassLoader)
-
     metrics = Some(context.taskMetrics)
     try {
-      val bytes = SparkEnv.get.blockManager.diskStore.getBytesDirect(blockId)
-      val warmedId = WarmedShuffleBlockId.fromShuffle(blockId)
+      val bytes = SparkEnv.get.blockManager.diskStore.getBytesDirect(shuffleBlockId)
+      val warmedId = WarmedShuffleBlockId.fromShuffle(shuffleBlockId)
       SparkEnv.get.blockManager.memoryStore.putBytesDirect(warmedId, bytes)
     } finally {
       context.executeOnCompleteCallbacks()

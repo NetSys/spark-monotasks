@@ -25,10 +25,12 @@ import org.apache.spark._
 import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.rdd.{BlockRDD, RDD}
 import org.apache.spark.shuffle.ShuffleWriter
-import org.apache.spark.storage.{WarmedShuffleBlockId, ShuffleBlockId, BlockManagerId, StorageLevel}
+import org.apache.spark.storage._
 import java.io.Externalizable
 import com.sun.istack.internal.NotNull
 import org.apache.spark.serializer.Serializer
+import org.apache.spark.storage.ShuffleBlockId
+import scala.Some
 
 /**
  * A MiniFetchTasks fetches _one_ partition of a ShuffleMapTask output for one
@@ -36,24 +38,19 @@ import org.apache.spark.serializer.Serializer
  * that fetches _all_ parts of ShuffleMapTasks for one downstream RDD partition.
  *
  * @param stageId id of the stage this task belongs to
- * @param taskBinary broadcast version of of the RDD
  */
 private[spark] class MiniFetchTask(
     stageId: Int,
-    taskBinary: Broadcast[Array[Byte]],
-    val shuffleBlockId: ShuffleBlockId)
+    val shuffleBlockId: ShuffleBlockId,
+    val manager: BlockManagerId,
+    val compSize: Byte)
   extends Task[Unit](stageId, -1) with Logging {
   // TODO(ryan) partition doesn't make sense, using -1 for now ...
 
   override def runTask(context: TaskContext) {
-    // Deserialize the RDD using the broadcast variable.
-    val ser = SparkEnv.get.closureSerializer.newInstance()
-    val (blockId, manager, compSize, dep) = ser.deserialize[(ShuffleBlockId, BlockManagerId, Byte, MiniFetchDependency[_, _, _])] (
-      ByteBuffer.wrap(taskBinary.value), Thread.currentThread.getContextClassLoader)
-
     metrics = Some(context.taskMetrics)
     try {
-      val warmedId = WarmedShuffleBlockId.fromShuffle(blockId)
+      val warmedId = WarmedShuffleBlockId.fromShuffle(shuffleBlockId)
       val length: Long = MapOutputTracker.decompressSize(compSize)
       val bytes = SparkEnv.get.blockManager.getSingle(manager, warmedId, length).get
       SparkEnv.get.blockManager.memoryStore.putBytesDirect(warmedId, bytes)
