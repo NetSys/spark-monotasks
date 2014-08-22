@@ -51,7 +51,7 @@ private[spark] class MiniFetchWarmTask(
 
     metrics = Some(context.taskMetrics)
     try {
-      val bytes = SparkEnv.get.blockManager.getLocalBytes(blockId).get
+      val bytes = SparkEnv.get.blockManager.diskStore.getBytesDirect(blockId)
       val warmedId = WarmedShuffleBlockId.fromShuffle(blockId)
       SparkEnv.get.blockManager.memoryStore.putBytesDirect(warmedId, bytes)
     } finally {
