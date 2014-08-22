@@ -24,6 +24,7 @@ import java.nio.channels.FileChannel.MapMode
 import org.apache.spark.Logging
 import org.apache.spark.serializer.Serializer
 import org.apache.spark.util.Utils
+import java.nio.channels.FileChannel
 
 /**
  * Stores BlockManager blocks on disk.
@@ -89,6 +90,23 @@ private[spark] class DiskStore(blockManager: BlockManager, diskManager: DiskBloc
     }
   }
 
+  def getBytesDirect(blockId: BlockId): ByteBuffer = {
+    val segment = diskManager.getBlockLocation(blockId)
+    val channel = new RandomAccessFile(segment.file, "r").getChannel
+    try {
+      getBytesDirect(segment, channel)
+    } finally {
+      channel.close()
+    }
+  }
+
+  private def getBytesDirect(segment: FileSegment, channel: FileChannel): ByteBuffer = {
+    val buf = ByteBuffer.allocate(segment.length.toInt)
+    channel.read(buf, segment.offset)
+    buf.flip()
+    buf
+  }
+
   override def getBytes(blockId: BlockId): Option[ByteBuffer] = {
     val segment = diskManager.getBlockLocation(blockId)
     val channel = new RandomAccessFile(segment.file, "r").getChannel
@@ -96,10 +114,7 @@ private[spark] class DiskStore(blockManager: BlockManager, diskManager: DiskBloc
     try {
       // For small files, directly read rather than memory map
       if (segment.length < minMemoryMapBytes) {
-        val buf = ByteBuffer.allocate(segment.length.toInt)
-        channel.read(buf, segment.offset)
-        buf.flip()
-        Some(buf)
+        Some(getBytesDirect(segment, channel))
       } else {
         Some(channel.map(MapMode.READ_ONLY, segment.offset, segment.length))
       }
