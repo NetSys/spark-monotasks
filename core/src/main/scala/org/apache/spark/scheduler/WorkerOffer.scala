@@ -62,7 +62,7 @@ object Resources {
   /** To ease backward compatibility, pretend that have cores, 10 concurrent transfers, 2 disks */
   def fromCores(cores: Int) = {
     val conf = SparkEnv.get.conf
-    Resources(conf.getInt("overrideCoreSlots", cores), conf.getInt("networkSlots", 10), conf.getInt("diskSlots", 2))
+    Resources(conf.getInt("spark.resource.overrideCoreSlots", cores), conf.getInt("spark.resource.networkSlots", 10), conf.getInt("spark.resource.diskSlots", 2))
   }
 
   def networkOnly = Resources(0, 1, 0)
