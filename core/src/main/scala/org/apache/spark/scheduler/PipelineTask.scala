@@ -64,7 +64,7 @@ private[spark] class PipelineTask(
     try {
       val store = SparkEnv.get.blockManager.memoryStore
       val blockId = PipelinedBlockId(rdd.id, partition.index)
-      store.putIterator(blockId, rdd.compute(partition, context), StorageLevel.MEMORY_ONLY, false) // cache the partition (hopefully :)
+      store.putArray(blockId, rdd.compute(partition, context).toArray, StorageLevel.MEMORY_ONLY, false) // TODO(ryan) handle error if can't unroll?
       new PipelineStatus()
     } finally {
       rdd.free(partition)
