@@ -20,7 +20,7 @@ package org.apache.spark.rdd
 import scala.reflect.ClassTag
 
 import org.apache.spark.{SparkEnv, PipelineDependency, Partition, TaskContext}
-import org.apache.spark.storage.{RDDBlockId, StorageLevel}
+import org.apache.spark.storage.{PipelinedBlockId, RDDBlockId, StorageLevel}
 
 /**
  * A PipelinedRDD represents a soft-barrier between the parent RDD and the
@@ -39,7 +39,7 @@ private[spark] class PipelinedRDD[T: ClassTag](
 
   override val partitioner = prev.partitioner    // Since pipeline is a logical identity function
 
-  private def blockId(partition: Partition) = RDDBlockId(prev.id, partition.index)
+  private def blockId(partition: Partition) = PipelinedBlockId(prev.id, partition.index)
 
   override def compute(split: Partition, context: TaskContext) = {
     SparkEnv.get.blockManager.memoryStore.getValues(blockId(split)).get.asInstanceOf[Iterator[T]]

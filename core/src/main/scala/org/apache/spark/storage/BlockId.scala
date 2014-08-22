@@ -54,6 +54,10 @@ case class RDDBlockId(rddId: Int, splitIndex: Int) extends BlockId {
   def name = "rdd_" + rddId + "_" + splitIndex
 }
 
+case class PipelinedBlockId(rddId: Int, splitIndex: Int) extends BlockId {
+  def name = "pipelined_" + rddId + "_" + splitIndex
+}
+
 @DeveloperApi
 case class ShuffleBlockId(shuffleId: Int, mapId: Int, reduceId: Int) extends BlockId {
   def name = "shuffle_" + shuffleId + "_" + mapId + "_" + reduceId
@@ -102,6 +106,7 @@ private[spark] case class TestBlockId(id: String) extends BlockId {
 @DeveloperApi
 object BlockId {
   val RDD = "rdd_([0-9]+)_([0-9]+)".r
+  val PIPELINED = "piplined_([0-9]+)_([0-9]+)".r
   val SHUFFLE = "shuffle_([0-9]+)_([0-9]+)_([0-9]+)".r
   val WARMED_SHUFFLE = "warmedshuffle_([0-9]+)_([0-9]+)_([0-9]+)".r
   val SHUFFLE_INDEX = "shuffle_([0-9]+)_([0-9]+)_([0-9]+).index".r
@@ -114,6 +119,8 @@ object BlockId {
   def apply(id: String) = id match {
     case RDD(rddId, splitIndex) =>
       RDDBlockId(rddId.toInt, splitIndex.toInt)
+    case PIPELINED(rddId, splitIndex) =>
+      PipelinedBlockId(rddId.toInt, splitIndex.toInt)
     case SHUFFLE(shuffleId, mapId, reduceId) =>
       ShuffleBlockId(shuffleId.toInt, mapId.toInt, reduceId.toInt)
     case WARMED_SHUFFLE(shuffleId, mapId, reduceId) =>

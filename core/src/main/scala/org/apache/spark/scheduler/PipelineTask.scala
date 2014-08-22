@@ -25,7 +25,7 @@ import org.apache.spark._
 import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.rdd.{BlockRDD, RDD}
 import org.apache.spark.shuffle.ShuffleWriter
-import org.apache.spark.storage.{RDDBlockId, BlockManagerId, StorageLevel}
+import org.apache.spark.storage.{PipelinedBlockId, RDDBlockId, BlockManagerId, StorageLevel}
 import java.io.Externalizable
 import com.sun.istack.internal.NotNull
 
@@ -63,7 +63,7 @@ private[spark] class PipelineTask(
     metrics = Some(context.taskMetrics)
     try {
       val store = SparkEnv.get.blockManager.memoryStore
-      val blockId = RDDBlockId(rdd.id, partition.index)
+      val blockId = PipelinedBlockId(rdd.id, partition.index)
       store.putIterator(blockId, rdd.compute(partition, context), StorageLevel.MEMORY_ONLY, false) // cache the partition (hopefully :)
       new PipelineStatus()
     } finally {
