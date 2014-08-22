@@ -1386,6 +1386,8 @@ abstract class RDD[T: ClassTag](
       iter.map(fn(value, _))
     }
   }
+
+  def saveAsBlockRDD(): RDD[T] = PipelinedBlockRDD.basedOn(this)
 }
 
 object RDD {
