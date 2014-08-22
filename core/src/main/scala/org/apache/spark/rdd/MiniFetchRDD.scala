@@ -52,7 +52,7 @@ private[spark] class MiniFetchRDD[K, V, C](prev: RDD[_ <: Product2[K, V]], val p
     }.toMap
   }
 
-  override def resource = RDDResourceTypes.None
+  override def resource = RDDResource.None
 
   override def free(partition: Partition) {
     for (id <- shuffleBlockIdsByPartition(partition.index)) {

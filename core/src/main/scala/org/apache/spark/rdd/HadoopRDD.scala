@@ -255,7 +255,7 @@ class HadoopRDD[K, V](
 
   def getConf: Configuration = getJobConf()
 
-  override def resource = RDDResourceTypes.Read
+  override def resource = RDDResource.Read
 }
 
 private[spark] object HadoopRDD {

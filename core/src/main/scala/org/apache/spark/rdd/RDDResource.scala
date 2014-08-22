@@ -7,7 +7,7 @@ package org.apache.spark.rdd
  * Read uses disk if at a preferred location, else network
  * None uses nothing
  */
-object RDDResourceTypes extends Enumeration {
+object RDDResource extends Enumeration {
   type RDDResourceTypes = Value
   val Compute, Read, None = Value
 }

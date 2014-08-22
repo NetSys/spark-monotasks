@@ -44,7 +44,7 @@ import org.apache.spark.storage.StorageLevel
 import org.apache.spark.util.{BoundedPriorityQueue, Utils}
 import org.apache.spark.util.collection.OpenHashMap
 import org.apache.spark.util.random.{BernoulliSampler, PoissonSampler, SamplingUtils}
-import org.apache.spark.rdd.RDDResourceTypes.RDDResourceTypes
+import org.apache.spark.rdd.RDDResource.RDDResourceTypes
 
 /**
  * A Resilient Distributed Dataset (RDD), the basic abstraction in Spark. Represents an immutable,
@@ -1361,7 +1361,7 @@ abstract class RDD[T: ClassTag](
   def pipeline(): PipelinedRDD[T] = new PipelinedRDD[T](this)
 
   /** The operation required to compute this RDD */
-  def resource: RDDResourceTypes = RDDResourceTypes.Compute
+  def resource: RDDResourceTypes = RDDResource.Compute
 
   /**
    * Free ephemeral resources that were involved in _creating_ a given partition

@@ -1,6 +1,6 @@
 package org.apache.spark.scheduler
 
-import org.apache.spark.rdd.{PipelinedRDD, RDD, RDDResourceTypes, MiniFetchRDD}
+import org.apache.spark.rdd.{PipelinedRDD, RDD, RDDResource, MiniFetchRDD}
 import org.apache.spark._
 import scala.collection.mutable
 import scala.collection.mutable.HashMap
@@ -76,8 +76,8 @@ class PipelineStage(stageId: Int, rdd: RDD[_], dependencies: Seq[MiniStage], sch
   }
 
   override def resourceRequirements: Resources = rdd.resource match {
-    case RDDResourceTypes.Compute => Resources.computeOnly
-    case RDDResourceTypes.Read =>
+    case RDDResource.Compute => Resources.computeOnly
+    case RDDResource.Read =>
       assert(dependencies.isEmpty) // if it's a read RDD, then this should be the first task and have no deps
       Resources.diskOnly
     case _ => throw new IllegalArgumentException
@@ -89,8 +89,8 @@ class PipelineStage(stageId: Int, rdd: RDD[_], dependencies: Seq[MiniStage], sch
 
   private def isLocalRead(partitionId: Int, host: String) = {
     lazy val preferredLocations = rdd.preferredLocations(rdd.partitions(partitionId))
-    assert(rdd.resource != RDDResourceTypes.Read || !preferredLocations.isEmpty) // read implies has a preferred loc
-    rdd.resource != RDDResourceTypes.Read || preferredLocations.contains(host)
+    assert(rdd.resource != RDDResource.Read || !preferredLocations.isEmpty) // read implies has a preferred loc
+    rdd.resource != RDDResource.Read || preferredLocations.contains(host)
   }
 
 }

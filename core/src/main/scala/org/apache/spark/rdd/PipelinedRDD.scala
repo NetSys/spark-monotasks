@@ -45,7 +45,7 @@ private[spark] class PipelinedRDD[T: ClassTag](
     SparkEnv.get.blockManager.memoryStore.getValues(blockId(split)).get.asInstanceOf[Iterator[T]]
   }
 
-  override def resource = RDDResourceTypes.None
+  override def resource = RDDResource.None
 
   override def free(partition: Partition) {
     SparkEnv.get.blockManager.memoryStore.remove(blockId(partition))
