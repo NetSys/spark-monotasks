@@ -20,9 +20,10 @@ package org.apache.spark.rdd
 import scala.reflect.ClassTag
 
 import org.apache.spark._
-import org.apache.spark.storage.{BlockId, BlockManager}
+import org.apache.spark.storage.{RDDBlockId, StorageLevel, BlockId, BlockManager}
 import scala.Some
 import java.nio.ByteBuffer
+import org.apache.spark.executor.{DataReadMethod, InputMetrics}
 
 private[spark] class BlockRDDPartition(val blockId: BlockId, idx: Int) extends Partition {
   val index = idx
@@ -95,10 +96,15 @@ private class RawBlockRDD(sc: SparkContext, blockIds: Array[BlockId])
 
   override def compute(split: Partition, context: TaskContext): Iterator[(BlockId, ByteBuffer)] = {
     assertValid()
+    val inputMetrics = new InputMetrics(DataReadMethod.Disk)
+    context.taskMetrics.inputMetrics = Some(inputMetrics)
+
     val blockManager = SparkEnv.get.blockManager
     val blockId = split.asInstanceOf[BlockRDDPartition].blockId
     blockManager.getLocalBytes(blockId) match {
-      case Some(bytes) => Iterator((blockId, bytes))
+      case Some(bytes) =>
+        context.taskMetrics.inputMetrics.get.bytesRead = bytes.limit()
+        Iterator((blockId, bytes))
       case None => throw new Exception("Could not compute split, block " + blockId + " not found")
     }
   }
@@ -109,9 +115,16 @@ private class RawBlockRDD(sc: SparkContext, blockIds: Array[BlockId])
 object PipelinedBlockRDD {
 
   def apply[T: ClassTag](sc: SparkContext, blockIds: Array[BlockId]): RDD[T] = {
-    val manager = SparkEnv.get.blockManager
+    lazy val manager = SparkEnv.get.blockManager // lazy so that is serializable
     new RawBlockRDD(sc, blockIds).pipeline().flatMap {
       case(blockId, bytes) => manager.dataDeserialize(blockId, bytes).asInstanceOf[Iterator[T]]
     }
+  }
+
+  def basedOn[T: ClassTag](rdd: RDD[T]): RDD[T] = {
+    rdd.persist(StorageLevel.DISK_ONLY)
+    val blockIds: Array[BlockId] = rdd.partitions.map(part => RDDBlockId(rdd.id, part.index))
+    rdd.count()
+    PipelinedBlockRDD(rdd.sparkContext, blockIds)
   }
 }
