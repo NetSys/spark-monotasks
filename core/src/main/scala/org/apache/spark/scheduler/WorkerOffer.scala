@@ -25,8 +25,8 @@ import org.apache.spark.SparkEnv
 private[spark]
 case class WorkerOffer(executorId: String, host: String, resources: Resources) {
 
+  @deprecated("Offer should ideally include disk and network slots")
   def this(executorId: String, host: String, cores: Int) {
-    // TODO(ryan): will want to warn/depricate this to make sure we don't miss its usages
     this(executorId, host, Resources.fromCores(cores))
   }
 
