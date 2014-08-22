@@ -17,6 +17,8 @@
 
 package org.apache.spark.scheduler
 
+import org.apache.spark.SparkEnv
+
 /**
  * Represents free resources available on an executor.
  */
@@ -58,7 +60,10 @@ case class Resources(cores: Int, networkSlots: Int, disks: Int) {
 object Resources {
 
   /** To ease backward compatibility, pretend that have cores, 10 concurrent transfers, 2 disks */
-  def fromCores(cores: Int) = Resources(cores, 10, 2)
+  def fromCores(cores: Int) = {
+    val conf = SparkEnv.get.conf
+    Resources(conf.getInt("overrideCoreSlots", cores), conf.getInt("networkSlots", 10), conf.getInt("diskSlots", 2))
+  }
 
   def networkOnly = Resources(0, 1, 0)
 
