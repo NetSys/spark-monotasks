@@ -1,11 +1,12 @@
 package org.apache.spark.scheduler
 
-import org.apache.spark.rdd.{RDD, RDDResourceTypes, MiniFetchRDD}
+import org.apache.spark.rdd.{PipelinedRDD, RDD, RDDResourceTypes, MiniFetchRDD}
 import org.apache.spark._
 import scala.collection.mutable
 import scala.collection.mutable.HashMap
 import org.apache.spark.storage.{ShuffleBlockId, BlockId}
 import java.nio.ByteBuffer
+import scala.reflect.ClassTag
 
 /**
  * A MiniStage allows tracking of dependencies between tasks in the same Stage.
@@ -252,10 +253,16 @@ object MiniStage {
 
 
   /** Create a mini-stage from a final RDD. The MiniStage should hold ResultTasks */
-  def resultFromFinalRDD(rdd: RDD[_], stageId: Int,
-                        func: (TaskContext, scala.Iterator[_]) => (_$1) forSome {type _$1},
+  def resultFromFinalRDD[U: ClassTag](rdd: RDD[_], stageId: Int,
+                        func: (TaskContext, Iterator[_]) => U,
                           job: ActiveJob, scheduler: DAGScheduler): MiniStage = {
-    new ResultStage(stageId, rdd, miniStages(stageId, rdd, scheduler), func, job, scheduler)
+    val mapped = rdd.mapPartitionsWithContext { case(context, iter) =>
+      Iterator(func(context, iter)) // apply the function explicitly and collect it as an iter of 1 value
+    }
+    val pipelined = mapped.pipeline() // pipeline the application of the function
+    def newFunc(context: TaskContext, iter: Iterator[_]): U =
+      iter.asInstanceOf[Iterator[U]].toArray.head // just get the single value of the above iter
+    new ResultStage(stageId, pipelined, miniStages(stageId, pipelined, scheduler), newFunc, job, scheduler)
   }
 
   /** Create a mini-stage from a final RDD. The MiniStage should hold ShuffleMapTasks */
