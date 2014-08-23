@@ -815,7 +815,8 @@ class DAGScheduler(
         if (stage.isShuffleMap) {
           MiniStage.shuffleMapFromFinalRDD(stage.rdd, stage.id, stage.shuffleDep.get, this)
         } else {
-          MiniStage.resultFromFinalRDD(stage.rdd, stage.id, stage.resultOfJob.get.func, stage.resultOfJob.get, this)
+          val result = stage.resultOfJob.get
+          MiniStage.resultFromFinalRDD(stage.rdd, stage.id, result.func, result, this)
         }
     } catch {
       // In the case of a failure during serialization, abort the stage.
@@ -855,9 +856,9 @@ class DAGScheduler(
       logInfo("Submitting " + tasks.size + " missing tasks from " + stage + " (" + stage.rdd + ")")
       stage.pendingTasks ++= tasks
       logDebug("New pending tasks: " + stage.pendingTasks)
-      taskScheduler.submitTasks(
-        TaskSet.setWithMiniStages(tasks.toArray, depMap, stage.id, stage.newAttemptId(), stage.jobId, properties)
-      )
+      val taskSet = TaskSet.setWithMiniStages(
+        tasks.toArray, depMap, stage.id, stage.newAttemptId(), stage.jobId, properties)
+      taskScheduler.submitTasks(taskSet)
       stage.info.submissionTime = Some(clock.getTime())
     } else {
       // Because we posted SparkListenerStageSubmitted earlier, we should post

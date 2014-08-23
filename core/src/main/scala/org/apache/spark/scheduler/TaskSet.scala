@@ -51,5 +51,4 @@ private[spark] object TaskSet {
     s.miniStageByTask = depMap.toMap
     s
   }
-
 }

@@ -1,3 +1,20 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package org.apache.spark.scheduler
 
 import org.apache.spark.rdd.{PipelinedRDD, RDD, RDDResource, MiniFetchRDD}
@@ -176,9 +193,11 @@ class MiniFetchStage(
 
   override def tasks: Seq[Task[_]] = tasksByPartition.values.flatten.toSeq
 
-  override def dependenciesOfChild(child: Task[_]): Seq[Task[_]] = tasksByPartition(child.partitionId)
+  override def dependenciesOfChild(child: Task[_]) = tasksByPartition(child.partitionId)
 
-  override def cotasks(task: Task[_]) = tasksByPartition(task.asInstanceOf[MiniFetchTask].shuffleBlockId.reduceId)
+  override def cotasks(task: Task[_]) = {
+    tasksByPartition(task.asInstanceOf[MiniFetchTask].shuffleBlockId.reduceId)
+  }
   // TODO(ryan): is there a way around the cast above?
 
   override def resourceRequirements: Resources = Resources.networkOnly
@@ -229,9 +248,9 @@ class ResultStage(stageId: Int, rdd: RDD[_], dependencies: Seq[MiniStage],
 }
 
 
-object MiniStage {
+private[spark] object MiniStage {
 
-  private[spark] def miniStages(stageId: Int, rdd: RDD[_], scheduler: DAGScheduler): Seq[MiniStage] = {
+  def miniStages(stageId: Int, rdd: RDD[_], scheduler: DAGScheduler): Seq[MiniStage] = {
     // TODO(ryan): cache results because it's a DAG and not nec a tree ?
     // TODO(ryan) actually maybe it has to be a tree AND it actually is just a list
     rdd.dependencies flatMap {
@@ -303,7 +322,8 @@ object MiniStage {
       shuffleDependency: ShuffleDependency[_, _, _],
       scheduler: DAGScheduler) = {
     val realRDD = rdd.asInstanceOf[RDD[(Int, ByteBuffer)]]
-    new ShuffleMapStage(stageId, realRDD, miniStages(stageId, rdd, scheduler), shuffleDependency, scheduler)
+    val dependencies = miniStages(stageId, rdd, scheduler)
+    new ShuffleMapStage(stageId, realRDD, dependencies, shuffleDependency, scheduler)
   }
 
 }

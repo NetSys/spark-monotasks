@@ -75,7 +75,7 @@ private[spark] class ShuffleMapTask(
         store.putBytes(outBlockId, bytes, StorageLevel.DISK_ONLY)
         assert(compressedSizes(outPartitionId) == 0) // only write 1 output per output partition
         compressedSizes(outPartitionId) = MapOutputTracker.compressSize(bytes.limit())
-          //TODO(ryan): not sure on limit() validity
+          // TODO(ryan): not sure on limit() validity
       }
       new MapStatus(SparkEnv.get.blockManager.blockManagerId, compressedSizes)
     } finally {

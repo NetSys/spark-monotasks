@@ -355,23 +355,27 @@ private[spark] class TaskSetManager(
     // and there should be a (likely painful) way to forgo a lot of the computation
     val sufficientResources = miniStageByIndex(taskIndex).canRun(tasks(taskIndex), offer)
 
-    sufficientResources && satisfiedDependencies(offer, taskIndex) && onSameMachineAsCotasks(offer, taskIndex)
+    sufficientResources &&
+      satisfiedDependencies(offer, taskIndex) &&
+      onSameMachineAsCotasks(offer, taskIndex)
   }
 
   private def satisfiedDependencies(offer: WorkerOffer, taskIndex: Int) = {
       dependenciesByIndex(taskIndex).forall {
       index => successful.contains(index) &&
-        (!miniStageByIndex(taskIndex).requiresColocationWithParent || successful(index).host == offer.host)
+        (!miniStageByIndex(taskIndex).requiresColocationWithParent ||
+          successful(index).host == offer.host)
       // requiresColocation ==> location of success is this machine
     }
   }
 
   private def onSameMachineAsCotasks(offer: WorkerOffer, taskIndex: Int) = {
     val cotasks = cotasksByIndex(taskIndex)
-    assert(allSameMachine(cotasks), "cotask machines : " + cotasks.flatMap(successful.get(_).map(_.host)))
+    assert(allSameMachine(cotasks))
     cotasks.forall {
       index => (!successful.contains(index) || successful(index).host == offer.host) &&
-        taskAttempts(index).headOption.forall(_.host == offer.host) // edge case: task launched, but not finished
+        taskAttempts(index).headOption.forall(_.host == offer.host) // edge case: task launched,
+                                                                    // but not finished
       // TODO(ryan): what if there are multiple attempts for the task on different machines?
     }
   }
@@ -406,49 +410,13 @@ private[spark] class TaskSetManager(
   private def findTask(offer: WorkerOffer, locality: TaskLocality.Value)
     : Option[(Int, TaskLocality.Value, Boolean)] =
   {
-    val indices = readyTasksIndices(offer).filter(index => copiesRunning(index) == 0 && !successful.contains(index))
+    val indices = readyTasksIndices(offer).filter(index => copiesRunning(index) == 0
+      && !successful.contains(index))
     if (indices.length == 0) {
       None
     } else {
       Some(indices.head, TaskLocality.PROCESS_LOCAL, false)
     }
-
-    /*
-    for (index <- findTaskFromList(execId, getPendingTasksForExecutor(execId))) {
-      return Some((index, TaskLocality.PROCESS_LOCAL, false))
-    }
-
-    if (TaskLocality.isAllowed(locality, TaskLocality.NODE_LOCAL)) {
-      for (index <- findTaskFromList(execId, getPendingTasksForHost(host))) {
-        return Some((index, TaskLocality.NODE_LOCAL, false))
-      }
-    }
-
-    if (TaskLocality.isAllowed(locality, TaskLocality.RACK_LOCAL)) {
-      for {
-        rack <- sched.getRackForHost(host)
-        index <- findTaskFromList(execId, getPendingTasksForRack(rack))
-      } {
-        return Some((index, TaskLocality.RACK_LOCAL, false))
-      }
-    }
-
-    // Look for no-pref tasks after rack-local tasks since they can run anywhere.
-    for (index <- findTaskFromList(execId, pendingTasksWithNoPrefs)) {
-      return Some((index, TaskLocality.PROCESS_LOCAL, false))
-    }
-
-    if (TaskLocality.isAllowed(locality, TaskLocality.ANY)) {
-      for (index <- findTaskFromList(execId, allPendingTasks)) {
-        return Some((index, TaskLocality.ANY, false))
-      }
-    }
-
-    // Finally, if all else has failed, find a speculative task
-    findSpeculativeTask(execId, host, locality).map { case (taskIndex, allowedLocality) =>
-      (taskIndex, allowedLocality, true)
-    }
-    */
   }
 
   /**
