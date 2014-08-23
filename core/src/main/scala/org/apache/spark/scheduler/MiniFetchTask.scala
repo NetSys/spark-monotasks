@@ -17,20 +17,11 @@
 
 package org.apache.spark.scheduler
 
-import java.nio.ByteBuffer
-
 import scala.language.existentials
+import scala.Some
 
 import org.apache.spark._
-import org.apache.spark.broadcast.Broadcast
-import org.apache.spark.rdd.{BlockRDD, RDD}
-import org.apache.spark.shuffle.ShuffleWriter
-import org.apache.spark.storage._
-import java.io.Externalizable
-import com.sun.istack.internal.NotNull
-import org.apache.spark.serializer.Serializer
-import org.apache.spark.storage.ShuffleBlockId
-import scala.Some
+import org.apache.spark.storage.{BlockManagerId, ShuffleBlockId, WarmedShuffleBlockId}
 
 /**
  * A MiniFetchTasks fetches _one_ partition of a ShuffleMapTask output for one

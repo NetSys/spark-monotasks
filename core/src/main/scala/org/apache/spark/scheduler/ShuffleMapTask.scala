@@ -24,8 +24,7 @@ import scala.language.existentials
 import org.apache.spark._
 import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.rdd.RDD
-import org.apache.spark.shuffle.ShuffleWriter
-import org.apache.spark.storage.{BlockManagerId, StorageLevel, ShuffleBlockId}
+import org.apache.spark.storage.{ShuffleBlockId, StorageLevel}
 
 /**
  * A ShuffleMapTask (SMT) divides the elements of an RDD into multiple buckets (based on a

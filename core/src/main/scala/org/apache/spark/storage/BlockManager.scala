@@ -33,8 +33,8 @@ import org.apache.spark.executor.{DataReadMethod, InputMetrics}
 import org.apache.spark.io.CompressionCodec
 import org.apache.spark.network._
 import org.apache.spark.serializer.Serializer
-import org.apache.spark.util._
 import org.apache.spark.storage.BlockFetcherIterator.FetchRequest
+import org.apache.spark.util._
 
 private[spark] sealed trait BlockValues
 private[spark] case class ByteBufferValues(buffer: ByteBuffer) extends BlockValues

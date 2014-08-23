@@ -17,13 +17,15 @@
 
 package org.apache.spark.scheduler
 
-import org.apache.spark.rdd.{PipelinedRDD, RDD, RDDResource, MiniFetchRDD}
-import org.apache.spark._
+import java.nio.ByteBuffer
+
+import scala.reflect.ClassTag
 import scala.collection.mutable
 import scala.collection.mutable.HashMap
+
+import org.apache.spark._
+import org.apache.spark.rdd.{MiniFetchRDD, RDD, RDDResource}
 import org.apache.spark.storage.{ShuffleBlockId, BlockId}
-import java.nio.ByteBuffer
-import scala.reflect.ClassTag
 
 /**
  * A MiniStage allows tracking of dependencies between tasks in the same Stage.

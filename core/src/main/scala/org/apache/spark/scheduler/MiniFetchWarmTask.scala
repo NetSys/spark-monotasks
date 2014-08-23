@@ -17,16 +17,10 @@
 
 package org.apache.spark.scheduler
 
-import java.nio.ByteBuffer
-
 import scala.language.existentials
 
 import org.apache.spark._
-import org.apache.spark.broadcast.Broadcast
-import org.apache.spark.rdd.RDD
-import org.apache.spark.storage.{WarmedShuffleBlockId, ShuffleBlockId, BlockManagerId, StorageLevel}
-import java.io.Externalizable
-import org.apache.spark.serializer.Serializer
+import org.apache.spark.storage.{BlockManagerId, ShuffleBlockId, WarmedShuffleBlockId}
 
 /**
  * A MiniFetchWarmTask warms (brings into memory) part of a partition

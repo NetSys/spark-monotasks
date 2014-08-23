@@ -19,12 +19,12 @@ package org.apache.spark.storage
 
 import java.io.{FileOutputStream, RandomAccessFile}
 import java.nio.ByteBuffer
+import java.nio.channels.FileChannel
 import java.nio.channels.FileChannel.MapMode
 
 import org.apache.spark.Logging
 import org.apache.spark.serializer.Serializer
 import org.apache.spark.util.Utils
-import java.nio.channels.FileChannel
 
 /**
  * Stores BlockManager blocks on disk.

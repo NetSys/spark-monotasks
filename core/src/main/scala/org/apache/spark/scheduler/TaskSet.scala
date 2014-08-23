@@ -18,8 +18,8 @@
 package org.apache.spark.scheduler
 
 import java.util.Properties
+
 import scala.collection.mutable.HashMap
-import org.apache.spark.scheduler.Task
 
 /**
  * A set of tasks submitted together to the low-level TaskScheduler, usually representing

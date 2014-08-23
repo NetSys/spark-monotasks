@@ -23,11 +23,8 @@ import scala.language.existentials
 
 import org.apache.spark._
 import org.apache.spark.broadcast.Broadcast
-import org.apache.spark.rdd.{BlockRDD, RDD}
-import org.apache.spark.shuffle.ShuffleWriter
-import org.apache.spark.storage.{PipelinedBlockId, RDDBlockId, BlockManagerId, StorageLevel}
-import java.io.Externalizable
-import com.sun.istack.internal.NotNull
+import org.apache.spark.rdd.{RDD}
+import org.apache.spark.storage.{PipelinedBlockId, StorageLevel}
 
 /**
 * A PipelineTask blindly caches the elements of a partition in memory
@@ -44,7 +41,7 @@ import com.sun.istack.internal.NotNull
  */
 private[spark] class PipelineTask(
     stageId: Int,
-    @NotNull taskBinary: Broadcast[Array[Byte]],
+    taskBinary: Broadcast[Array[Byte]],
     partition: Partition,
     @transient private var locs: Seq[TaskLocation])
   extends Task[PipelineStatus](stageId, partition.index) with Logging {

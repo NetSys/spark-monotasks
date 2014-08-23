@@ -23,9 +23,8 @@ import akka.actor.{Actor, ActorRef, Props}
 
 import org.apache.spark.{Logging, SparkEnv, TaskState}
 import org.apache.spark.TaskState.TaskState
-import org.apache.spark.executor.{TaskMetrics, Executor, ExecutorBackend}
+import org.apache.spark.executor.{Executor, ExecutorBackend}
 import org.apache.spark.scheduler.{Resources, SchedulerBackend, TaskSchedulerImpl, WorkerOffer}
-import org.apache.spark.storage.BlockManagerId
 import org.apache.spark.util.Utils
 
 private case class ReviveOffers()

@@ -30,7 +30,6 @@ import org.apache.spark._
 import org.apache.spark.TaskState.TaskState
 import org.apache.spark.executor.TaskMetrics
 import org.apache.spark.util.{Clock, SystemClock}
-import scala.collection.mutable
 
 /**
  * Schedules the tasks within a single TaskSet in the TaskSchedulerImpl. This class keeps track of
