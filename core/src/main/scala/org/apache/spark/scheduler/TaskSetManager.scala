@@ -745,8 +745,8 @@ private[spark] class TaskSetManager(
       logDebug("Task length threshold for speculation: " + threshold)
       for ((tid, info) <- taskInfos) {
         val index = info.index
-        if (!successful.contains(index) && copiesRunning(index) == 1 && info.timeRunning(time) > threshold &&
-          !speculatableTasks.contains(index)) {
+        if (!successful.contains(index) && copiesRunning(index) == 1 &&
+          info.timeRunning(time) > threshold && !speculatableTasks.contains(index)) {
           logInfo(
             "Marking task %d in stage %s (on %s) as speculatable because it ran more than %.0f ms"
               .format(index, taskSet.id, info.host, threshold))
