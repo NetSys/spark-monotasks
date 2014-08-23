@@ -28,12 +28,12 @@ import org.apache.spark.shuffle.ShuffleWriter
 import org.apache.spark.storage.{BlockManagerId, StorageLevel, ShuffleBlockId}
 
 /**
- * A ShuffleMapTask (SMT) divides the elements of an RDD into multiple buckets (based on a partitioner
- * specified in the ShuffleDependency). Note that the unitask changes to SMT have made it so that
- * SMT _must_ operate on an RDD of type RDD[(Int, ByteBuffer)] -- pairs of (reducePartitionId,
- * serializedBytes) and that it requires that all bytes for one partition already be grouped together
- * (i.e., reducePartitionId must be unique). SMT will then write out the serialized bytes to the shuffle
- * block store directly.
+ * A ShuffleMapTask (SMT) divides the elements of an RDD into multiple buckets (based on a
+ * partitioner specified in the ShuffleDependency). Note that the unitask changes to SMT have made
+ * it so that SMT _must_ operate on an RDD of type RDD[(Int, ByteBuffer)] -- pairs of
+ * (reducePartitionId, serializedBytes) and that it requires that all bytes for one partition
+ * already be grouped together (i.e., reducePartitionId must be unique). SMT will then write out
+ * the serialized bytes to the shuffle block store directly.
  *
   * See [[org.apache.spark.scheduler.Task]] for more information.
   *
@@ -74,7 +74,8 @@ private[spark] class ShuffleMapTask(
         val outBlockId = ShuffleBlockId(dep.shuffleId, partitionId, outPartitionId)
         store.putBytes(outBlockId, bytes, StorageLevel.DISK_ONLY)
         assert(compressedSizes(outPartitionId) == 0) // only write 1 output per output partition
-        compressedSizes(outPartitionId) = MapOutputTracker.compressSize(bytes.limit()) //TODO(ryan): not sure on limit() validity
+        compressedSizes(outPartitionId) = MapOutputTracker.compressSize(bytes.limit())
+          //TODO(ryan): not sure on limit() validity
       }
       new MapStatus(SparkEnv.get.blockManager.blockManagerId, compressedSizes)
     } finally {

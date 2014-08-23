@@ -98,7 +98,8 @@ object MiniFetchPipelinedRDD {
       serializer: Serializer): RDD[(K, V)] = {
 
     val serialized: RDD[(Int, ByteBuffer)] = prev.mapPartitionsWithContext { // step 1 serialize
-        (context, iter) => partitionIterator(iter.asInstanceOf[Iterator[(K, V)]], part, serializer).toIterator
+        (context, iter) =>
+          partitionIterator(iter.asInstanceOf[Iterator[(K, V)]], part, serializer).toIterator
     }
 
     val pipelined = serialized.pipeline() // step 2 force computation
