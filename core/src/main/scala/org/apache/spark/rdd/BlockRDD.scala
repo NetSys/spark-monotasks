@@ -17,12 +17,15 @@
 
 package org.apache.spark.rdd
 
+import java.nio.ByteBuffer
+
 import scala.reflect.ClassTag
+import scala.Some
 
 import org.apache.spark._
-import org.apache.spark.storage.{RDDBlockId, StorageLevel, BlockId, BlockManager}
-import scala.Some
-import java.nio.ByteBuffer
+import org.apache.spark.storage.{BlockId, BlockManager, RDDBlockId, StorageLevel}
+
+
 import org.apache.spark.executor.{DataReadMethod, InputMetrics}
 
 private[spark] class BlockRDDPartition(val blockId: BlockId, idx: Int) extends Partition {

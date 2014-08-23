@@ -19,8 +19,8 @@ package org.apache.spark.rdd
 
 import scala.reflect.ClassTag
 
-import org.apache.spark.{SparkEnv, PipelineDependency, Partition, TaskContext}
-import org.apache.spark.storage.{PipelinedBlockId, RDDBlockId, StorageLevel}
+import org.apache.spark.{Partition, PipelineDependency, SparkEnv, TaskContext}
+import org.apache.spark.storage.PipelinedBlockId
 
 /**
  * A PipelinedRDD represents a soft-barrier between the parent RDD and the

@@ -17,12 +17,12 @@
 
 package org.apache.spark.rdd
 
+import java.io.ByteArrayOutputStream
+import java.nio.ByteBuffer
+
 import org.apache.spark._
 import org.apache.spark.storage.{WarmedShuffleBlockId, ShuffleBlockId}
-import org.apache.spark.util.collection.ExternalSorter
-import org.apache.spark.serializer.{SerializationStream, SerializerInstance, Serializer}
-import java.nio.ByteBuffer
-import java.io.ByteArrayOutputStream
+import org.apache.spark.serializer.{SerializationStream, Serializer}
 
 /**
  * All MiniFetchRDD does is pull together shuffled ByteBuffers that were serialized from a
