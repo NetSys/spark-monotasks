@@ -572,7 +572,8 @@ private[spark] class BlockManager(
     val blockMessageArray = new BlockMessageArray(req.blocks.map {
       case (blockId, size) => BlockMessage.fromGetBlock(GetBlock(blockId))
     })
-    val maybeMessage = connectionManager.sendMessageReliablySync(cmId, blockMessageArray.toBufferMessage)
+    val maybeMessage = connectionManager.sendMessageReliablySync(
+        cmId, blockMessageArray.toBufferMessage)
 
     maybeMessage match {
       case Some(message) => {

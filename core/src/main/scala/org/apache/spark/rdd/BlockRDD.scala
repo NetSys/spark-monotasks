@@ -90,7 +90,10 @@ class BlockRDD[T: ClassTag](@transient sc: SparkContext, @transient val blockIds
   override def resource = RDDResource.Read
 }
 
-/** An RDD whose compute is raw ByteBuffers, meant to be chained with a PipelineRDD and then deserialized */
+/**
+ * An RDD whose compute is raw ByteBuffers, meant to be chained with a PipelineRDD and then
+ * deserialized.
+ */
 private class RawBlockRDD(sc: SparkContext, blockIds: Array[BlockId])
   extends BlockRDD[(BlockId, ByteBuffer)](sc, blockIds) {
 
