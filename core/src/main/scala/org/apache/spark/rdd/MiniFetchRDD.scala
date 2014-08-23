@@ -1,3 +1,20 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package org.apache.spark.rdd
 
 import org.apache.spark._
@@ -22,13 +39,15 @@ private[spark] class MiniFetchRDD[K, V, C](prev: RDD[_ <: Product2[K, V]], val p
   }
 
   override def getDependencies: Seq[Dependency[_]] = {
-    List(new MiniFetchDependency(prev, part, None, None, None, false)) // Note all of the 'None' args; it's because
-                                                                       // aggregation, etc. is done explicitly in the
-                                                                       // MiniFetchPipelinedRDD
-    // TODO(ryan) MiniFetchDependency needs a refactor. In reality, prev should be of type RDD[ByteBuffer], but
-    // there is a lot of code depending on ShuffleDependency that I can't deal with right now, so we make it
-    // of type RDD[(Int, ByteBuffer)]. That is, each record is of type (reducePartitionIndex, serializedBytes) but
-    // it would be cleaner to just make it serializedBytes and the partition index would just be the index of the bytes
+    List(new MiniFetchDependency(prev, part, None, None, None, false))
+    // Note all of the 'None' args; it's because aggregation, etc. is done explicitly in the
+    // MiniFetchPipelinedRDD
+
+    // TODO(ryan) MiniFetchDependency needs a refactor. In reality, prev should be of type
+    // RDD[ByteBuffer], but there is a lot of code depending on ShuffleDependency that I can't
+    // deal with right now, so we make it of type RDD[(Int, ByteBuffer)]. That is, each record
+    // is of type (reducePartitionIndex, serializedBytes) but it would be cleaner to just make
+    // it serializedBytes and the partition index would just be the index of the bytes
     // within the iterator
   }
 
@@ -43,7 +62,7 @@ private[spark] class MiniFetchRDD[K, V, C](prev: RDD[_ <: Product2[K, V]], val p
     } // TODO(ryan): sort order is not respected
   }
 
-	val shuffleBlockIdsByPartition: Map[Int, Seq[ShuffleBlockId]] = {
+  val shuffleBlockIdsByPartition: Map[Int, Seq[ShuffleBlockId]] = {
     val shuffleId = dependencies.head.asInstanceOf[ShuffleDependency[_, _, _]].shuffleId
     (0 until this.partitions.length).map {
       reduceId =>
@@ -72,28 +91,35 @@ private[spark] class MiniFetchRDD[K, V, C](prev: RDD[_ <: Product2[K, V]], val p
  */
 object MiniFetchPipelinedRDD {
 
-  /** A MiniFetchRDD without an aggregator; it opaquely performs the serialization and deserialization */
-  def apply[K, V](prev: RDD[_ <: Product2[K, V]], part: Partitioner, serializer: Serializer): RDD[(K, V)] = {
+  /** A MiniFetchRDD without an aggregator; it opaquely performs (de-)serialization */
+  def apply[K, V](
+      prev: RDD[_ <: Product2[K, V]],
+      part: Partitioner,
+      serializer: Serializer): RDD[(K, V)] = {
 
     val serialized: RDD[(Int, ByteBuffer)] = prev.mapPartitionsWithContext { // step 1 serialize
         (context, iter) => partitionIterator(iter.asInstanceOf[Iterator[(K, V)]], part, serializer).toIterator
     }
 
     val pipelined = serialized.pipeline() // step 2 force computation
-    val fetched: RDD[ByteBuffer] = new MiniFetchRDD(pipelined, part) // step 3 will cause a write and then a shuffle
-    lazy val ser = Serializer.getSerializer(serializer).newInstance() // (ser is not serializable, if it's lazy, then
-                                                                      // the idea is that it'll get created on remote machine)
+    val fetched: RDD[ByteBuffer] = new MiniFetchRDD(pipelined, part) // step 3: write and shuffle
+    lazy val ser = Serializer.getSerializer(serializer).newInstance()
+      // (ser is not serializable, if it's lazy, then the idea is that it'll get created 1 time
+      // on remote machine)
     fetched.flatMap(ser.deserializeMany(_).asInstanceOf[Iterator[(K, V)]]) // step 4 deserialize
   }
 
   // TODO(ryan): this should go somewhere else -> probably in the shuffle package
   /** Partition and serialize an iterator */
-  private def partitionIterator(iter: Iterator[(_, _)], part: Partitioner, serializer: Serializer): Seq[(Int, ByteBuffer)] = {
+  private def partitionIterator(
+      iter: Iterator[(_, _)],
+      part: Partitioner, serializer: Serializer): Seq[(Int, ByteBuffer)] = {
     val ser = Serializer.getSerializer(serializer).newInstance()
     val streams = Array.tabulate[BufferableByteArrayOutputStream](part.numPartitions) {
       unused => new BufferableByteArrayOutputStream
     }
-    val outputs = Array.tabulate[SerializationStream](part.numPartitions)(i => ser.serializeStream(streams(i)))
+    val outputs =
+      Array.tabulate[SerializationStream](part.numPartitions)(i => ser.serializeStream(streams(i)))
 
     for ((k, v) <- iter) {
       outputs(part.getPartition(k)).writeObject((k, v))
@@ -101,7 +127,7 @@ object MiniFetchPipelinedRDD {
     streams.zipWithIndex.map{ case(stream, index) => (index, stream.toByteBuffer()) }
   }
 
-  class BufferableByteArrayOutputStream extends ByteArrayOutputStream {
+  private class BufferableByteArrayOutputStream extends ByteArrayOutputStream {
 
     /** Create a ByteBuffer backed by the array backing this ByteArrayOutputStream */
     def toByteBuffer() = ByteBuffer.wrap(buf, 0, size())
