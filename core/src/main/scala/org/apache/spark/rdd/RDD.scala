@@ -1376,26 +1376,20 @@ abstract class RDD[T: ClassTag](
     }
   }
 
-  /** Map a partition with a function that also takes a value local to that partition.
-    *
-    * Useful for bringing a non-serializable value that can be initialized from a serializable closure.
-    */
-  def mapWithUninitializedValue[X: ClassTag, U: ClassTag](initValue: => X, fn: (X, T) => U): RDD[U] = {
-    this.mapPartitions { iter =>
-      val value = initValue
-      iter.map(fn(value, _))
-    }
-  }
-
   def saveAsBlockRDD(): RDD[T] = PipelinedBlockRDD.basedOn(this)
 }
 
 object RDD {
 
-  def aggregate[K, V, C](rdd: RDD[(K, V)], aggregator: Aggregator[K, V, C]): RDD[(K, C)] =
-    rdd.mapPartitionsWithContext((context, iterator) => aggregator.combineValuesByKey(iterator, context))
+  def aggregate[K, V, C](rdd: RDD[(K, V)], aggregator: Aggregator[K, V, C]): RDD[(K, C)] = {
+    rdd.mapPartitionsWithContext {
+      (context, iterator) => aggregator.combineValuesByKey(iterator, context)
+    }
+  }
 
-  def combine[K, C](rdd: RDD[(K, C)], aggregator: Aggregator[K, _, C]): RDD[(K, C)] =
-    rdd.mapPartitionsWithContext((context, iterator) => aggregator.combineCombinersByKey(iterator, context))
-
+  def combine[K, C](rdd: RDD[(K, C)], aggregator: Aggregator[K, _, C]): RDD[(K, C)] = {
+    rdd.mapPartitionsWithContext {
+      (context, iterator) => aggregator.combineCombinersByKey(iterator, context)
+    }
+  }
 }

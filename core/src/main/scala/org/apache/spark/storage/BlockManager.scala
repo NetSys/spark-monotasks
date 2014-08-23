@@ -326,7 +326,8 @@ private[spark] class BlockManager(
     val bytes = getLocalBytes(blockId).getOrElse {
       throw new BlockException(blockId, s"Block $blockId not found on disk, though it should be")
     }
-    Some(dataDeserialize(blockId, bytes, serializer)) // TODO(ryan) change method interface to not return option
+    Some(dataDeserialize(blockId, bytes, serializer))
+    // TODO(ryan) change method interface to not return option
   }
 
   /**
@@ -357,7 +358,8 @@ private[spark] class BlockManager(
       val store = if (blockId.isShuffle) diskStore else memoryStore
       val bytes = store.getBytes(blockId)
       if (blockId.isWarmShuffle) {
-        store.remove(blockId) // we should only need to keep the fetch results 1 time, so lets free the mem now
+        store.remove(blockId)
+        // we should only need to keep the fetch results 1 time, so lets free the mem now
       }
       bytes match {
         case Some(bytes) =>
@@ -562,7 +564,7 @@ private[spark] class BlockManager(
   /**
    * Get a single remote (shuffle) block as serialized bytes
    */
-  // TODO(ryan): too much copy paste from BlockFetchIterator, need to refactor both to use common method
+  // TODO(ryan): too much copy paste from BlockFetchIterator, refactor both to use same method
   def getSingle(address: BlockManagerId, blockId: BlockId,size: Long): Option[ByteBuffer] = {
     val req = new FetchRequest(address, Seq((blockId, size)))
     val connectionManager = new ConnectionManager(0, conf, securityManager)
