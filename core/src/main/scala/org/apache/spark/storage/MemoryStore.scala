@@ -176,6 +176,13 @@ private[spark] class MemoryStore(blockManager: BlockManager, maxMemory: Long)
     }
   }
 
+  def getArrayDirect[T](blockId: BlockId): Array[T] = {
+    val entry = entries.synchronized {
+      entries.get(blockId)
+    }
+    entry.value.asInstanceOf[Array[T]]
+  }
+
   override def remove(blockId: BlockId): Boolean = {
     entries.synchronized {
       val entry = entries.remove(blockId)

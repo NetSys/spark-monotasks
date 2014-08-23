@@ -42,14 +42,13 @@ private[spark] class PipelinedRDD[T: ClassTag](
   private def blockId(partition: Partition) = PipelinedBlockId(prev.id, partition.index)
 
   override def compute(split: Partition, context: TaskContext) = {
-    SparkEnv.get.blockManager.memoryStore.getValues(blockId(split)).get.asInstanceOf[Iterator[T]]
+    val store = SparkEnv.get.blockManager.memoryStore
+    val id = blockId(split)
+    val array: Array[T] = store.getArrayDirect(id)
+    val isRemoved = store.remove(id) // free the block now that we got it
+    assert(isRemoved)
+    array.iterator
   }
 
   override def resource = RDDResource.None
-
-  override def free(partition: Partition) {
-    SparkEnv.get.blockManager.memoryStore.remove(blockId(partition))
-    // Note that we _don't_ continue the recursive frees to our dependency because it should have
-    // been freed already, if it needed to be
-  }
 }

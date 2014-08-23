@@ -1362,19 +1362,6 @@ abstract class RDD[T: ClassTag](
   /** The operation required to compute this RDD */
   def resource: RDDResourceTypes = RDDResource.Compute
 
-  /**
-   * Free ephemeral resources that were involved in _creating_ a given partition
-   *
-   * Note that this backward traverses _only_ OneToOneDependencies
-   * */
-  def free(partition: Partition) {
-    for (dep <- dependencies) {
-      dep match {
-        case _: OneToOneDependency[_] => dep.rdd.free(partition)
-      }
-    }
-  }
-
   def saveAsBlockRDD(): RDD[T] = PipelinedBlockRDD.basedOn(this)
 }
 

@@ -56,10 +56,14 @@ private[spark] class MiniFetchRDD[K, V, C](prev: RDD[_ <: Product2[K, V]], val p
    * compute from a downstream task and it should behave just like a ShuffledRDD
    */
   override def compute(split: Partition, context: TaskContext): Iterator[ByteBuffer] = {
-    shuffleBlockIdsByPartition(split.index).iterator.map { id =>
-      val warmedId = WarmedShuffleBlockId.fromShuffle(id)
-      SparkEnv.get.blockManager.memoryStore.getBytes(warmedId).get
-    } // TODO(ryan): sort order is not respected
+    val ids = shuffleBlockIdsByPartition(split.index).map(WarmedShuffleBlockId.fromShuffle).toArray
+    val computed: Array[ByteBuffer] = ids.map { id =>
+      val bytes = SparkEnv.get.blockManager.memoryStore.getBytes(id).get
+      val isRemoved = SparkEnv.get.blockManager.memoryStore.remove(id)
+      assert(isRemoved)
+      bytes
+    }
+    computed.toIterator // TODO(ryan): sort order is not respected
   }
 
   val shuffleBlockIdsByPartition: Map[Int, Seq[ShuffleBlockId]] = {
@@ -72,12 +76,6 @@ private[spark] class MiniFetchRDD[K, V, C](prev: RDD[_ <: Product2[K, V]], val p
   }
 
   override def resource = RDDResource.None
-
-  override def free(partition: Partition) {
-    for (id <- shuffleBlockIdsByPartition(partition.index)) {
-      SparkEnv.get.blockManager.memoryStore.remove(id)
-    }
-  }
 }
 
 /**

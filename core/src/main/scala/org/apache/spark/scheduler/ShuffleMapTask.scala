@@ -78,7 +78,6 @@ private[spark] class ShuffleMapTask(
       }
       new MapStatus(SparkEnv.get.blockManager.blockManagerId, compressedSizes)
     } finally {
-      rdd.free(partition)
       context.executeOnCompleteCallbacks()
     }
   }

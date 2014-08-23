@@ -66,7 +66,6 @@ private[spark] class PipelineTask(
         // TODO(ryan) handle error if can't unroll?
       new PipelineStatus()
     } finally {
-      rdd.free(partition)
       context.executeOnCompleteCallbacks() // TODO(ryan) what does this do?
     }
   }
