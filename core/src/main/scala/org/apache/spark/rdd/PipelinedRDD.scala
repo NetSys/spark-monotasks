@@ -49,7 +49,7 @@ private[spark] class PipelinedRDD[T: ClassTag](
 
   override def free(partition: Partition) {
     SparkEnv.get.blockManager.memoryStore.remove(blockId(partition))
-    // Note that we _don't_ continue the recursive frees to our dependency because it should have been freed
-    // already, if it needed to be
+    // Note that we _don't_ continue the recursive frees to our dependency because it should have
+    // been freed already, if it needed to be
   }
 }
