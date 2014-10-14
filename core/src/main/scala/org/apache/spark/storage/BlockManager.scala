@@ -254,9 +254,11 @@ private[spark] class BlockManager(
   def getStatus(blockId: BlockId): Option[BlockStatus] = {
     blockInfo.get(blockId).map { info =>
       val memSize = if (memoryStore.contains(blockId)) memoryStore.getSize(blockId) else 0L
-      val diskSize = if (diskStore.contains(blockId)) diskStore.getSize(blockId) else 0L
+      val isOnDisk = diskStore.contains(blockId)
+      val diskSize = if (isOnDisk) diskStore.getSize(blockId) else 0L
+      val diskId = if (isOnDisk) info.diskId else None
       // Assume that block is not in Tachyon
-      BlockStatus(info.level, memSize, diskSize, 0L)
+      BlockStatus(info.level, memSize, diskSize, 0L, diskId)
     }
   }
 
@@ -323,7 +325,7 @@ private[spark] class BlockManager(
     info.synchronized {
       info.level match {
         case null =>
-          BlockStatus(StorageLevel.NONE, 0L, 0L, 0L)
+          BlockStatus(StorageLevel.NONE, 0L, 0L, 0L, None)
         case level =>
           val inMem = level.useMemory && memoryStore.contains(blockId)
           val inTachyon = level.useOffHeap && tachyonStore.contains(blockId)
@@ -334,7 +336,8 @@ private[spark] class BlockManager(
           val memSize = if (inMem) memoryStore.getSize(blockId) else 0L
           val tachyonSize = if (inTachyon) tachyonStore.getSize(blockId) else 0L
           val diskSize = if (onDisk) diskStore.getSize(blockId) else 0L
-          BlockStatus(storageLevel, memSize, diskSize, tachyonSize)
+          val diskId = if (onDisk) info.diskId else None
+          BlockStatus(storageLevel, memSize, diskSize, tachyonSize, diskId)
       }
     }
   }
@@ -668,7 +671,7 @@ private[spark] class BlockManager(
      * to be dropped right after it got put into memory. Note, however, that other threads will
      * not be able to get() this block until we call markReady on its BlockInfo. */
     val putBlockInfo = {
-      val tinfo = new BlockInfo(level, tellMaster)
+      val tinfo = new BlockInfo(level, tellMaster, None)
       // Do atomically !
       val oldBlockOpt = blockInfo.putIfAbsent(blockId, tinfo)
       if (oldBlockOpt.isDefined) {
@@ -752,6 +755,12 @@ private[spark] class BlockManager(
           case Left (newIterator) if putLevel.useMemory => valuesAfterPut = newIterator
           case Right (newBytes) => bytesAfterPut = newBytes
           case _ =>
+        }
+
+        // If this block was written to disk, record the unique identifier of the specific
+        // physical disk to which this block was written.
+        if (putLevel.useDisk) {
+          putBlockInfo.diskId = result.diskId
         }
 
         // Keep track of which blocks are dropped from memory

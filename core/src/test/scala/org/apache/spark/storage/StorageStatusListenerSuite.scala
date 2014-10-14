@@ -83,9 +83,9 @@ class StorageStatusListenerSuite extends FunSuite {
     listener.onBlockManagerAdded(SparkListenerBlockManagerAdded(bm2, 2000L))
     val taskMetrics1 = new TaskMetrics
     val taskMetrics2 = new TaskMetrics
-    val block1 = (RDDBlockId(1, 1), BlockStatus(StorageLevel.DISK_ONLY, 0L, 100L, 0L))
-    val block2 = (RDDBlockId(1, 2), BlockStatus(StorageLevel.DISK_ONLY, 0L, 200L, 0L))
-    val block3 = (RDDBlockId(4, 0), BlockStatus(StorageLevel.DISK_ONLY, 0L, 300L, 0L))
+    val block1 = (RDDBlockId(1, 1), BlockStatus(StorageLevel.DISK_ONLY, 0L, 100L, 0L, None))
+    val block2 = (RDDBlockId(1, 2), BlockStatus(StorageLevel.DISK_ONLY, 0L, 200L, 0L, None))
+    val block3 = (RDDBlockId(4, 0), BlockStatus(StorageLevel.DISK_ONLY, 0L, 300L, 0L, None))
     taskMetrics1.updatedBlocks = Some(Seq(block1, block2))
     taskMetrics2.updatedBlocks = Some(Seq(block3))
 
@@ -106,9 +106,9 @@ class StorageStatusListenerSuite extends FunSuite {
     assert(listener.executorIdToStorageStatus("fat").containsBlock(RDDBlockId(4, 0)))
 
     // Task end with dropped blocks
-    val droppedBlock1 = (RDDBlockId(1, 1), BlockStatus(StorageLevel.NONE, 0L, 0L, 0L))
-    val droppedBlock2 = (RDDBlockId(1, 2), BlockStatus(StorageLevel.NONE, 0L, 0L, 0L))
-    val droppedBlock3 = (RDDBlockId(4, 0), BlockStatus(StorageLevel.NONE, 0L, 0L, 0L))
+    val droppedBlock1 = (RDDBlockId(1, 1), BlockStatus(StorageLevel.NONE, 0L, 0L, 0L, None))
+    val droppedBlock2 = (RDDBlockId(1, 2), BlockStatus(StorageLevel.NONE, 0L, 0L, 0L, None))
+    val droppedBlock3 = (RDDBlockId(4, 0), BlockStatus(StorageLevel.NONE, 0L, 0L, 0L, None))
     taskMetrics1.updatedBlocks = Some(Seq(droppedBlock1, droppedBlock3))
     taskMetrics2.updatedBlocks = Some(Seq(droppedBlock2, droppedBlock3))
 
@@ -131,9 +131,9 @@ class StorageStatusListenerSuite extends FunSuite {
     listener.onBlockManagerAdded(SparkListenerBlockManagerAdded(bm1, 1000L))
     val taskMetrics1 = new TaskMetrics
     val taskMetrics2 = new TaskMetrics
-    val block1 = (RDDBlockId(1, 1), BlockStatus(StorageLevel.DISK_ONLY, 0L, 100L, 0L))
-    val block2 = (RDDBlockId(1, 2), BlockStatus(StorageLevel.DISK_ONLY, 0L, 200L, 0L))
-    val block3 = (RDDBlockId(4, 0), BlockStatus(StorageLevel.DISK_ONLY, 0L, 300L, 0L))
+    val block1 = (RDDBlockId(1, 1), BlockStatus(StorageLevel.DISK_ONLY, 0L, 100L, 0L, None))
+    val block2 = (RDDBlockId(1, 2), BlockStatus(StorageLevel.DISK_ONLY, 0L, 200L, 0L, None))
+    val block3 = (RDDBlockId(4, 0), BlockStatus(StorageLevel.DISK_ONLY, 0L, 300L, 0L, None))
     taskMetrics1.updatedBlocks = Some(Seq(block1, block2))
     taskMetrics2.updatedBlocks = Some(Seq(block3))
     listener.onTaskEnd(SparkListenerTaskEnd(1, 0, "obliteration", Success, taskInfo1, taskMetrics1))

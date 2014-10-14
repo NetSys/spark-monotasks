@@ -691,7 +691,7 @@ private[spark] object JsonProtocol {
     val memorySize = (json \ "Memory Size").extract[Long]
     val diskSize = (json \ "Disk Size").extract[Long]
     val tachyonSize = (json \ "Tachyon Size").extract[Long]
-    BlockStatus(storageLevel, memorySize, diskSize, tachyonSize)
+    BlockStatus(storageLevel, memorySize, diskSize, tachyonSize, None)
   }
 
 

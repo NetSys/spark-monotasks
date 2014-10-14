@@ -19,7 +19,11 @@ package org.apache.spark.storage
 
 import java.util.concurrent.ConcurrentHashMap
 
-private[storage] class BlockInfo(val level: StorageLevel, val tellMaster: Boolean) {
+private[storage] class BlockInfo(
+    val level: StorageLevel,
+    val tellMaster: Boolean,
+    var diskId: Option[String]) {
+
   // To save space, 'pending' and 'failed' are encoded as special sizes:
   @volatile var size: Long = BlockInfo.BLOCK_PENDING
   private def pending: Boolean = size == BlockInfo.BLOCK_PENDING

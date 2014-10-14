@@ -80,9 +80,9 @@ private[spark] class TachyonStore(
       blockId, Utils.bytesToString(byteBuffer.limit), finishTime - startTime))
 
     if (returnValues) {
-      PutResult(bytes.limit(), Right(bytes.duplicate()))
+      PutResult(bytes.limit(), Right(bytes.duplicate()), None)
     } else {
-      PutResult(bytes.limit(), null)
+      PutResult(bytes.limit(), null, None)
     }
   }
 

@@ -20,6 +20,7 @@ package org.apache.spark.storage
 import java.io.{FileOutputStream, RandomAccessFile}
 import java.nio.ByteBuffer
 import java.nio.channels.FileChannel.MapMode
+import java.nio.file.Files
 
 import org.apache.spark.Logging
 import org.apache.spark.serializer.Serializer
@@ -50,9 +51,11 @@ private[spark] class DiskStore(blockManager: BlockManager, diskManager: DiskBloc
     }
     channel.close()
     val finishTime = System.currentTimeMillis
-    logDebug("Block %s stored as %s file on disk in %d ms".format(
-      file.getName, Utils.bytesToString(bytes.limit), finishTime - startTime))
-    PutResult(bytes.limit(), Right(bytes.duplicate()))
+    val diskId = getDiskId(blockId)
+    logDebug("Block %s stored as %s file (%s) on disk %s in %d ms".format(
+      file.getName, Utils.bytesToString(bytes.limit), file.getAbsolutePath(), diskId,
+      finishTime - startTime))
+    PutResult(bytes.limit(), Right(bytes.duplicate()), Some(diskId))
   }
 
   override def putArray(
@@ -77,15 +80,16 @@ private[spark] class DiskStore(blockManager: BlockManager, diskManager: DiskBloc
     val length = file.length
 
     val timeTaken = System.currentTimeMillis - startTime
-    logDebug("Block %s stored as %s file on disk in %d ms".format(
-      file.getName, Utils.bytesToString(length), timeTaken))
+    val diskId = getDiskId(blockId)
+    logDebug("Block %s stored as %s file (%s) on disk %s in %d ms".format(
+      file.getName, Utils.bytesToString(length), file.getAbsolutePath(), diskId, timeTaken))
 
     if (returnValues) {
       // Return a byte buffer for the contents of the file
       val buffer = getBytes(blockId).get
-      PutResult(length, Right(buffer))
+      PutResult(length, Right(buffer), Some(diskId))
     } else {
-      PutResult(length, null)
+      PutResult(length, null, Some(diskId))
     }
   }
 
@@ -136,5 +140,14 @@ private[spark] class DiskStore(blockManager: BlockManager, diskManager: DiskBloc
   override def contains(blockId: BlockId): Boolean = {
     val file = diskManager.getBlockLocation(blockId).file
     file.exists()
+  }
+
+  /**
+   * Returns the unique identifier of the disk on which the specified block is stored.
+   */
+  def getDiskId(blockId: BlockId): String = {
+    val file = diskManager.getFile(blockId)
+    val fileStore = Files.getFileStore(file.toPath())
+    fileStore.name()
   }
 }

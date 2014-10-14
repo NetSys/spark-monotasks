@@ -1332,4 +1332,64 @@ class BlockManagerSuite extends FunSuite with Matchers with BeforeAndAfter
     assert(unrollMemoryAfterB6 === unrollMemoryAfterB4)
     assert(unrollMemoryAfterB7 === unrollMemoryAfterB4)
   }
+
+  test("diskIds are set correctly when writing to disk") {
+    store = makeBlockManager(12000)
+    val a1 = new Array[Byte](400)
+    val a2 = new Array[Byte](400)
+    val a3 = new Array[Byte](400)
+    store.putSingle("a1", a1, StorageLevel.DISK_ONLY)
+    store.putSingle("a2", a2, StorageLevel.DISK_ONLY)
+    store.putSingle("a3", a3, StorageLevel.DISK_ONLY)
+    val disk1a = store.getStatus("a1").get.diskId
+    val disk2a = store.getStatus("a2").get.diskId
+    val disk3a = store.getStatus("a3").get.diskId
+    val disk1b = store.diskStore.getDiskId("a1")
+    val disk2b = store.diskStore.getDiskId("a2")
+    val disk3b = store.diskStore.getDiskId("a3")
+    assert(disk1a.nonEmpty, "a1's diskId was not set")
+    assert(disk2a.nonEmpty, "a2's diskId was not set")
+    assert(disk3a.nonEmpty, "a3's diskId was not set")
+    assert(disk1a.get === disk1b, "a1's diskId was not set correctly")
+    assert(disk2a.get === disk2b, "a2's diskId was not set correctly")
+    assert(disk3a.get === disk3b, "a3's diskId was not set correctly")
+  }
+
+  test("diskIds are not set when writing to memory") {
+    store = makeBlockManager(12000)
+    val a1 = new Array[Byte](400)
+    val a2 = new Array[Byte](400)
+    val a3 = new Array[Byte](400)
+    store.putSingle("a1", a1, StorageLevel.MEMORY_ONLY)
+    store.putSingle("a2", a2, StorageLevel.MEMORY_ONLY)
+    store.putSingle("a3", a3, StorageLevel.MEMORY_ONLY)
+    val disk1 = store.getStatus("a1").get.diskId
+    val disk2 = store.getStatus("a2").get.diskId
+    val disk3 = store.getStatus("a3").get.diskId
+    assert(disk1.isEmpty, "a1's diskId was set")
+    assert(disk2.isEmpty, "a2's diskId was set")
+    assert(disk3.isEmpty, "a3's diskId was set")
+  }
+
+  test ("diskIds are not set when writing to off-heap storage") {
+    val tachyonUnitTestEnabled = conf.getBoolean("spark.test.tachyon.enable", false)
+    if (tachyonUnitTestEnabled) {
+      store = makeBlockManager(12000)
+      val a1 = new Array[Byte](400)
+      val a2 = new Array[Byte](400)
+      val a3 = new Array[Byte](400)
+      store.putSingle("a1", a1, StorageLevel.OFF_HEAP)
+      store.putSingle("a2", a2, StorageLevel.OFF_HEAP)
+      store.putSingle("a3", a3, StorageLevel.OFF_HEAP)
+      val disk1 = store.getStatus("a1").get.diskId
+      val disk2 = store.getStatus("a2").get.diskId
+      val disk3 = store.getStatus("a3").get.diskId
+      assert(disk1.isEmpty, "a1's diskId was set")
+      assert(disk2.isEmpty, "a2's diskId was set")
+      assert(disk3.isEmpty, "a3's diskId was set")
+    } else {
+      info("\"diskIds are not set when writing to off-heap storage\" test disabled.")
+    }
+  }
+
 }

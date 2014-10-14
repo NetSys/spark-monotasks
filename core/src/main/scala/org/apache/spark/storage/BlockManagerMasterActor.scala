@@ -420,13 +420,14 @@ case class BlockStatus(
     storageLevel: StorageLevel,
     memSize: Long,
     diskSize: Long,
-    tachyonSize: Long) {
+    tachyonSize: Long,
+    diskId: Option[String]) {
   def isCached: Boolean = memSize + diskSize + tachyonSize > 0
 }
 
 @DeveloperApi
 object BlockStatus {
-  def empty: BlockStatus = BlockStatus(StorageLevel.NONE, 0L, 0L, 0L)
+  def empty: BlockStatus = BlockStatus(StorageLevel.NONE, 0L, 0L, 0L, None)
 }
 
 private[spark] class BlockManagerInfo(
@@ -474,19 +475,21 @@ private[spark] class BlockManagerInfo(
        * They can be both larger than 0, when a block is dropped from memory to disk.
        * Therefore, a safe way to set BlockStatus is to set its info in accurate modes. */
       if (storageLevel.useMemory) {
-        _blocks.put(blockId, BlockStatus(storageLevel, memSize, 0, 0))
+        _blocks.put(blockId, BlockStatus(storageLevel, memSize, 0, 0, None))
         _remainingMem -= memSize
         logInfo("Added %s in memory on %s (size: %s, free: %s)".format(
           blockId, blockManagerId.hostPort, Utils.bytesToString(memSize),
           Utils.bytesToString(_remainingMem)))
       }
       if (storageLevel.useDisk) {
-        _blocks.put(blockId, BlockStatus(storageLevel, 0, diskSize, 0))
+        /* TODO: Report a block's diskId to the BlockManagerMasterActor. 'None' will be replaced 
+         * with the reported diskId. */ 
+        _blocks.put(blockId, BlockStatus(storageLevel, 0, diskSize, 0, None))
         logInfo("Added %s on disk on %s (size: %s)".format(
           blockId, blockManagerId.hostPort, Utils.bytesToString(diskSize)))
       }
       if (storageLevel.useOffHeap) {
-        _blocks.put(blockId, BlockStatus(storageLevel, 0, 0, tachyonSize))
+        _blocks.put(blockId, BlockStatus(storageLevel, 0, 0, tachyonSize, None))
         logInfo("Added %s on tachyon on %s (size: %s)".format(
           blockId, blockManagerId.hostPort, Utils.bytesToString(tachyonSize)))
       }

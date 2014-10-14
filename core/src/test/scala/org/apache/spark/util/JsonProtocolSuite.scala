@@ -547,7 +547,8 @@ class JsonProtocolSuite extends FunSuite {
     t.shuffleWriteMetrics = Some(sw)
     // Make at most 6 blocks
     t.updatedBlocks = Some((1 to (e % 5 + 1)).map { i =>
-      (RDDBlockId(e % i, f % i), BlockStatus(StorageLevel.MEMORY_AND_DISK_SER_2, a % i, b % i, c%i))
+      (RDDBlockId(e % i, f % i),
+      BlockStatus(StorageLevel.MEMORY_AND_DISK_SER_2, a % i, b % i, c%i, None))
     }.toSeq)
     t
   }
