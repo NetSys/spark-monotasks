@@ -112,7 +112,7 @@ class KafkaStreamSuite extends TestSuiteBase {
         }
       }
     ssc.start()
-    ssc.awaitTermination(3000)
+    ssc.awaitTermination(10000)
 
     assert(sent.size === result.size)
     sent.keys.foreach { k => assert(sent(k) === result(k).toInt) }

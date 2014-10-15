@@ -124,7 +124,7 @@ public class JavaKafkaStreamSuite extends LocalJavaStreamingContext implements S
     );
 
     ssc.start();
-    ssc.awaitTermination(3000);
+    ssc.awaitTermination(10000);
 
     Assert.assertEquals(sent.size(), result.size());
     for (String k : sent.keySet()) {

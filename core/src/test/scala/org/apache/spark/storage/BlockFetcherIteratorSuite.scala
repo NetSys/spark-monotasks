@@ -52,19 +52,21 @@ class BlockFetcherIteratorSuite extends FunSuite with Matchers {
       ShuffleBlockId(0,3,0),
       ShuffleBlockId(0,4,0))
 
-    val optItr = mock(classOf[Option[Iterator[Any]]])
-    val answer = new Answer[Option[Iterator[Any]]] {
-      override def answer(invocation: InvocationOnMock) = Option[Iterator[Any]] {
-        throw new Exception
-      }
-    }
+    val byteBuffer = mock(classOf[ByteBuffer])
+    val optByteBuffer = Some(byteBuffer)
+    val optItr = mock(classOf[Iterator[Any]])
 
     // 3rd block is going to fail
-    doReturn(optItr).when(blockManager).getLocalFromDisk(meq(blIds(0)), any())
-    doReturn(optItr).when(blockManager).getLocalFromDisk(meq(blIds(1)), any())
-    doAnswer(answer).when(blockManager).getLocalFromDisk(meq(blIds(2)), any())
-    doReturn(optItr).when(blockManager).getLocalFromDisk(meq(blIds(3)), any())
-    doReturn(optItr).when(blockManager).getLocalFromDisk(meq(blIds(4)), any())
+    doReturn(optByteBuffer).when(blockManager).getLocalBytes(meq(blIds(0)))
+    doReturn(optByteBuffer).when(blockManager).getLocalBytes(meq(blIds(1)))
+    doReturn(None).when(blockManager).getLocalBytes(meq(blIds(2)))
+    doReturn(optByteBuffer).when(blockManager).getLocalBytes(meq(blIds(3)))
+    doReturn(optByteBuffer).when(blockManager).getLocalBytes(meq(blIds(4)))
+
+    doReturn(optItr).when(blockManager).dataDeserialize(meq(blIds(0)), any(), any())
+    doReturn(optItr).when(blockManager).dataDeserialize(meq(blIds(1)), any(), any())
+    doReturn(optItr).when(blockManager).dataDeserialize(meq(blIds(3)), any(), any())
+    doReturn(optItr).when(blockManager).dataDeserialize(meq(blIds(4)), any(), any())
 
     val bmId = BlockManagerId("test-client", "test-client", 1)
     val blocksByAddress = Seq[(BlockManagerId, Seq[(BlockId, Long)])](
@@ -76,12 +78,12 @@ class BlockFetcherIteratorSuite extends FunSuite with Matchers {
 
     iterator.initialize()
 
-    // 3rd getLocalFromDisk invocation should be failed
-    verify(blockManager, times(3)).getLocalFromDisk(any(), any())
+    // 3rd getLocalBytes invocation should be failed
+    verify(blockManager, times(3)).getLocalBytes(any())
 
     assert(iterator.hasNext, "iterator should have 5 elements but actually has no elements")
     // the 2nd element of the tuple returned by iterator.next should be defined when fetching successfully
-    assert(iterator.next._2.isDefined, "1st element should be defined but is not actually defined") 
+    assert(iterator.next._2.isDefined, "1st element should be defined but is not actually defined")
     assert(iterator.hasNext, "iterator should have 5 elements but actually has 1 element")
     assert(iterator.next._2.isDefined, "2nd element should be defined but is not actually defined") 
     assert(iterator.hasNext, "iterator should have 5 elements but actually has 2 elements")
@@ -108,14 +110,22 @@ class BlockFetcherIteratorSuite extends FunSuite with Matchers {
       ShuffleBlockId(0,3,0),
       ShuffleBlockId(0,4,0))
 
-    val optItr = mock(classOf[Option[Iterator[Any]]])
+    val byteBuffer = mock(classOf[ByteBuffer])
+    val optByteBuffer = Some(byteBuffer)
+    val optItr = mock(classOf[Iterator[Any]])
  
    // All blocks should be fetched successfully
-    doReturn(optItr).when(blockManager).getLocalFromDisk(meq(blIds(0)), any())
-    doReturn(optItr).when(blockManager).getLocalFromDisk(meq(blIds(1)), any())
-    doReturn(optItr).when(blockManager).getLocalFromDisk(meq(blIds(2)), any())
-    doReturn(optItr).when(blockManager).getLocalFromDisk(meq(blIds(3)), any())
-    doReturn(optItr).when(blockManager).getLocalFromDisk(meq(blIds(4)), any())
+    doReturn(optByteBuffer).when(blockManager).getLocalBytes(meq(blIds(0)))
+    doReturn(optByteBuffer).when(blockManager).getLocalBytes(meq(blIds(1)))
+    doReturn(optByteBuffer).when(blockManager).getLocalBytes(meq(blIds(2)))
+    doReturn(optByteBuffer).when(blockManager).getLocalBytes(meq(blIds(3)))
+    doReturn(optByteBuffer).when(blockManager).getLocalBytes(meq(blIds(4)))
+
+    doReturn(optItr).when(blockManager).dataDeserialize(meq(blIds(0)), any(), any())
+    doReturn(optItr).when(blockManager).dataDeserialize(meq(blIds(1)), any(), any())
+    doReturn(optItr).when(blockManager).dataDeserialize(meq(blIds(2)), any(), any())
+    doReturn(optItr).when(blockManager).dataDeserialize(meq(blIds(3)), any(), any())
+    doReturn(optItr).when(blockManager).dataDeserialize(meq(blIds(4)), any(), any())
 
     val bmId = BlockManagerId("test-client", "test-client", 1)
     val blocksByAddress = Seq[(BlockManagerId, Seq[(BlockId, Long)])](
@@ -128,7 +138,7 @@ class BlockFetcherIteratorSuite extends FunSuite with Matchers {
     iterator.initialize()
 
     // getLocalFromDis should be invoked for all of 5 blocks
-    verify(blockManager, times(5)).getLocalFromDisk(any(), any())
+    verify(blockManager, times(5)).getLocalBytes(any())
 
     assert(iterator.hasNext, "iterator should have 5 elements but actually has no elements")
     assert(iterator.next._2.isDefined, "All elements should be defined but 1st element is not actually defined") 
@@ -139,7 +149,9 @@ class BlockFetcherIteratorSuite extends FunSuite with Matchers {
     assert(iterator.hasNext, "iterator should have 5 elements but actually has 3 elements")
     assert(iterator.next._2.isDefined, "All elements should be defined but 4th element is not actually defined") 
     assert(iterator.hasNext, "iterator should have 5 elements but actually has 4 elements")
-    assert(iterator.next._2.isDefined, "All elements should be defined but 5th element is not actually defined") 
+    assert(iterator.next._2.isDefined, "All elements should be defined but 5th element is not actually defined")
+
+    verify(blockManager, times(5)).dataDeserialize(any(), any(), any())
   }
 
   test("block fetch from remote fails using BasicBlockFetcherIterator") {

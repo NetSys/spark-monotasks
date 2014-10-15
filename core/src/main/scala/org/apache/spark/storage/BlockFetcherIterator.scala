@@ -80,8 +80,6 @@ object BlockFetcherIterator {
       readMetrics: ShuffleReadMetrics)
     extends BlockFetcherIterator {
 
-    import blockManager._
-
     if (blocksByAddress == null) {
       throw new IllegalArgumentException("BlocksByAddress is null")
     }
@@ -116,7 +114,10 @@ object BlockFetcherIterator {
       })
       bytesInFlight += req.size
       val sizeMap = req.blocks.toMap  // so we can look up the size of each blockID
-      val future = connectionManager.sendMessageReliably(cmId, blockMessageArray.toBufferMessage)
+      val future = blockManager.connectionManager.sendMessageReliably(
+          cmId, blockMessageArray.toBufferMessage)
+
+      implicit val futureExecContext = blockManager.futureExecContext
       future.onComplete {
         case Success(message) => {
           val bufferMessage = message.asInstanceOf[BufferMessage]
@@ -129,7 +130,7 @@ object BlockFetcherIterator {
             val blockId = blockMessage.getId
             val networkSize = blockMessage.getData.limit()
             results.put(new FetchResult(blockId, sizeMap(blockId),
-              () => dataDeserialize(blockId, blockMessage.getData, serializer)))
+              () => blockManager.dataDeserialize(blockId, blockMessage.getData, serializer)))
             // TODO: NettyBlockFetcherIterator has some race conditions where multiple threads can
             // be incrementing bytes read at the same time (SPARK-2625).
             readMetrics.remoteBytesRead += networkSize
@@ -150,8 +151,8 @@ object BlockFetcherIterator {
       // Make remote requests at most maxBytesInFlight / 5 in length; the reason to keep them
       // smaller than maxBytesInFlight is to allow multiple, parallel fetches from up to 5
       // nodes, rather than blocking on reading output from one node.
-      val targetRequestSize = math.max(maxBytesInFlight / 5, 1L)
-      logInfo("maxBytesInFlight: " + maxBytesInFlight + ", targetRequestSize: " + targetRequestSize)
+      val targetRequestSize = math.max(blockManager.maxBytesInFlight / 5, 1L)
+      logInfo("maxBytesInFlight: " + blockManager.maxBytesInFlight + ", targetRequestSize: " + targetRequestSize)
 
       // Split local and remote blocks. Remote blocks are further split into FetchRequests of size
       // at most maxBytesInFlight in order to limit the amount of data in flight.
@@ -159,7 +160,7 @@ object BlockFetcherIterator {
       var totalBlocks = 0
       for ((address, blockInfos) <- blocksByAddress) {
         totalBlocks += blockInfos.size
-        if (address == blockManagerId) {
+        if (address == blockManager.blockManagerId) {
           // Filter out zero-sized blocks
           localBlocksToFetch ++= blockInfos.filter(_._2 != 0).map(_._1)
           _numBlocksToFetch += localBlocksToFetch.size
@@ -202,19 +203,23 @@ object BlockFetcherIterator {
       // these all at once because they will just memory-map some files, so they won't consume
       // any memory that might exceed our maxBytesInFlight
       for (id <- localBlocksToFetch) {
-        try {
-          // getLocalFromDisk never return None but throws BlockException
-          val iter = getLocalFromDisk(id, serializer).get
-          // Pass 0 as size since it's not in flight
-          readMetrics.localBlocksFetched += 1
-          results.put(new FetchResult(id, 0, () => iter))
-          logDebug("Got local block " + id)
-        } catch {
-          case e: Exception => {
-            logError(s"Error occurred while fetching local blocks", e)
-            results.put(new FetchResult(id, -1, null))
-            return
-          }
+        val localBytes = blockManager.getLocalBytes(id)
+        val fetchResult = localBytes match {
+          case Some(bytes) =>
+            logDebug("Got local block " + id)
+            readMetrics.localBlocksFetched += 1
+            // Pass in a function, rather than passing in the iterator directly, so that
+            // dataDeserialize doesn't get called until the data is being used (dataDeserialize
+            // can lead to significant memory allocation to wrap the stream for decompression /
+            // deserialization -- see SPARK-1912).
+            new FetchResult(id, 0, () => blockManager.dataDeserialize(id, bytes, serializer))
+          case None =>
+            logError(s"Unable to fetch local block with id $id")
+            new FetchResult(id, -1, null)
+        }
+        results.put(fetchResult)
+        if (fetchResult.failed) {
+          return
         }
       }
     }
@@ -227,7 +232,8 @@ object BlockFetcherIterator {
 
       // Send out initial requests for blocks, up to our maxBytesInFlight
       while (!fetchRequests.isEmpty &&
-        (bytesInFlight == 0 || bytesInFlight + fetchRequests.front.size <= maxBytesInFlight)) {
+        (bytesInFlight == 0 ||
+          bytesInFlight + fetchRequests.front.size <= blockManager.maxBytesInFlight)) {
         sendRequest(fetchRequests.dequeue())
       }
 
@@ -254,7 +260,8 @@ object BlockFetcherIterator {
       readMetrics.fetchWaitTime += (stopFetchWait - startFetchWait)
       if (! result.failed) bytesInFlight -= result.size
       while (!fetchRequests.isEmpty &&
-        (bytesInFlight == 0 || bytesInFlight + fetchRequests.front.size <= maxBytesInFlight)) {
+        (bytesInFlight == 0 ||
+          bytesInFlight + fetchRequests.front.size <= blockManager.maxBytesInFlight)) {
         sendRequest(fetchRequests.dequeue())
       }
       (result.blockId, if (result.failed) None else Some(result.deserialize()))
