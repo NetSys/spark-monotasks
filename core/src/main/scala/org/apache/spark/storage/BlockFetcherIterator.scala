@@ -152,7 +152,8 @@ object BlockFetcherIterator {
       // smaller than maxBytesInFlight is to allow multiple, parallel fetches from up to 5
       // nodes, rather than blocking on reading output from one node.
       val targetRequestSize = math.max(blockManager.maxBytesInFlight / 5, 1L)
-      logInfo("maxBytesInFlight: " + blockManager.maxBytesInFlight + ", targetRequestSize: " + targetRequestSize)
+      logInfo("maxBytesInFlight: " + blockManager.maxBytesInFlight +
+        ", targetRequestSize: " + targetRequestSize)
 
       // Split local and remote blocks. Remote blocks are further split into FetchRequests of size
       // at most maxBytesInFlight in order to limit the amount of data in flight.

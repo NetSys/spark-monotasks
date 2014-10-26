@@ -72,10 +72,11 @@ class BlockManagerMasterActor(val isLocal: Boolean, conf: SparkConf, listenerBus
       sender ! true
 
     case UpdateBlockInfo(
-      blockManagerId, blockId, storageLevel, deserializedSize, size, tachyonSize) =>
+      blockManagerId, blockId, storageLevel, deserializedSize, size, tachyonSize, diskId) =>
       // TODO: Ideally we want to handle all the message replies in receive instead of in the
       // individual private methods.
-      updateBlockInfo(blockManagerId, blockId, storageLevel, deserializedSize, size, tachyonSize)
+      updateBlockInfo(blockManagerId, blockId, storageLevel,
+        deserializedSize, size, tachyonSize, diskId)
 
     case GetLocations(blockId) =>
       sender ! getLocations(blockId)
@@ -351,7 +352,8 @@ class BlockManagerMasterActor(val isLocal: Boolean, conf: SparkConf, listenerBus
       storageLevel: StorageLevel,
       memSize: Long,
       diskSize: Long,
-      tachyonSize: Long) {
+      tachyonSize: Long,
+      diskId: Option[String]) {
 
     if (!blockManagerInfo.contains(blockManagerId)) {
       if (blockManagerId.executorId == "<driver>" && !isLocal) {
@@ -371,7 +373,7 @@ class BlockManagerMasterActor(val isLocal: Boolean, conf: SparkConf, listenerBus
     }
 
     blockManagerInfo(blockManagerId).updateBlockInfo(
-      blockId, storageLevel, memSize, diskSize, tachyonSize)
+      blockId, storageLevel, memSize, diskSize, tachyonSize, diskId)
 
     var locations: mutable.HashSet[BlockManagerId] = null
     if (blockLocations.containsKey(blockId)) {
@@ -454,7 +456,8 @@ private[spark] class BlockManagerInfo(
       storageLevel: StorageLevel,
       memSize: Long,
       diskSize: Long,
-      tachyonSize: Long) {
+      tachyonSize: Long,
+      diskId: Option[String]) {
 
     updateLastSeenMs()
 
@@ -482,9 +485,7 @@ private[spark] class BlockManagerInfo(
           Utils.bytesToString(_remainingMem)))
       }
       if (storageLevel.useDisk) {
-        /* TODO: Report a block's diskId to the BlockManagerMasterActor. 'None' will be replaced 
-         * with the reported diskId. */ 
-        _blocks.put(blockId, BlockStatus(storageLevel, 0, diskSize, 0, None))
+        _blocks.put(blockId, BlockStatus(storageLevel, 0, diskSize, 0, diskId))
         logInfo("Added %s on disk on %s (size: %s)".format(
           blockId, blockManagerId.hostPort, Utils.bytesToString(diskSize)))
       }

@@ -286,7 +286,7 @@ private[spark] class BlockManager(
       val inTachyonSize = status.tachyonSize
       val onDiskSize = status.diskSize
       master.updateBlockInfo(
-        blockManagerId, blockId, storageLevel, inMemSize, onDiskSize, inTachyonSize)
+        blockManagerId, blockId, storageLevel, inMemSize, onDiskSize, inTachyonSize, info.diskId)
     } else {
       true
     }

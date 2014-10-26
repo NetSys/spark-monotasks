@@ -1369,7 +1369,7 @@ class BlockManagerSuite extends FunSuite with Matchers with BeforeAndAfter
     assert(disk3.isEmpty, "a3's diskId was set")
   }
 
-  test ("diskIds are not set when writing to off-heap storage") {
+  test("diskIds are not set when writing to off-heap storage") {
     val tachyonUnitTestEnabled = conf.getBoolean("spark.test.tachyon.enable", false)
     if (tachyonUnitTestEnabled) {
       store = makeBlockManager(12000)
@@ -1390,4 +1390,80 @@ class BlockManagerSuite extends FunSuite with Matchers with BeforeAndAfter
     }
   }
 
+  test("diskIds are sent to the master when writing to disk") {
+    store = makeBlockManager(12000)
+    val a1 = new Array[Byte](400)
+    val a2 = new Array[Byte](400)
+    val a3 = new Array[Byte](400)
+    store.putSingle("a1", a1, StorageLevel.DISK_ONLY)
+    store.putSingle("a2", a2, StorageLevel.DISK_ONLY)
+    store.putSingle("a3", a3, StorageLevel.DISK_ONLY)
+    val disk1a = store.getStatus("a1").get.diskId.get
+    val disk2a = store.getStatus("a2").get.diskId.get
+    val disk3a = store.getStatus("a3").get.diskId.get
+    val status1b = master.getBlockStatus("a1", true).get(store.blockManagerId)
+    val status2b = master.getBlockStatus("a2", true).get(store.blockManagerId)
+    val status3b = master.getBlockStatus("a3", true).get(store.blockManagerId)
+    assert(status1b.isDefined, "Block a1 does not have a BlockStatus object")
+    assert(status2b.isDefined, "Block a2 does not have a BlockStatus object")
+    assert(status3b.isDefined, "Block a3 does not have a BlockStatus object")
+    val disk1b = status1b.get.diskId
+    val disk2b = status2b.get.diskId
+    val disk3b = status3b.get.diskId
+    assert(disk1b.isDefined, "Block a1 does not have a diskId")
+    assert(disk2b.isDefined, "Block a2 does not have a diskId")
+    assert(disk3b.isDefined, "Block a3 does not have a diskId")
+    assert(disk1a === disk1b.get, "Block a1's diskId was not set correctly")
+    assert(disk2a === disk2b.get, "Block a2's diskId was not set correctly")
+    assert(disk3a === disk2b.get, "Block a3's diskId was not set correctly")
+  }
+
+  test("the master's diskId records are empty when writing to memory") {
+    store = makeBlockManager(12000)
+    val a1 = new Array[Byte](400)
+    val a2 = new Array[Byte](400)
+    val a3 = new Array[Byte](400)
+    store.putSingle("a1", a1, StorageLevel.MEMORY_ONLY)
+    store.putSingle("a2", a2, StorageLevel.MEMORY_ONLY)
+    store.putSingle("a3", a3, StorageLevel.MEMORY_ONLY)
+    val status1b = master.getBlockStatus("a1", true).get(store.blockManagerId)
+    val status2b = master.getBlockStatus("a2", true).get(store.blockManagerId)
+    val status3b = master.getBlockStatus("a3", true).get(store.blockManagerId)
+    assert(status1b.isDefined, "Block a1 does not have a BlockStatus object")
+    assert(status2b.isDefined, "Block a2 does not have a BlockStatus object")
+    assert(status3b.isDefined, "Block a3 does not have a BlockStatus object")
+    val disk1b = status1b.get.diskId
+    val disk2b = status2b.get.diskId
+    val disk3b = status3b.get.diskId
+    assert(disk1b.isEmpty, "Block a1 has a diskId")
+    assert(disk2b.isEmpty, "Block a2 has a diskId")
+    assert(disk3b.isEmpty, "Block a3 has a diskId")
+  }
+
+  test("the master's diskId records are empty when writing to off-heap storage") {
+    val tachyonUnitTestEnabled = conf.getBoolean("spark.test.tachyon.enable", false)
+    if (tachyonUnitTestEnabled) {
+      store = makeBlockManager(12000)
+      val a1 = new Array[Byte](400)
+      val a2 = new Array[Byte](400)
+      val a3 = new Array[Byte](400)
+      store.putSingle("a1", a1, StorageLevel.OFF_HEAP)
+      store.putSingle("a2", a2, StorageLevel.OFF_HEAP)
+      store.putSingle("a3", a3, StorageLevel.OFF_HEAP)
+      val status1b = master.getBlockStatus("a1", true).get(store.blockManagerId)
+      val status2b = master.getBlockStatus("a2", true).get(store.blockManagerId)
+      val status3b = master.getBlockStatus("a3", true).get(store.blockManagerId)
+      assert(status1b.isDefined, "Block a1 does not have a BlockStatus object")
+      assert(status2b.isDefined, "Block a2 does not have a BlockStatus object")
+      assert(status3b.isDefined, "Block a3 does not have a BlockStatus object")
+      val disk1b = status1b.get.diskId
+      val disk2b = status2b.get.diskId
+      val disk3b = status3b.get.diskId
+      assert(disk1b.isEmpty, "Block a1 has a diskId")
+      assert(disk2b.isEmpty, "Block a2 has a diskId")
+      assert(disk3b.isEmpty, "Block a3 has a diskId")
+    } else {
+      info("\"diskIds are not sent to the master when writing to off-heap storage\" test disabled.")
+    }
+  }
 }
