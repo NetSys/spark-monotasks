@@ -19,16 +19,18 @@ package org.apache.spark.monotasks
 import scala.collection.mutable.HashSet
 
 import org.apache.spark.Logging
+import org.apache.spark.monotasks.disk.{DiskMonotask, DiskScheduler}
+import org.apache.spark.storage.BlockManager
 
 /**
  * LocalDagScheduler tracks running and waiting monotasks. When all of a monotask's
  * dependencies have finished executing, the LocalDagScheduler will submit the monotask
  * to the appropriate scheduler to be executed once sufficient resources are available.
  */
-private[spark] class LocalDagScheduler extends Logging {
+private[spark] class LocalDagScheduler(val blockManager: BlockManager) extends Logging {
   // TODO: Comment these back in once the relevant schedulers have been added.
   // val computeScheduler = new ComputeScheduler
-  // val diskScheduler = new DiskScheduler
+  val diskScheduler = new DiskScheduler(blockManager)
   // val networkScheduler = new NetworkScheduler
 
   /* IDs of monotasks that are waiting for dependencies to be satisfied. This exists solely for
@@ -69,7 +71,7 @@ private[spark] class LocalDagScheduler extends Logging {
       // TODO: Comment these in once the relevant monotasks / schedulers have been added.
       // case computeMonotask: ComputeMonotask => computeScheduler.submitTask(computeMonotask)
       // case networkMonotask: NetworkMonotask => networkScheduler.submitTask(networkMonotask)
-      // case diskMonotask: DiskMonotask => diskScheduler.submitTask(diskMonotask)
+      case diskMonotask: DiskMonotask => diskScheduler.submitTask(diskMonotask)
       case _ => logError("Received unexpected type of monotask")
     }
     /* Add the monotask to runningMonotasks before removing it from waitingMonotasks to avoid

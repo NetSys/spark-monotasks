@@ -1466,4 +1466,57 @@ class BlockManagerSuite extends FunSuite with Matchers with BeforeAndAfter
       info("\"diskIds are not sent to the master when writing to off-heap storage\" test disabled.")
     }
   }
+
+  test("updateBlockInfoOnWrite: creates a new BlockInfo object if the block is not yet known") {
+    store = makeBlockManager(1000)
+    val diskId = "disk"
+    for (i <- 1 to 3) {
+      val blockId = new TestBlockId(i.toString)
+      store.updateBlockInfoOnWrite(blockId, diskId)
+
+      val statusOption = store.getStatus(blockId)
+      assert(statusOption.isDefined)
+      val status = statusOption.get
+      assert(status.storageLevel === StorageLevel.DISK_ONLY)
+      val diskIdA = status.diskId
+      assert(diskIdA.isDefined)
+      assert(diskIdA.get === diskId)
+    }
+  }
+
+  test("updateBlockInfoOnWrite: sets a known block's diskId in its BlockInfo object") {
+    store = makeBlockManager(1000)
+    val diskId1 = "disk1"
+    val diskId2 = "disk2"
+    for (i <- 1 to 3) {
+      val blockId = new TestBlockId(i.toString)
+      // Create a BlockInfo object for this block.
+      store.updateBlockInfoOnWrite(blockId, diskId1)
+
+      /* Verify that the BlockManager's record of a block's diskId is updated in the event that a
+       * block already has a BlockInfo object when updateBlockInfoOnWrite() is called. */
+      store.updateBlockInfoOnWrite(blockId, diskId2)
+
+      val status = store.getStatus(blockId)
+      assert(status.isDefined)
+      val diskId = status.get.diskId
+      assert(diskId.isDefined)
+      assert(diskId.get === diskId2)
+    }
+  }
+
+  test("updateBlockInfoOnWrite: correctly sends a block's diskId to the master") {
+    store = makeBlockManager(1000)
+    val diskId = "disk"
+    for (i <- 1 to 3) {
+      val blockId = new TestBlockId(i.toString)
+      store.updateBlockInfoOnWrite(blockId, diskId)
+
+      val masterStatus = store.master.getBlockStatus(blockId, true).get(store.blockManagerId)
+      assert(masterStatus.isDefined)
+      val diskIdA = masterStatus.get.diskId
+      assert(diskIdA.isDefined)
+      assert(diskIdA.get === diskId)
+    }
+  }
 }

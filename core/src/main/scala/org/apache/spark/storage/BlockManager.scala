@@ -15,6 +15,22 @@
  * limitations under the License.
  */
 
+/*
+ * Copyright 2014 The Regents of The University California
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package org.apache.spark.storage
 
 import java.io.{File, InputStream, OutputStream, BufferedOutputStream, ByteArrayOutputStream}
@@ -65,6 +81,7 @@ private[spark] class BlockManager(
 
   private val port = conf.getInt("spark.blockManager.port", 0)
   val diskBlockManager = new DiskBlockManager(conf)
+  val blockFileManager = new BlockFileManager(conf)
   val connectionManager =
     new ConnectionManager(port, conf, securityManager, "Connection manager for block manager")
 
@@ -218,9 +235,8 @@ private[spark] class BlockManager(
       val memSize = if (memoryStore.contains(blockId)) memoryStore.getSize(blockId) else 0L
       val isOnDisk = diskStore.contains(blockId)
       val diskSize = if (isOnDisk) diskStore.getSize(blockId) else 0L
-      val diskId = if (isOnDisk) info.diskId else None
       // Assume that block is not in Tachyon
-      BlockStatus(info.level, memSize, diskSize, 0L, diskId)
+      BlockStatus(info.level, memSize, diskSize, 0L, info.diskId)
     }
   }
 
@@ -254,6 +270,23 @@ private[spark] class BlockManager(
       asyncReregister()
     }
     logDebug(s"Told master about block $blockId")
+  }
+
+  /**
+   * Tells the master about the current storage status of the specified block, if this BlockManager
+   * knows about it. This is a wrapper for the reportBlockStatus() above.
+   */
+  private def reportBlockStatus(blockId: BlockId) {
+    if (blockInfo.contains(blockId)) {
+      val info = blockInfo(blockId)
+      // Prevent concurrent access to a block's BlockInfo object.
+      info.synchronized {
+        val status = getCurrentBlockStatus(blockId, info)
+        if (status.storageLevel != StorageLevel.NONE) {
+          reportBlockStatus(blockId, info, status)
+        }
+      }
+    }
   }
 
   /**
@@ -993,6 +1026,25 @@ private[spark] class BlockManager(
 
     val stream = wrapForCompression(blockId, new ByteBufferInputStream(bytes, true))
     serializer.newInstance().deserializeStream(stream).asIterator
+  }
+
+  /**
+   * Updates the specified block's BlockInfo object to reflect that the block is now stored on a
+   * particular disk. If the BlockManager does not have a BlockInfo object corresponding to the
+   * block, one is created.
+   */
+  def updateBlockInfoOnWrite(blockId: BlockId, diskId: String) {
+    if (blockInfo.contains(blockId)) {
+      val info = blockInfo(blockId)
+      // Prevent concurrent access to a block's BlockInfo object.
+      info.synchronized {
+        info.diskId = Some(diskId)
+      }
+      // TODO: Update info.level to indicate that the block is now stored on disk.
+    } else {
+      blockInfo(blockId) = new BlockInfo(StorageLevel.DISK_ONLY, true, Some(diskId))
+    }
+    reportBlockStatus(blockId)
   }
 
   def stop(): Unit = {

@@ -15,6 +15,22 @@
  * limitations under the License.
  */
 
+/*
+ * Copyright 2014 The Regents of The University California
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package org.apache.spark.executor
 
 /**
@@ -38,8 +54,8 @@ object ExecutorExitCode {
       OutOfMemoryError. */
   val OOM = 52
 
-  /** DiskStore failed to create a local temporary directory after many attempts. */
-  val DISK_STORE_FAILED_TO_CREATE_DIR = 53
+  /** BlockFileManager failed to create a local temporary directory after many attempts. */
+  val BLOCK_FILE_MANAGER_FAILED_TO_CREATE_DIR = 53
 
   /** TachyonStore failed to initialize after many attempts. */
   val TACHYON_STORE_FAILED_TO_INITIALIZE = 54
@@ -52,7 +68,7 @@ object ExecutorExitCode {
       case UNCAUGHT_EXCEPTION => "Uncaught exception"
       case UNCAUGHT_EXCEPTION_TWICE => "Uncaught exception, and logging the exception failed"
       case OOM => "OutOfMemoryError"
-      case DISK_STORE_FAILED_TO_CREATE_DIR =>
+      case BLOCK_FILE_MANAGER_FAILED_TO_CREATE_DIR =>
         "Failed to create local directory (bad spark.local.dir?)"
       case TACHYON_STORE_FAILED_TO_INITIALIZE => "TachyonStore failed to initialize."
       case TACHYON_STORE_FAILED_TO_CREATE_DIR =>
