@@ -61,11 +61,12 @@ private[spark] object BlockManagerMessages {
       var storageLevel: StorageLevel,
       var memSize: Long,
       var diskSize: Long,
-      var tachyonSize: Long)
+      var tachyonSize: Long,
+      var diskId: Option[String])
     extends ToBlockManagerMaster
     with Externalizable {
 
-    def this() = this(null, null, null, 0, 0, 0)  // For deserialization only
+    def this() = this(null, null, null, 0, 0, 0, None)  // For deserialization only
 
     override def writeExternal(out: ObjectOutput): Unit = Utils.tryOrIOException {
       blockManagerId.writeExternal(out)
@@ -74,6 +75,7 @@ private[spark] object BlockManagerMessages {
       out.writeLong(memSize)
       out.writeLong(diskSize)
       out.writeLong(tachyonSize)
+      out.writeObject(diskId)
     }
 
     override def readExternal(in: ObjectInput): Unit = Utils.tryOrIOException {
@@ -83,6 +85,7 @@ private[spark] object BlockManagerMessages {
       memSize = in.readLong()
       diskSize = in.readLong()
       tachyonSize = in.readLong()
+      diskId = in.readObject().asInstanceOf[Option[String]]
     }
   }
 
