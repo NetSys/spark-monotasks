@@ -18,11 +18,19 @@ package org.apache.spark.monotasks
 
 import org.scalatest.{BeforeAndAfterEach, FunSuite, Matchers}
 
-class LocalDagSchedulerSuite extends FunSuite with Matchers with BeforeAndAfterEach {
+import org.apache.spark.{LocalSparkContext, SparkConf, SparkContext, SparkEnv}
+
+class LocalDagSchedulerSuite extends FunSuite with BeforeAndAfterEach with LocalSparkContext
+  with Matchers {
+
   private var localDagScheduler: LocalDagScheduler = _
 
   override def beforeEach() {
-    localDagScheduler = new LocalDagScheduler()
+    /* This is required because the LocalDagScheduler takes as input a BlockManager, which is
+     * obtained from SparkEnv. Pass in false to the SparkConf constructor so that the same
+     * configuration is loaded regardless of the system properties. */
+    sc = new SparkContext("local", "test", new SparkConf(false))
+    localDagScheduler = new LocalDagScheduler(SparkEnv.get.blockManager)
   }
 
   test("submitMonotasks: tasks with no dependencies are run immediately") {

@@ -18,17 +18,27 @@ package org.apache.spark.monotasks
 
 import scala.collection.mutable.HashSet
 
-import org.scalatest.{FunSuite, Matchers}
+import org.scalatest.{BeforeAndAfterEach, FunSuite, Matchers}
 
-class MonotaskSuite extends FunSuite with Matchers {
- test("monotasks are assigned unique IDs") {
-   val localDagScheduler = new LocalDagScheduler()
-   val numMonotasks = 10
-   val monotaskList = Array.fill[Monotask](numMonotasks)(new SimpleMonotask(localDagScheduler))
+import org.apache.spark.{LocalSparkContext, SparkConf, SparkContext, SparkEnv}
 
-   // Make sure that all of the IDs are unique.
-   val monotaskIdSet = new HashSet[Long]()
-   monotaskList.foreach(monotaskIdSet += _.taskId)
-   assert(numMonotasks === monotaskIdSet.size)
- }
+class MonotaskSuite extends FunSuite with BeforeAndAfterEach with LocalSparkContext with Matchers {
+
+  override def beforeEach() {
+    /* This is required because Monotasks take as input a LocalDagScheduler, which in turn needs a
+     * BlockManager. This BlockManager is obtained from SparkEnv. Pass in false to the SparkConf
+     * constructor so that the same configuration is loaded regardless of the system properties. */
+    sc = new SparkContext("local", "test", new SparkConf(false))
+  }
+
+  test("monotasks are assigned unique IDs") {
+    val localDagScheduler = new LocalDagScheduler(SparkEnv.get.blockManager)
+    val numMonotasks = 10
+    val monotaskList = Array.fill[Monotask](numMonotasks)(new SimpleMonotask(localDagScheduler))
+
+    // Make sure that all of the IDs are unique.
+    val monotaskIdSet = new HashSet[Long]()
+    monotaskList.foreach(monotaskIdSet += _.taskId)
+    assert(numMonotasks === monotaskIdSet.size)
+  }
 }
