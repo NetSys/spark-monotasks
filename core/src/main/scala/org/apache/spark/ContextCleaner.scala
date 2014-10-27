@@ -23,6 +23,7 @@ import scala.collection.mutable.{ArrayBuffer, SynchronizedBuffer}
 
 import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.rdd.RDD
+import org.apache.spark.storage.ShuffleBlockId
 import org.apache.spark.util.Utils
 
 /**
@@ -30,7 +31,8 @@ import org.apache.spark.util.Utils
  */
 private sealed trait CleanupTask
 private case class CleanRDD(rddId: Int) extends CleanupTask
-private case class CleanShuffle(shuffleId: Int) extends CleanupTask
+private case class CleanShuffle(shuffleId: Int, numMapPartitions: Int, numShuffleBuckets: Int)
+  extends CleanupTask
 private case class CleanBroadcast(broadcastId: Long) extends CleanupTask
 
 /**
@@ -116,7 +118,12 @@ private[spark] class ContextCleaner(sc: SparkContext) extends Logging {
 
   /** Register a ShuffleDependency for cleanup when it is garbage collected. */
   def registerShuffleForCleanup(shuffleDependency: ShuffleDependency[_, _, _]) {
-    registerForCleanup(shuffleDependency, CleanShuffle(shuffleDependency.shuffleId))
+    registerForCleanup(
+      shuffleDependency,
+      CleanShuffle(
+        shuffleDependency.shuffleId,
+        shuffleDependency.rdd.partitions.length,
+        shuffleDependency.partitioner.numPartitions))
   }
 
   /** Register a Broadcast for cleanup when it is garbage collected. */
@@ -141,8 +148,9 @@ private[spark] class ContextCleaner(sc: SparkContext) extends Logging {
           task match {
             case CleanRDD(rddId) =>
               doCleanupRDD(rddId, blocking = blockOnCleanupTasks)
-            case CleanShuffle(shuffleId) =>
-              doCleanupShuffle(shuffleId, blocking = blockOnShuffleCleanupTasks)
+            case CleanShuffle(shuffleId, numMapPartitions, numShuffleBuckets) =>
+              doCleanupShuffle(shuffleId, numMapPartitions, numShuffleBuckets,
+                blocking = blockOnShuffleCleanupTasks)
             case CleanBroadcast(broadcastId) =>
               doCleanupBroadcast(broadcastId, blocking = blockOnCleanupTasks)
           }
@@ -166,11 +174,19 @@ private[spark] class ContextCleaner(sc: SparkContext) extends Logging {
   }
 
   /** Perform shuffle cleanup, asynchronously. */
-  def doCleanupShuffle(shuffleId: Int, blocking: Boolean) {
+  def doCleanupShuffle(
+      shuffleId: Int,
+      numMapPartitions: Int,
+      numShuffleBuckets: Int,
+      blocking: Boolean) {
     try {
       logDebug("Cleaning shuffle " + shuffleId)
       mapOutputTrackerMaster.unregisterShuffle(shuffleId)
       blockManagerMaster.removeShuffle(shuffleId, blocking)
+      for (mapId <- 0 until numMapPartitions; reduceId <- 0 until numShuffleBuckets) {
+        val blockId = new ShuffleBlockId(shuffleId, mapId, reduceId)
+        blockManagerMaster.removeBlock(blockId)
+      }
       listeners.foreach(_.shuffleCleaned(shuffleId))
       logInfo("Cleaned shuffle " + shuffleId)
     } catch {

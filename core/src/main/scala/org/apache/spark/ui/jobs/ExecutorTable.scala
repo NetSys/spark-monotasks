@@ -47,8 +47,6 @@ private[ui] class ExecutorTable(stageId: Int, stageAttemptId: Int, parent: JobPr
         <th><span data-toggle="tooltip" title={ToolTips.INPUT}>Input</span></th>
         <th><span data-toggle="tooltip" title={ToolTips.SHUFFLE_READ}>Shuffle Read</span></th>
         <th><span data-toggle="tooltip" title={ToolTips.SHUFFLE_WRITE}>Shuffle Write</span></th>
-        <th>Shuffle Spill (Memory)</th>
-        <th>Shuffle Spill (Disk)</th>
       </thead>
       <tbody>
         {createExecutorTable()}
@@ -81,10 +79,6 @@ private[ui] class ExecutorTable(stageId: Int, stageAttemptId: Int, parent: JobPr
               {Utils.bytesToString(v.shuffleRead)}</td>
             <td sorttable_customekey={v.shuffleWrite.toString}>
               {Utils.bytesToString(v.shuffleWrite)}</td>
-            <td sorttable_customekey={v.memoryBytesSpilled.toString}>
-              {Utils.bytesToString(v.memoryBytesSpilled)}</td>
-            <td sorttable_customekey={v.diskBytesSpilled.toString}>
-              {Utils.bytesToString(v.diskBytesSpilled)}</td>
           </tr>
         }
       case None =>

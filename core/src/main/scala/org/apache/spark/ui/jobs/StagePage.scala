@@ -55,7 +55,6 @@ private[ui] class StagePage(parent: JobProgressTab) extends WebUIPage("stage") {
       val hasInput = stageData.inputBytes > 0
       val hasShuffleRead = stageData.shuffleReadBytes > 0
       val hasShuffleWrite = stageData.shuffleWriteBytes > 0
-      val hasBytesSpilled = stageData.memoryBytesSpilled > 0 && stageData.diskBytesSpilled > 0
 
       // scalastyle:off
       val summary =
@@ -83,16 +82,6 @@ private[ui] class StagePage(parent: JobProgressTab) extends WebUIPage("stage") {
                 {Utils.bytesToString(stageData.shuffleWriteBytes)}
               </li>
             }
-            {if (hasBytesSpilled)
-            <li>
-              <strong>Shuffle spill (memory): </strong>
-              {Utils.bytesToString(stageData.memoryBytesSpilled)}
-            </li>
-            <li>
-              <strong>Shuffle spill (disk): </strong>
-              {Utils.bytesToString(stageData.diskBytesSpilled)}
-            </li>
-            }
           </ul>
         </div>
         // scalastyle:on
@@ -108,11 +97,10 @@ private[ui] class StagePage(parent: JobProgressTab) extends WebUIPage("stage") {
         {if (hasInput) Seq("Input") else Nil} ++
         {if (hasShuffleRead) Seq("Shuffle Read")  else Nil} ++
         {if (hasShuffleWrite) Seq("Write Time", "Shuffle Write") else Nil} ++
-        {if (hasBytesSpilled) Seq("Shuffle Spill (Memory)", "Shuffle Spill (Disk)") else Nil} ++
         Seq("Errors")
 
       val taskTable = UIUtils.listingTable(
-        taskHeaders, taskRow(hasInput, hasShuffleRead, hasShuffleWrite, hasBytesSpilled), tasks)
+        taskHeaders, taskRow(hasInput, hasShuffleRead, hasShuffleWrite), tasks)
 
       // Excludes tasks which failed and have incomplete metrics
       val validTasks = tasks.filter(t => t.taskInfo.status == "SUCCESS" && t.taskMetrics.isDefined)
@@ -185,18 +173,6 @@ private[ui] class StagePage(parent: JobProgressTab) extends WebUIPage("stage") {
           }
           val shuffleWriteQuantiles = <td>Shuffle Write</td> +: getQuantileCols(shuffleWriteSizes)
 
-          val memoryBytesSpilledSizes = validTasks.map { case TaskUIData(_, metrics, _) =>
-            metrics.get.memoryBytesSpilled.toDouble
-          }
-          val memoryBytesSpilledQuantiles = <td>Shuffle spill (memory)</td> +:
-            getQuantileCols(memoryBytesSpilledSizes)
-
-          val diskBytesSpilledSizes = validTasks.map { case TaskUIData(_, metrics, _) =>
-            metrics.get.diskBytesSpilled.toDouble
-          }
-          val diskBytesSpilledQuantiles = <td>Shuffle spill (disk)</td> +:
-            getQuantileCols(diskBytesSpilledSizes)
-
           val listings: Seq[Seq[Node]] = Seq(
             serializationQuantiles,
             serviceQuantiles,
@@ -204,9 +180,7 @@ private[ui] class StagePage(parent: JobProgressTab) extends WebUIPage("stage") {
             schedulerDelayQuantiles,
             if (hasInput) inputQuantiles else Nil,
             if (hasShuffleRead) shuffleReadQuantiles else Nil,
-            if (hasShuffleWrite) shuffleWriteQuantiles else Nil,
-            if (hasBytesSpilled) memoryBytesSpilledQuantiles else Nil,
-            if (hasBytesSpilled) diskBytesSpilledQuantiles else Nil)
+            if (hasShuffleWrite) shuffleWriteQuantiles else Nil)
 
           val quantileHeaders = Seq("Metric", "Min", "25th percentile",
             "Median", "75th percentile", "Max")
@@ -234,8 +208,7 @@ private[ui] class StagePage(parent: JobProgressTab) extends WebUIPage("stage") {
   def taskRow(
       hasInput: Boolean,
       hasShuffleRead: Boolean,
-      hasShuffleWrite: Boolean,
-      hasBytesSpilled: Boolean)(taskData: TaskUIData): Seq[Node] = {
+      hasShuffleWrite: Boolean)(taskData: TaskUIData): Seq[Node] = {
     taskData match { case TaskUIData(info, metrics, errorMessage) =>
       val duration = if (info.status == "RUNNING") info.timeRunning(System.currentTimeMillis())
         else metrics.map(_.executorRunTime).getOrElse(1L)
@@ -264,15 +237,6 @@ private[ui] class StagePage(parent: JobProgressTab) extends WebUIPage("stage") {
       val writeTimeReadable = maybeWriteTime.map(t => t / (1000 * 1000)).map { ms =>
         if (ms == 0) "" else UIUtils.formatDuration(ms)
       }.getOrElse("")
-
-      val maybeMemoryBytesSpilled = metrics.map(_.memoryBytesSpilled)
-      val memoryBytesSpilledSortable = maybeMemoryBytesSpilled.map(_.toString).getOrElse("")
-      val memoryBytesSpilledReadable =
-        maybeMemoryBytesSpilled.map(Utils.bytesToString).getOrElse("")
-
-      val maybeDiskBytesSpilled = metrics.map(_.diskBytesSpilled)
-      val diskBytesSpilledSortable = maybeDiskBytesSpilled.map(_.toString).getOrElse("")
-      val diskBytesSpilledReadable = maybeDiskBytesSpilled.map(Utils.bytesToString).getOrElse("")
 
       <tr>
         <td>{info.index}</td>
@@ -318,14 +282,6 @@ private[ui] class StagePage(parent: JobProgressTab) extends WebUIPage("stage") {
            <td sorttable_customkey={shuffleWriteSortable}>
              {shuffleWriteReadable}
            </td>
-        }}
-        {if (hasBytesSpilled) {
-          <td sorttable_customkey={memoryBytesSpilledSortable}>
-            {memoryBytesSpilledReadable}
-          </td>
-          <td sorttable_customkey={diskBytesSpilledSortable}>
-            {diskBytesSpilledReadable}
-          </td>
         }}
         <td>
           {errorMessage.map { e => <pre>{e}</pre> }.getOrElse("")}

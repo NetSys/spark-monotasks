@@ -33,7 +33,6 @@ import org.apache.spark.SparkContext._
 import org.apache.spark.rdd.RDD
 import org.apache.spark.storage._
 import org.apache.spark.shuffle.hash.HashShuffleManager
-import org.apache.spark.shuffle.sort.SortShuffleManager
 import org.apache.spark.storage.BroadcastBlockId
 import org.apache.spark.storage.RDDBlockId
 import org.apache.spark.storage.ShuffleBlockId
@@ -138,7 +137,11 @@ class ContextCleanerSuite extends ContextCleanerSuiteBase {
     val tester = new CleanerTester(sc, shuffleIds = shuffleDeps.map(_.shuffleId))
 
     // Explicit cleanup
-    shuffleDeps.foreach(s => cleaner.doCleanupShuffle(s.shuffleId, blocking = true))
+    shuffleDeps.foreach(s => cleaner.doCleanupShuffle(
+      s.shuffleId,
+      s.rdd.partitions.length,
+      s.partitioner.numPartitions,
+      blocking = true))
     tester.assertCleanup()
 
     // Verify that shuffles can be re-executed after cleaning up
@@ -254,83 +257,6 @@ class ContextCleanerSuite extends ContextCleanerSuiteBase {
     val broadcastBuffer = (1 to numBroadcasts).map(i => newBroadcast()).toBuffer
     val rddIds = sc.persistentRdds.keys.toSeq
     val shuffleIds = 0 until sc.newShuffleId
-    val broadcastIds = broadcastBuffer.map(_.id)
-
-    val preGCTester = new CleanerTester(sc, rddIds, shuffleIds, broadcastIds)
-    runGC()
-    intercept[Exception] {
-      preGCTester.assertCleanup()(timeout(1000 millis))
-    }
-
-    // Test that GC triggers the cleanup of all variables after the dereferencing them
-    val postGCTester = new CleanerTester(sc, rddIds, shuffleIds, broadcastIds)
-    broadcastBuffer.clear()
-    rddBuffer.clear()
-    runGC()
-    postGCTester.assertCleanup()
-
-    // Make sure the broadcasted task closure no longer exists after GC.
-    val taskClosureBroadcastId = broadcastIds.max + 1
-    assert(sc.env.blockManager.master.getMatchingBlockIds({
-      case BroadcastBlockId(`taskClosureBroadcastId`, _) => true
-      case _ => false
-    }, askSlaves = true).isEmpty)
-  }
-}
-
-
-/**
- * A copy of the shuffle tests for sort-based shuffle
- */
-class SortShuffleContextCleanerSuite extends ContextCleanerSuiteBase(classOf[SortShuffleManager]) {
-  test("cleanup shuffle") {
-    val (rdd, shuffleDeps) = newRDDWithShuffleDependencies()
-    val collected = rdd.collect().toList
-    val tester = new CleanerTester(sc, shuffleIds = shuffleDeps.map(_.shuffleId))
-
-    // Explicit cleanup
-    shuffleDeps.foreach(s => cleaner.doCleanupShuffle(s.shuffleId, blocking = true))
-    tester.assertCleanup()
-
-    // Verify that shuffles can be re-executed after cleaning up
-    assert(rdd.collect().toList.equals(collected))
-  }
-
-  test("automatically cleanup shuffle") {
-    var rdd = newShuffleRDD()
-    rdd.count()
-
-    // Test that GC does not cause shuffle cleanup due to a strong reference
-    val preGCTester = new CleanerTester(sc, shuffleIds = Seq(0))
-    runGC()
-    intercept[Exception] {
-      preGCTester.assertCleanup()(timeout(1000 millis))
-    }
-
-    // Test that GC causes shuffle cleanup after dereferencing the RDD
-    val postGCTester = new CleanerTester(sc, shuffleIds = Seq(0))
-    rdd = null  // Make RDD out of scope, so that corresponding shuffle goes out of scope
-    runGC()
-    postGCTester.assertCleanup()
-  }
-
-  test("automatically cleanup RDD + shuffle + broadcast in distributed mode") {
-    sc.stop()
-
-    val conf2 = new SparkConf()
-      .setMaster("local-cluster[2, 1, 512]")
-      .setAppName("ContextCleanerSuite")
-      .set("spark.cleaner.referenceTracking.blocking", "true")
-      .set("spark.cleaner.referenceTracking.blocking.shuffle", "true")
-      .set("spark.shuffle.manager", shuffleManager.getName)
-    sc = new SparkContext(conf2)
-
-    val numRdds = 10
-    val numBroadcasts = 4 // Broadcasts are more costly
-    val rddBuffer = (1 to numRdds).map(i => randomRdd).toBuffer
-    val broadcastBuffer = (1 to numBroadcasts).map(i => newBroadcast).toBuffer
-    val rddIds = sc.persistentRdds.keys.toSeq
-    val shuffleIds = 0 until sc.newShuffleId()
     val broadcastIds = broadcastBuffer.map(_.id)
 
     val preGCTester = new CleanerTester(sc, rddIds, shuffleIds, broadcastIds)

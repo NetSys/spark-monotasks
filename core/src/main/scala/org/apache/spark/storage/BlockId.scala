@@ -78,11 +78,6 @@ case class StreamBlockId(streamId: Int, uniqueId: Long) extends BlockId {
   def name = "input-" + streamId + "-" + uniqueId
 }
 
-/** Id associated with temporary data managed as blocks. Not serializable. */
-private[spark] case class TempBlockId(id: UUID) extends BlockId {
-  def name = "temp_" + id
-}
-
 // Intended only for testing purposes
 private[spark] case class TestBlockId(id: String) extends BlockId {
   def name = "test_" + id

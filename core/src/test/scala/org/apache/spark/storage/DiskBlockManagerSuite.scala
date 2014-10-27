@@ -46,12 +46,6 @@ class DiskBlockManagerSuite extends FunSuite with BeforeAndAfterEach with Before
 
   private val shuffleManager = new HashShuffleManager(testConf.clone)
 
-  val shuffleBlockManager = new ShuffleBlockManager(null, shuffleManager) {
-    override def conf = testConf.clone
-    var idToSegmentMap = mutable.Map[ShuffleBlockId, FileSegment]()
-    override def getBlockLocation(id: ShuffleBlockId) = idToSegmentMap(id)
-  }
-
   var diskBlockManager: DiskBlockManager = _
 
   override def beforeAll() {
@@ -73,13 +67,11 @@ class DiskBlockManagerSuite extends FunSuite with BeforeAndAfterEach with Before
   override def beforeEach() {
     val conf = testConf.clone
     conf.set("spark.local.dir", rootDirs)
-    diskBlockManager = new DiskBlockManager(shuffleBlockManager, conf)
-    shuffleBlockManager.idToSegmentMap.clear()
+    diskBlockManager = new DiskBlockManager(conf)
   }
 
   override def afterEach() {
     diskBlockManager.stop()
-    shuffleBlockManager.idToSegmentMap.clear()
   }
 
   test("basic block creation") {
@@ -113,106 +105,10 @@ class DiskBlockManagerSuite extends FunSuite with BeforeAndAfterEach with Before
     newFile.delete()
   }
 
-  test("block remapping") {
-    val filename = "test"
-    val blockId0 = new ShuffleBlockId(1, 2, 3)
-    val newFile = diskBlockManager.getFile(filename)
-    writeToFile(newFile, 15)
-    shuffleBlockManager.idToSegmentMap(blockId0) = new FileSegment(newFile, 0, 15)
-    assertSegmentEquals(blockId0, filename, 0, 15)
-
-    val blockId1 = new ShuffleBlockId(1, 2, 4)
-    val newFile2 = diskBlockManager.getFile(filename)
-    writeToFile(newFile2, 12)
-    shuffleBlockManager.idToSegmentMap(blockId1) = new FileSegment(newFile, 15, 12)
-    assertSegmentEquals(blockId1, filename, 15, 12)
-
-    assert(newFile === newFile2)
-    newFile.delete()
-  }
-
   private def checkSegments(segment1: FileSegment, segment2: FileSegment) {
     assert (segment1.file.getCanonicalPath === segment2.file.getCanonicalPath)
     assert (segment1.offset === segment2.offset)
     assert (segment1.length === segment2.length)
-  }
-
-  test("consolidated shuffle can write to shuffle group without messing existing offsets/lengths") {
-
-    val serializer = new JavaSerializer(testConf)
-    val confCopy = testConf.clone
-    // reset after EACH object write. This is to ensure that there are bytes appended after
-    // an object is written. So if the codepaths assume writeObject is end of data, this should
-    // flush those bugs out. This was common bug in ExternalAppendOnlyMap, etc.
-    confCopy.set("spark.serializer.objectStreamReset", "1")
-
-    val securityManager = new org.apache.spark.SecurityManager(confCopy)
-    // Do not use the shuffleBlockManager above !
-    val (actorSystem, boundPort) = AkkaUtils.createActorSystem("test", "localhost", 0, confCopy,
-      securityManager)
-    val master = new BlockManagerMaster(
-      actorSystem.actorOf(Props(new BlockManagerMasterActor(true, confCopy, new LiveListenerBus))),
-      confCopy)
-    val store = new BlockManager("<driver>", actorSystem, master , serializer, confCopy,
-      securityManager, null, shuffleManager)
-
-    try {
-
-      val shuffleManager = store.shuffleBlockManager
-
-      val shuffle1 = shuffleManager.forMapTask(1, 1, 1, serializer, new ShuffleWriteMetrics)
-      for (writer <- shuffle1.writers) {
-        writer.write("test1")
-        writer.write("test2")
-      }
-      for (writer <- shuffle1.writers) {
-        writer.commitAndClose()
-      }
-
-      val shuffle1Segment = shuffle1.writers(0).fileSegment()
-      shuffle1.releaseWriters(success = true)
-
-      val shuffle2 = shuffleManager.forMapTask(1, 2, 1, new JavaSerializer(testConf),
-        new ShuffleWriteMetrics)
-
-      for (writer <- shuffle2.writers) {
-        writer.write("test3")
-        writer.write("test4")
-      }
-      for (writer <- shuffle2.writers) {
-        writer.commitAndClose()
-      }
-      val shuffle2Segment = shuffle2.writers(0).fileSegment()
-      shuffle2.releaseWriters(success = true)
-
-      // Now comes the test :
-      // Write to shuffle 3; and close it, but before registering it, check if the file lengths for
-      // previous task (forof shuffle1) is the same as 'segments'. Earlier, we were inferring length
-      // of block based on remaining data in file : which could mess things up when there is concurrent read
-      // and writes happening to the same shuffle group.
-
-      val shuffle3 = shuffleManager.forMapTask(1, 3, 1, new JavaSerializer(testConf),
-        new ShuffleWriteMetrics)
-      for (writer <- shuffle3.writers) {
-        writer.write("test3")
-        writer.write("test4")
-      }
-      for (writer <- shuffle3.writers) {
-        writer.commitAndClose()
-      }
-      // check before we register.
-      checkSegments(shuffle2Segment, shuffleManager.getBlockLocation(ShuffleBlockId(1, 2, 0)))
-      shuffle3.releaseWriters(success = true)
-      checkSegments(shuffle2Segment, shuffleManager.getBlockLocation(ShuffleBlockId(1, 2, 0)))
-      shuffleManager.removeShuffle(1)
-    } finally {
-
-      if (store != null) {
-        store.stop()
-      }
-      actorSystem.shutdown()
-      actorSystem.awaitTermination()
-    }
   }
 
   def assertSegmentEquals(blockId: BlockId, filename: String, offset: Int, length: Int) {

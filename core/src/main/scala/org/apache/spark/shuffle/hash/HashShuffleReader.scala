@@ -20,7 +20,6 @@ package org.apache.spark.shuffle.hash
 import org.apache.spark.{InterruptibleIterator, TaskContext}
 import org.apache.spark.serializer.Serializer
 import org.apache.spark.shuffle.{BaseShuffleHandle, ShuffleReader}
-import org.apache.spark.util.collection.ExternalSorter
 
 private[spark] class HashShuffleReader[K, C](
     handle: BaseShuffleHandle[K, _, C],
@@ -57,18 +56,17 @@ private[spark] class HashShuffleReader[K, C](
     // Sort the output if there is a sort ordering defined.
     dep.keyOrdering match {
       case Some(keyOrd: Ordering[K]) =>
-        // Create an ExternalSorter to sort the data. Note that if spark.shuffle.spill is disabled,
-        // the ExternalSorter won't spill to disk.
-        val sorter = new ExternalSorter[K, C, C](ordering = Some(keyOrd), serializer = Some(ser))
-        sorter.insertAll(aggregatedIter)
-        context.taskMetrics.memoryBytesSpilled += sorter.memoryBytesSpilled
-        context.taskMetrics.diskBytesSpilled += sorter.diskBytesSpilled
-        sorter.iterator
+        // Define a Comparator for the whole record based on the key Ordering.
+        val cmp = new Ordering[Product2[K, C]] {
+          override def compare(o1: Product2[K, C], o2: Product2[K, C]): Int = {
+            keyOrd.compare(o1._1, o2._1)
+          }
+        }
+        val sortBuffer: Array[Product2[K, C]] = aggregatedIter.toArray
+        scala.util.Sorting.quickSort(sortBuffer)(cmp)
+        sortBuffer.iterator
       case None =>
         aggregatedIter
     }
   }
-
-  /** Close this reader */
-  override def stop(): Unit = ???
 }

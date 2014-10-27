@@ -310,8 +310,6 @@ class JsonProtocolSuite extends FunSuite {
     assert(metrics1.resultSize === metrics2.resultSize)
     assert(metrics1.jvmGCTime === metrics2.jvmGCTime)
     assert(metrics1.resultSerializationTime === metrics2.resultSerializationTime)
-    assert(metrics1.memoryBytesSpilled === metrics2.memoryBytesSpilled)
-    assert(metrics1.diskBytesSpilled === metrics2.diskBytesSpilled)
     assertOptionEquals(
       metrics1.shuffleReadMetrics, metrics2.shuffleReadMetrics, assertShuffleReadEquals)
     assertOptionEquals(
@@ -526,7 +524,6 @@ class JsonProtocolSuite extends FunSuite {
     t.resultSize = c
     t.jvmGCTime = d
     t.resultSerializationTime = a + b
-    t.memoryBytesSpilled = a + c
 
     if (hasHadoopInput) {
       val inputMetrics = new InputMetrics(DataReadMethod.Hadoop)
@@ -770,8 +767,6 @@ class JsonProtocolSuite extends FunSuite {
       |    "Result Size": 500,
       |    "JVM GC Time": 600,
       |    "Result Serialization Time": 700,
-      |    "Memory Bytes Spilled": 800,
-      |    "Disk Bytes Spilled": 0,
       |    "Shuffle Read Metrics": {
       |      "Shuffle Finish Time": 900,
       |      "Remote Blocks Fetched": 800,
@@ -854,8 +849,6 @@ class JsonProtocolSuite extends FunSuite {
       |    "Result Size": 500,
       |    "JVM GC Time": 600,
       |    "Result Serialization Time": 700,
-      |    "Memory Bytes Spilled": 800,
-      |    "Disk Bytes Spilled": 0,
       |    "Shuffle Write Metrics": {
       |      "Shuffle Bytes Written": 1200,
       |      "Shuffle Write Time": 1500

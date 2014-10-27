@@ -19,12 +19,11 @@ package org.apache.spark.storage
 
 import java.io.File
 import java.text.SimpleDateFormat
-import java.util.{Date, Random, UUID}
+import java.util.{Date, Random}
 
-import org.apache.spark.{SparkConf, SparkEnv, Logging}
+import org.apache.spark.{Logging, SparkConf}
 import org.apache.spark.executor.ExecutorExitCode
 import org.apache.spark.util.Utils
-import org.apache.spark.shuffle.sort.SortShuffleManager
 
 /**
  * Creates and maintains the logical mapping between logical blocks and physical on-disk
@@ -35,13 +34,11 @@ import org.apache.spark.shuffle.sort.SortShuffleManager
  * Block files are hashed among the directories listed in spark.local.dir (or in
  * SPARK_LOCAL_DIRS, if it's set).
  */
-private[spark] class DiskBlockManager(shuffleBlockManager: ShuffleBlockManager, conf: SparkConf)
-  extends Logging {
+private[spark] class DiskBlockManager(conf: SparkConf) extends Logging {
 
   private val MAX_DIR_CREATION_ATTEMPTS: Int = 10
 
-  private val subDirsPerLocalDir =
-    shuffleBlockManager.conf.getInt("spark.diskStore.subDirectories", 64)
+  private val subDirsPerLocalDir = conf.getInt("spark.diskStore.subDirectories", 64)
 
   /* Create one local directory for each path mentioned in spark.local.dir; then, inside this
    * directory, create multiple subdirectories that we will hash files into, in order to avoid
@@ -61,18 +58,8 @@ private[spark] class DiskBlockManager(shuffleBlockManager: ShuffleBlockManager, 
    * Otherwise, we assume the Block is mapped to the whole file identified by the BlockId.
    */
   def getBlockLocation(blockId: BlockId): FileSegment = {
-    val env = SparkEnv.get  // NOTE: can be null in unit tests
-    if (blockId.isShuffle && env != null && env.shuffleManager.isInstanceOf[SortShuffleManager]) {
-      // For sort-based shuffle, let it figure out its blocks
-      val sortShuffleManager = env.shuffleManager.asInstanceOf[SortShuffleManager]
-      sortShuffleManager.getBlockLocation(blockId.asInstanceOf[ShuffleBlockId], this)
-    } else if (blockId.isShuffle && shuffleBlockManager.consolidateShuffleFiles) {
-      // For hash-based shuffle with consolidated files, ShuffleBlockManager takes care of this
-      shuffleBlockManager.getBlockLocation(blockId.asInstanceOf[ShuffleBlockId])
-    } else {
-      val file = getFile(blockId.name)
-      new FileSegment(file, 0, file.length())
-    }
+    val file = getFile(blockId.name)
+    new FileSegment(file, 0, file.length())
   }
 
   def getFile(filename: String): File = {
@@ -119,15 +106,6 @@ private[spark] class DiskBlockManager(shuffleBlockManager: ShuffleBlockManager, 
   /** List all the blocks currently stored on disk by the disk manager. */
   def getAllBlocks(): Seq[BlockId] = {
     getAllFiles().map(f => BlockId(f.getName))
-  }
-
-  /** Produces a unique block id and File suitable for intermediate results. */
-  def createTempBlock(): (TempBlockId, File) = {
-    var blockId = new TempBlockId(UUID.randomUUID())
-    while (getFile(blockId).exists()) {
-      blockId = new TempBlockId(UUID.randomUUID())
-    }
-    (blockId, getFile(blockId))
   }
 
   private def createLocalDirs(conf: SparkConf): Array[File] = {

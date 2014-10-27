@@ -34,7 +34,8 @@ private[spark] object BlockManagerMessages {
   // Remove all blocks belonging to a specific RDD.
   case class RemoveRdd(rddId: Int) extends ToBlockManagerSlave
 
-  // Remove all blocks belonging to a specific shuffle.
+  // Removed cached information about the shuffle from MapOutputTracker.
+  // TODO: This shouldn't need to go through the block manager.
   case class RemoveShuffle(shuffleId: Int) extends ToBlockManagerSlave
 
   // Remove all blocks belonging to a specific broadcast.

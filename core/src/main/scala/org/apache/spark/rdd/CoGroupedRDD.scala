@@ -26,7 +26,7 @@ import scala.collection.mutable.ArrayBuffer
 import org.apache.spark.{InterruptibleIterator, Partition, Partitioner, SparkEnv, TaskContext}
 import org.apache.spark.{Dependency, OneToOneDependency, ShuffleDependency}
 import org.apache.spark.annotation.DeveloperApi
-import org.apache.spark.util.collection.{ExternalAppendOnlyMap, AppendOnlyMap, CompactBuffer}
+import org.apache.spark.util.collection.{AppendOnlyMap, CompactBuffer}
 import org.apache.spark.serializer.Serializer
 import org.apache.spark.shuffle.ShuffleHandle
 
@@ -117,7 +117,6 @@ class CoGroupedRDD[K](@transient var rdds: Seq[RDD[_ <: Product2[K, _]]], part: 
 
   override def compute(s: Partition, context: TaskContext): Iterator[(K, Array[Iterable[_]])] = {
     val sparkConf = SparkEnv.get.conf
-    val externalSorting = sparkConf.getBoolean("spark.shuffle.spill", true)
     val split = s.asInstanceOf[CoGroupPartition]
     val numRdds = split.deps.size
 
@@ -137,58 +136,21 @@ class CoGroupedRDD[K](@transient var rdds: Seq[RDD[_ <: Product2[K, _]]], part: 
         rddIterators += ((it, depNum))
     }
 
-    if (!externalSorting) {
-      val map = new AppendOnlyMap[K, CoGroupCombiner]
-      val update: (Boolean, CoGroupCombiner) => CoGroupCombiner = (hadVal, oldVal) => {
-        if (hadVal) oldVal else Array.fill(numRdds)(new CoGroup)
-      }
-      val getCombiner: K => CoGroupCombiner = key => {
-        map.changeValue(key, update)
-      }
-      rddIterators.foreach { case (it, depNum) =>
-        while (it.hasNext) {
-          val kv = it.next()
-          getCombiner(kv._1)(depNum) += kv._2
-        }
-      }
-      new InterruptibleIterator(context,
-        map.iterator.asInstanceOf[Iterator[(K, Array[Iterable[_]])]])
-    } else {
-      val map = createExternalMap(numRdds)
-      for ((it, depNum) <- rddIterators) {
-        map.insertAll(it.map(pair => (pair._1, new CoGroupValue(pair._2, depNum))))
-      }
-      context.taskMetrics.memoryBytesSpilled += map.memoryBytesSpilled
-      context.taskMetrics.diskBytesSpilled += map.diskBytesSpilled
-      new InterruptibleIterator(context,
-        map.iterator.asInstanceOf[Iterator[(K, Array[Iterable[_]])]])
+    val map = new AppendOnlyMap[K, CoGroupCombiner]
+    val update: (Boolean, CoGroupCombiner) => CoGroupCombiner = (hadVal, oldVal) => {
+      if (hadVal) oldVal else Array.fill(numRdds)(new CoGroup)
     }
-  }
-
-  private def createExternalMap(numRdds: Int)
-    : ExternalAppendOnlyMap[K, CoGroupValue, CoGroupCombiner] = {
-
-    val createCombiner: (CoGroupValue => CoGroupCombiner) = value => {
-      val newCombiner = Array.fill(numRdds)(new CoGroup)
-      newCombiner(value._2) += value._1
-      newCombiner
+    val getCombiner: K => CoGroupCombiner = key => {
+      map.changeValue(key, update)
     }
-    val mergeValue: (CoGroupCombiner, CoGroupValue) => CoGroupCombiner =
-      (combiner, value) => {
-      combiner(value._2) += value._1
-      combiner
-    }
-    val mergeCombiners: (CoGroupCombiner, CoGroupCombiner) => CoGroupCombiner =
-      (combiner1, combiner2) => {
-        var depNum = 0
-        while (depNum < numRdds) {
-          combiner1(depNum) ++= combiner2(depNum)
-          depNum += 1
-        }
-        combiner1
+    rddIterators.foreach { case (it, depNum) =>
+      while (it.hasNext) {
+        val kv = it.next()
+        getCombiner(kv._1)(depNum) += kv._2
       }
-    new ExternalAppendOnlyMap[K, CoGroupValue, CoGroupCombiner](
-      createCombiner, mergeValue, mergeCombiners)
+    }
+    new InterruptibleIterator(context,
+      map.iterator.asInstanceOf[Iterator[(K, Array[Iterable[_]])]])
   }
 
   override def clearDependencies() {

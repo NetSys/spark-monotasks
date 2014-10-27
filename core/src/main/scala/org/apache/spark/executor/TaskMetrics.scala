@@ -67,16 +67,6 @@ class TaskMetrics extends Serializable {
   var resultSerializationTime: Long = _
 
   /**
-   * The number of in-memory bytes spilled by this task
-   */
-  var memoryBytesSpilled: Long = _
-
-  /**
-   * The number of on-disk bytes spilled by this task
-   */
-  var diskBytesSpilled: Long = _
-
-  /**
    * If this task reads from a HadoopRDD or from persisted data, metrics on how much data was read
    * are stored here.
    */

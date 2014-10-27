@@ -154,8 +154,6 @@ class JobProgressListenerSuite extends FunSuite with LocalSparkContext with Matc
       shuffleReadMetrics.remoteBlocksFetched = base + 2
       shuffleWriteMetrics.shuffleBytesWritten = base + 3
       taskMetrics.executorRunTime = base + 4
-      taskMetrics.diskBytesSpilled = base + 5
-      taskMetrics.memoryBytesSpilled = base + 6
       val inputMetrics = new InputMetrics(DataReadMethod.Hadoop)
       taskMetrics.inputMetrics = Some(inputMetrics)
       inputMetrics.bytesRead = base + 7
@@ -187,10 +185,6 @@ class JobProgressListenerSuite extends FunSuite with LocalSparkContext with Matc
     assert(stage1Data.shuffleWriteBytes == 203)
     assert(stage0Data.executorRunTime == 108)
     assert(stage1Data.executorRunTime == 204)
-    assert(stage0Data.diskBytesSpilled == 110)
-    assert(stage1Data.diskBytesSpilled == 205)
-    assert(stage0Data.memoryBytesSpilled == 112)
-    assert(stage1Data.memoryBytesSpilled == 206)
     assert(stage0Data.inputBytes == 114)
     assert(stage1Data.inputBytes == 207)
     assert(stage0Data.taskData.get(1234L).get.taskMetrics.get.shuffleReadMetrics.get
@@ -215,10 +209,6 @@ class JobProgressListenerSuite extends FunSuite with LocalSparkContext with Matc
     assert(stage1Data.shuffleWriteBytes == 606)
     assert(stage0Data.executorRunTime == 408)
     assert(stage1Data.executorRunTime == 608)
-    assert(stage0Data.diskBytesSpilled == 410)
-    assert(stage1Data.diskBytesSpilled == 610)
-    assert(stage0Data.memoryBytesSpilled == 412)
-    assert(stage1Data.memoryBytesSpilled == 612)
     assert(stage0Data.inputBytes == 414)
     assert(stage1Data.inputBytes == 614)
     assert(stage0Data.taskData.get(1234L).get.taskMetrics.get.shuffleReadMetrics.get
