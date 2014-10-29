@@ -634,7 +634,7 @@ group.add_option("-m", "--message", action="store", dest="message",
                  help="New issue description or new patch set message")
 group.add_option("-F", "--file", action="store", dest="file",
                  default=None, help="Read the message above from file.")
-default_reviewers = ("kayousterhout@gmail.com,christopher.canel@berkeley.edu," +
+default_reviewers = ("kayousterhout@gmail.com,cvcanel@gmail.com," +
   "shivaram.venkataraman@gmail.com")
 group.add_option("-r", "--reviewers", action="store", dest="reviewers",
                  metavar="REVIEWERS", default=default_reviewers,
