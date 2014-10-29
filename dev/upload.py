@@ -634,8 +634,10 @@ group.add_option("-m", "--message", action="store", dest="message",
                  help="New issue description or new patch set message")
 group.add_option("-F", "--file", action="store", dest="file",
                  default=None, help="Read the message above from file.")
+default_reviewers = ("kayousterhout@gmail.com,christopher.canel@berkeley.edu," +
+  "shivaram.venkataraman@gmail.com")
 group.add_option("-r", "--reviewers", action="store", dest="reviewers",
-                 metavar="REVIEWERS", default="keo@eecs.berkeley.edu,christopher.canel@berkeley.edu",
+                 metavar="REVIEWERS", default=default_reviewers,
                  help="Add reviewers (comma separated email addresses).")
 group.add_option("--cc", action="store", dest="cc",
                  metavar="CC", default=None,
