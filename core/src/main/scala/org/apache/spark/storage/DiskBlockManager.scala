@@ -23,7 +23,6 @@ import java.util.{Date, Random, UUID}
 
 import org.apache.spark.{SparkConf, SparkEnv, Logging}
 import org.apache.spark.executor.ExecutorExitCode
-import org.apache.spark.network.netty.PathResolver
 import org.apache.spark.util.Utils
 import org.apache.spark.shuffle.sort.SortShuffleManager
 
@@ -37,7 +36,7 @@ import org.apache.spark.shuffle.sort.SortShuffleManager
  * SPARK_LOCAL_DIRS, if it's set).
  */
 private[spark] class DiskBlockManager(shuffleBlockManager: ShuffleBlockManager, conf: SparkConf)
-  extends PathResolver with Logging {
+  extends Logging {
 
   private val MAX_DIR_CREATION_ATTEMPTS: Int = 10
 
