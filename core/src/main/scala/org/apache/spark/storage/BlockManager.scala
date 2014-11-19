@@ -61,7 +61,7 @@ private[spark] class BlockManager(
     securityManager: SecurityManager,
     mapOutputTracker: MapOutputTracker,
     shuffleManager: ShuffleManager)
-  extends BlockDataProvider with Logging {
+  extends Logging {
 
   private val port = conf.getInt("spark.blockManager.port", 0)
   val diskBlockManager = new DiskBlockManager(conf)
@@ -206,20 +206,6 @@ private[spark] class BlockManager(
     val task = asyncReregisterTask
     if (task != null) {
       Await.ready(task, Duration.Inf)
-    }
-  }
-
-  override def getBlockData(blockId: String): Either[FileSegment, ByteBuffer] = {
-    val bid = BlockId(blockId)
-    if (bid.isShuffle) {
-      Left(diskBlockManager.getBlockLocation(bid))
-    } else {
-      val blockBytesOpt = doGetLocal(bid, asBlockResult = false).asInstanceOf[Option[ByteBuffer]]
-      if (blockBytesOpt.isDefined) {
-        Right(blockBytesOpt.get)
-      } else {
-        throw new BlockNotFoundException(blockId)
-      }
     }
   }
 

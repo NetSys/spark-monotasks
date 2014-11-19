@@ -35,7 +35,7 @@ private[spark] class DiskStore(blockManager: BlockManager, diskManager: DiskBloc
   val minMemoryMapBytes = blockManager.conf.getLong("spark.storage.memoryMapThreshold", 2 * 4096L)
 
   override def getSize(blockId: BlockId): Long = {
-    diskManager.getBlockLocation(blockId).length
+    diskManager.getFile(blockId).length()
   }
 
   override def putBytes(blockId: BlockId, _bytes: ByteBuffer, level: StorageLevel): PutResult = {
@@ -94,18 +94,18 @@ private[spark] class DiskStore(blockManager: BlockManager, diskManager: DiskBloc
   }
 
   override def getBytes(blockId: BlockId): Option[ByteBuffer] = {
-    val segment = diskManager.getBlockLocation(blockId)
-    val channel = new RandomAccessFile(segment.file, "r").getChannel
+    val blockFile = diskManager.getFile(blockId.name)
+    val channel = new RandomAccessFile(blockFile, "r").getChannel
 
     try {
       // For small files, directly read rather than memory map
-      if (segment.length < minMemoryMapBytes) {
-        val buf = ByteBuffer.allocate(segment.length.toInt)
-        channel.read(buf, segment.offset)
+      if (blockFile.length() < minMemoryMapBytes) {
+        val buf = ByteBuffer.allocate(blockFile.length().toInt)
+        channel.read(buf)
         buf.flip()
         Some(buf)
       } else {
-        Some(channel.map(MapMode.READ_ONLY, segment.offset, segment.length))
+        Some(channel.map(MapMode.READ_ONLY, 0, blockFile.length()))
       }
     } finally {
       channel.close()
@@ -116,22 +116,10 @@ private[spark] class DiskStore(blockManager: BlockManager, diskManager: DiskBloc
     getBytes(blockId).map(buffer => blockManager.dataDeserialize(blockId, buffer))
   }
 
-  override def remove(blockId: BlockId): Boolean = {
-    val fileSegment = diskManager.getBlockLocation(blockId)
-    val file = fileSegment.file
-    if (file.exists() && file.length() == fileSegment.length) {
-      file.delete()
-    } else {
-      if (fileSegment.length < file.length()) {
-        logWarning(s"Could not delete block associated with only a part of a file: $blockId")
-      }
-      false
-    }
-  }
+  override def remove(blockId: BlockId): Boolean = diskManager.getFile(blockId.name).delete()
 
   override def contains(blockId: BlockId): Boolean = {
-    val file = diskManager.getBlockLocation(blockId).file
-    file.exists()
+    diskManager.getFile(blockId.name).exists()
   }
 
   /**

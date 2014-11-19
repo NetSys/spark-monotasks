@@ -76,11 +76,11 @@ class DiskBlockManagerSuite extends FunSuite with BeforeAndAfterEach with Before
 
   test("basic block creation") {
     val blockId = new TestBlockId("test")
-    assertSegmentEquals(blockId, blockId.name, 0, 0)
+    assertFileEquals(blockId, blockId.name, 0)
 
     val newFile = diskBlockManager.getFile(blockId)
     writeToFile(newFile, 10)
-    assertSegmentEquals(blockId, blockId.name, 0, 10)
+    assertFileEquals(blockId, blockId.name, 10)
     assert(diskBlockManager.containsBlock(blockId))
     newFile.delete()
     assert(!diskBlockManager.containsBlock(blockId))
@@ -97,25 +97,18 @@ class DiskBlockManagerSuite extends FunSuite with BeforeAndAfterEach with Before
     val blockId = new TestBlockId("test")
     val newFile = diskBlockManager.getFile(blockId)
     writeToFile(newFile, 15)
-    assertSegmentEquals(blockId, blockId.name, 0, 15)
+    assertFileEquals(blockId, blockId.name, 15)
     val newFile2 = diskBlockManager.getFile(blockId)
     assert(newFile === newFile2)
     writeToFile(newFile2, 12)
-    assertSegmentEquals(blockId, blockId.name, 0, 27)
+    assertFileEquals(blockId, blockId.name, 27)
     newFile.delete()
   }
 
-  private def checkSegments(segment1: FileSegment, segment2: FileSegment) {
-    assert (segment1.file.getCanonicalPath === segment2.file.getCanonicalPath)
-    assert (segment1.offset === segment2.offset)
-    assert (segment1.length === segment2.length)
-  }
-
-  def assertSegmentEquals(blockId: BlockId, filename: String, offset: Int, length: Int) {
-    val segment = diskBlockManager.getBlockLocation(blockId)
-    assert(segment.file.getName === filename)
-    assert(segment.offset === offset)
-    assert(segment.length === length)
+  def assertFileEquals(blockId: BlockId, filename: String, length: Int) {
+    val file = diskBlockManager.getFile(blockId.name)
+    assert(file.getName === filename)
+    assert(file.length() === length)
   }
 
   def writeToFile(file: File, numBytes: Int) {

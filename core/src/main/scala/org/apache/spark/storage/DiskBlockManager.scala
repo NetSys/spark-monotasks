@@ -28,8 +28,6 @@ import org.apache.spark.util.Utils
 /**
  * Creates and maintains the logical mapping between logical blocks and physical on-disk
  * locations. By default, one block is mapped to one file with a name given by its BlockId.
- * However, it is also possible to have a block map to only a segment of a file, by calling
- * mapBlockToFileSegment().
  *
  * Block files are hashed among the directories listed in spark.local.dir (or in
  * SPARK_LOCAL_DIRS, if it's set).
@@ -51,16 +49,6 @@ private[spark] class DiskBlockManager(conf: SparkConf) extends Logging {
   private val subDirs = Array.fill(localDirs.length)(new Array[File](subDirsPerLocalDir))
 
   addShutdownHook()
-
-  /**
-   * Returns the physical file segment in which the given BlockId is located. If the BlockId has
-   * been mapped to a specific FileSegment by the shuffle layer, that will be returned.
-   * Otherwise, we assume the Block is mapped to the whole file identified by the BlockId.
-   */
-  def getBlockLocation(blockId: BlockId): FileSegment = {
-    val file = getFile(blockId.name)
-    new FileSegment(file, 0, file.length())
-  }
 
   def getFile(filename: String): File = {
     // Figure out which local directory it hashes to, and which subdirectory in that
@@ -91,7 +79,7 @@ private[spark] class DiskBlockManager(conf: SparkConf) extends Logging {
 
   /** Check if disk block manager has a block. */
   def containsBlock(blockId: BlockId): Boolean = {
-    getBlockLocation(blockId).file.exists()
+    getFile(blockId.name).exists()
   }
 
   /** List all the files currently stored on disk by the disk manager. */
