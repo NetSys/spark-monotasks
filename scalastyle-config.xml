@@ -30,7 +30,9 @@
  <!--   <parameter name="maxFileLength"><![CDATA[800]]></parameter> -->
  <!--  </parameters> -->
  <!-- </check> -->
- <check level="error" class="org.scalastyle.file.HeaderMatchesChecker" enabled="true">
+ <!-- The HeaderMatchesChecker is disabled because new monotasks files need a different -->
+ <!-- license file, because they're not licensed to the ASF. -->
+ <check level="error" class="org.scalastyle.file.HeaderMatchesChecker" enabled="false">
   <parameters>
    <parameter name="header"><![CDATA[/*
  * Licensed to the Apache Software Foundation (ASF) under one or more
