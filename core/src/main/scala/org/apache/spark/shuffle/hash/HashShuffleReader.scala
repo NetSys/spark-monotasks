@@ -42,9 +42,9 @@ private[spark] class HashShuffleReader[K, C](
 
     val aggregatedIter: Iterator[Product2[K, C]] = if (dep.aggregator.isDefined) {
       if (dep.mapSideCombine) {
-        new InterruptibleIterator(context, dep.aggregator.get.combineCombinersByKey(iter, context))
+        new InterruptibleIterator(context, dep.aggregator.get.combineCombinersByKey(iter))
       } else {
-        new InterruptibleIterator(context, dep.aggregator.get.combineValuesByKey(iter, context))
+        new InterruptibleIterator(context, dep.aggregator.get.combineValuesByKey(iter))
       }
     } else if (dep.aggregator.isEmpty && dep.mapSideCombine) {
       throw new IllegalStateException("Aggregator is empty for map-side combine")

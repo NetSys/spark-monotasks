@@ -87,7 +87,7 @@ class PairRDDFunctions[K, V](self: RDD[(K, V)])
     val aggregator = new Aggregator[K, V, C](createCombiner, mergeValue, mergeCombiners)
     if (self.partitioner == Some(partitioner)) {
       self.mapPartitionsWithContext((context, iter) => {
-        new InterruptibleIterator(context, aggregator.combineValuesByKey(iter, context))
+        new InterruptibleIterator(context, aggregator.combineValuesByKey(iter))
       }, preservesPartitioning = true)
     } else {
       new ShuffledRDD[K, V, C](self, partitioner)

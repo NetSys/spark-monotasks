@@ -70,7 +70,7 @@ private[spark] class ShuffleMapTask(
     val uncombinedIterator =
       rdd.iterator(partition, context).asInstanceOf[Iterator[_ <: Product2[Any, Any]]]
     val iter = if (dep.aggregator.isDefined && dep.mapSideCombine) {
-      dep.aggregator.get.combineValuesByKey(uncombinedIterator, context)
+      dep.aggregator.get.combineValuesByKey(uncombinedIterator)
     } else if (dep.aggregator.isEmpty && dep.mapSideCombine) {
       throw new IllegalStateException("Aggregator is empty for map-side combine")
     } else {

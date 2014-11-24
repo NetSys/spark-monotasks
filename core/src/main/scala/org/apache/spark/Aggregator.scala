@@ -34,12 +34,7 @@ case class Aggregator[K, V, C] (
     mergeValue: (C, V) => C,
     mergeCombiners: (C, C) => C) {
 
-  @deprecated("use combineValuesByKey with TaskContext argument", "0.9.0")
-  def combineValuesByKey(iter: Iterator[_ <: Product2[K, V]]): Iterator[(K, C)] =
-    combineValuesByKey(iter, null)
-
-  def combineValuesByKey(iter: Iterator[_ <: Product2[K, V]],
-                         context: TaskContext): Iterator[(K, C)] = {
+  def combineValuesByKey(iter: Iterator[_ <: Product2[K, V]]): Iterator[(K, C)] = {
     val combiners = new AppendOnlyMap[K,C]
     var kv: Product2[K, V] = null
     val update = (hadValue: Boolean, oldValue: C) => {
@@ -52,13 +47,7 @@ case class Aggregator[K, V, C] (
     combiners.iterator
   }
 
-  @deprecated("use combineCombinersByKey with TaskContext argument", "0.9.0")
-  def combineCombinersByKey(iter: Iterator[_ <: Product2[K, C]]) : Iterator[(K, C)] =
-    combineCombinersByKey(iter, null)
-
-  def combineCombinersByKey(iter: Iterator[_ <: Product2[K, C]], context: TaskContext)
-      : Iterator[(K, C)] =
-  {
+  def combineCombinersByKey(iter: Iterator[_ <: Product2[K, C]]): Iterator[(K, C)] = {
     val combiners = new AppendOnlyMap[K,C]
     var kc: Product2[K, C] = null
     val update = (hadValue: Boolean, oldValue: C) => {
