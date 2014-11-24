@@ -74,6 +74,11 @@ case class TaskResultBlockId(taskId: Long) extends BlockId {
 }
 
 @DeveloperApi
+case class MonotaskResultBlockId(monotaskId: Long) extends BlockId {
+  def name = "monotaskresult_" + monotaskId
+}
+
+@DeveloperApi
 case class StreamBlockId(streamId: Int, uniqueId: Long) extends BlockId {
   def name = "input-" + streamId + "-" + uniqueId
 }

@@ -20,8 +20,7 @@ package org.apache.spark.storage
 import java.nio.ByteBuffer
 import java.util.LinkedHashMap
 
-import scala.collection.mutable
-import scala.collection.mutable.ArrayBuffer
+import scala.collection.mutable.{ArrayBuffer, HashMap}
 
 import org.apache.spark.util.{SizeEstimator, Utils}
 import org.apache.spark.util.collection.SizeTrackingVector
@@ -45,7 +44,7 @@ private[spark] class MemoryStore(blockManager: BlockManager, maxMemory: Long)
 
   // A mapping from thread ID to amount of memory used for unrolling a block (in bytes)
   // All accesses of this map are assumed to have manually synchronized on `accountingLock`
-  private val unrollMemoryMap = mutable.HashMap[Long, Long]()
+  private val unrollMemoryMap = HashMap[Long, Long]()
 
   /**
    * The amount of space ensured for unrolling values in memory, shared across all cores.
@@ -96,6 +95,18 @@ private[spark] class MemoryStore(blockManager: BlockManager, maxMemory: Long)
     }
   }
 
+  /**
+   * Special method used by monotasks to store monotask intermediate data without registering
+   * it in the block manager.
+   *
+   * TODO: This should be managed in a better way: should never be flushed to disk / should be
+   *       flushed intelligently.
+   */
+  def putValue(blockId: BlockId, value: Any) = {
+    val sizeEstimate = SizeEstimator.estimate(value.asInstanceOf[AnyRef])
+    tryToPut(blockId, value, sizeEstimate, deserialized = true)
+  }
+
   override def putIterator(
       blockId: BlockId,
       values: Iterator[Any],
@@ -141,6 +152,19 @@ private[spark] class MemoryStore(blockManager: BlockManager, maxMemory: Long)
         } else {
           PutResult(0, Left(iteratorValues), None, droppedBlocks)
         }
+    }
+  }
+
+  def getValue(blockId: BlockId): Option[Any] = {
+    val entry = entries.synchronized {
+      entries.get(blockId)
+    }
+    if (entry == null) {
+      None
+    } else {
+      // TODO: Does this ever need to handle deserialized data?
+      assert(entry.deserialized)
+      Some(entry.value)
     }
   }
 
@@ -292,7 +316,7 @@ private[spark] class MemoryStore(blockManager: BlockManager, maxMemory: Long)
    * must also be passed by the caller.
    *
    * Synchronize on `accountingLock` to ensure that all the put requests and its associated block
-   * dropping is done by only on thread at a time. Otherwise while one thread is dropping
+   * dropping is done by only one thread at a time. Otherwise while one thread is dropping
    * blocks to free memory for one block, another thread may use up the freed space for
    * another block.
    *
