@@ -39,7 +39,7 @@ private[spark] class LocalDagScheduler extends Logging {
    * debugging/testing and is not needed for maintaining correctness. */
   val runningMonotasks = new HashSet[Long]()
 
-  def submitMonotasks(monotasks: Seq[Monotask]) {
+  def submitMonotasks(monotasks: Seq[Monotask]) = synchronized {
     monotasks.foreach { monotask =>
       if (monotask.dependencies.isEmpty) {
         scheduleMonotask(monotask)
@@ -49,7 +49,7 @@ private[spark] class LocalDagScheduler extends Logging {
     }
   }
 
-  def handleTaskCompletion(completedMonotask: Monotask) {
+  def handleTaskCompletion(completedMonotask: Monotask) = synchronized {
     completedMonotask.dependents.foreach { monotask =>
       monotask.dependencies -= completedMonotask.taskId
       if (monotask.dependencies.isEmpty) {
