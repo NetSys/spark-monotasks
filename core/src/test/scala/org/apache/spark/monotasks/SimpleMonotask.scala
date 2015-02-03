@@ -16,6 +16,8 @@
 
 package org.apache.spark.monotasks
 
+import java.nio.ByteBuffer
+
 import org.apache.spark.TaskContextImpl
 import org.apache.spark.monotasks.compute.ComputeMonotask
 
@@ -24,7 +26,7 @@ class SimpleMonotask(context: TaskContextImpl) extends ComputeMonotask(context) 
 
   def this(taskAttemptId: Long) = this(new TaskContextImpl(0, taskAttemptId, 0))
 
-  override def execute() = None
+  override def execute(): Option[ByteBuffer] = None
 
   override def executeAndHandleExceptions(): Unit = {}
 }

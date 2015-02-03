@@ -74,14 +74,8 @@ class LocalDagSchedulerIntegrationSuite extends FunSuite with BeforeAndAfter
     setupLocalDagSchedulerWithSynchrony()
     val timeoutMillis = 10000
     val numBlocks = 10
-    val dataSizeBytes = 1000
+    val dataBuffer = ByteBuffer.wrap((1 to 1000).map(_.toByte).toArray)
     val taskContext = new TaskContextImpl(0, 0, 0)
-
-    val dataBuffer = ByteBuffer.allocate(dataSizeBytes)
-    for (i <- 1 to dataSizeBytes) {
-      dataBuffer.put(i.toByte)
-    }
-    dataBuffer.flip()
 
     // Submit the write monotasks. Create a result monotask that creates a dummy task result and
     // saves that as the macrotask result, so that the LocalDagScheduler will identify the macrotask
@@ -92,8 +86,7 @@ class LocalDagSchedulerIntegrationSuite extends FunSuite with BeforeAndAfter
       blockManager.cacheBytes(
         serializedDataBlockId, dataBuffer, StorageLevel.MEMORY_ONLY_SER, false)
       val blockId = new TestBlockId(i.toString)
-      val diskWriteMonotask =
-        new DiskWriteMonotask(taskContext, blockId, serializedDataBlockId)
+      val diskWriteMonotask = new DiskWriteMonotask(taskContext, blockId, serializedDataBlockId)
       writeResultMonotask.addDependency(diskWriteMonotask)
       diskWriteMonotask
     }
@@ -112,8 +105,8 @@ class LocalDagSchedulerIntegrationSuite extends FunSuite with BeforeAndAfter
      val readAndRemoveMonotasks = (1 to numBlocks).flatMap { i =>
       val blockId = new TestBlockId(i.toString)
       val status = SparkEnv.get.blockManager.getStatus(blockId)
-      assert(status.isDefined,
-        "After a successful write, the BlockManager should have status information for this block.")
+      assert(status.isDefined, "After a successful write, the BlockManager should have status " +
+        s"information for block $blockId.")
       val diskIdOption = status.get.diskId
       assert(diskIdOption.isDefined)
       val diskId = diskIdOption.get

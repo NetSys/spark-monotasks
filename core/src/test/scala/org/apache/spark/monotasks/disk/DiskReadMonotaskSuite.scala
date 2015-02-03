@@ -35,7 +35,7 @@ class DiskReadMonotaskSuite extends FunSuite with BeforeAndAfter {
   private var taskContext: TaskContextImpl = _
   private var blockFileManager: BlockFileManager = _
   private var blockManager: BlockManager = _
-  private val dataBuffer = makeDataBuffer()
+  private val dataBuffer = ByteBuffer.wrap((1 to 1000).map(_.toByte).toArray)
   private val serializedDataBlockId = new MonotaskResultBlockId(0L)
 
   before {
@@ -62,15 +62,6 @@ class DiskReadMonotaskSuite extends FunSuite with BeforeAndAfter {
 
     taskContext = mock(classOf[TaskContextImpl])
     when(taskContext.taskMetrics).thenReturn(TaskMetrics.empty)
-  }
-
-  private def makeDataBuffer(): ByteBuffer = {
-    val dataSizeBytes = 1000
-    val dataBuffer = ByteBuffer.allocate(dataSizeBytes)
-    for (i <- 1 to dataSizeBytes) {
-      dataBuffer.put(i.toByte)
-    }
-    dataBuffer.flip().asInstanceOf[ByteBuffer]
   }
 
   test("execute: throws an exception when trying to read a nonexistent block") {

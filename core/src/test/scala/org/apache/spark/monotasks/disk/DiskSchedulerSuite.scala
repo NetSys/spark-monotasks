@@ -63,7 +63,7 @@ class DiskSchedulerSuite extends FunSuite with BeforeAndAfter with Timeouts {
       /* Create numDisks sub-directories in the current Spark local directory and make them the
        * Spark local directories. */
       val oldLocalDir = Utils.getLocalDir(conf)
-      val newLocalDirs = List.range(0, numDisks).map(i => oldLocalDir + i.toString).mkString(",")
+      val newLocalDirs = (1 to numDisks).map(i => oldLocalDir + i.toString).mkString(",")
       conf.set("spark.local.dir", newLocalDirs)
     }
     diskScheduler = new DiskScheduler(new BlockFileManager(conf))
@@ -80,30 +80,24 @@ class DiskSchedulerSuite extends FunSuite with BeforeAndAfter with Timeouts {
   test("when using one disk, at most one DiskMonotask is executed at a time") {
     initializeDiskScheduler(1)
 
-    val monotasks = (1 to numBlocks).map { i =>
-      val blockId = new TestBlockId(i.toString)
-      new DummyDiskMonotask(taskContext, blockId, 100)
-    }
+    val monotasks = (1 to numBlocks).map(i =>
+      new DummyDiskMonotask(taskContext, new TestBlockId(i.toString), 100))
     assert(submitTasksAndWaitForCompletion(monotasks, timeoutMillis))
   }
 
   test("when using multiple disks, at most one DiskMonotask is executed at a time per disk") {
     initializeDiskScheduler(2)
 
-    val monotasks = (1 to numBlocks).map { i =>
-      val blockId = new TestBlockId(i.toString)
-      new DummyDiskMonotask(taskContext, blockId, 100)
-    }
+    val monotasks = (1 to numBlocks).map(i =>
+      new DummyDiskMonotask(taskContext, new TestBlockId(i.toString), 100))
     assert(submitTasksAndWaitForCompletion(monotasks, timeoutMillis))
   }
 
   test("DiskMonotasks pertaining to the same disk are executed in FIFO order") {
     initializeDiskScheduler(1)
 
-    val monotasks = (1 to numBlocks).map { i =>
-      val blockId = new TestBlockId(i.toString)
-      new DummyDiskMonotask(taskContext, blockId, 100)
-    }
+    val monotasks = (1 to numBlocks).map(i =>
+      new DummyDiskMonotask(taskContext, new TestBlockId(i.toString), 100))
     assert(submitTasksAndWaitForCompletion(monotasks, timeoutMillis))
 
     val ids = monotasks.map(monotask => monotask.taskId)

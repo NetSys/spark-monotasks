@@ -37,7 +37,7 @@ class DiskWriteMonotaskSuite extends FunSuite with BeforeAndAfter {
   private var taskContext: TaskContextImpl = _
   private var blockFileManager: BlockFileManager = _
   private val dataSizeBytes = 1000
-  private val dataBuffer = makeDataBuffer()
+  private val dataBuffer = ByteBuffer.wrap((1 to dataSizeBytes).map(_.toByte).toArray)
   private val serializedDataBlockId = new MonotaskResultBlockId(0L)
 
   before {
@@ -55,14 +55,6 @@ class DiskWriteMonotaskSuite extends FunSuite with BeforeAndAfter {
 
     taskContext = mock(classOf[TaskContextImpl])
     when(taskContext.taskMetrics).thenReturn(TaskMetrics.empty)
-  }
-
-  private def makeDataBuffer(): ByteBuffer = {
-    val dataBuffer = ByteBuffer.allocate(dataSizeBytes)
-    for (i <- 1 to dataSizeBytes) {
-      dataBuffer.put(i.toByte)
-    }
-    dataBuffer.flip().asInstanceOf[ByteBuffer]
   }
 
   private def createTestFile(): File = {
@@ -106,8 +98,7 @@ class DiskWriteMonotaskSuite extends FunSuite with BeforeAndAfter {
 
   test("execute: writes correct data") {
     val blockId = new TestBlockId("0")
-    val monotask =
-      new DiskWriteMonotask(taskContext, blockId, serializedDataBlockId)
+    val monotask = new DiskWriteMonotask(taskContext, blockId, serializedDataBlockId)
     val diskId = "diskId"
     monotask.diskId = Some(diskId)
 
@@ -127,8 +118,8 @@ class DiskWriteMonotaskSuite extends FunSuite with BeforeAndAfter {
     }
     stream.close()
     assert(actualDataSizeBytes === dataSizeBytes)
-    for (j <- 0 to (dataSizeBytes - 1)) {
-      assert(dataBuffer.get(j) === readData(j))
+    for (i <- 0 to (dataSizeBytes - 1)) {
+      assert(dataBuffer.get(i) === readData(i))
     }
   }
 

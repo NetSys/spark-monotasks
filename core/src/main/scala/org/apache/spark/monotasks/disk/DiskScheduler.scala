@@ -43,7 +43,7 @@ private[spark] class DiskScheduler(blockFileManager: BlockFileManager) extends L
    * is set) describes a separate physical disk. */
   val diskIds = blockFileManager.localDirs.keySet.toArray
   // An index into diskIds indicating which disk to use for the next write task.
-  private var nextDisk: Int = 0
+  private var nextDisk = 0
 
   addShutdownHook()
   buildDiskAccessors()
@@ -123,9 +123,7 @@ private[spark] class DiskScheduler(blockFileManager: BlockFileManager) extends L
 
   private def addShutdownHook() {
     Runtime.getRuntime.addShutdownHook(new Thread("Stop DiskAccessor threads") {
-      override def run() = Utils.logUncaughtExceptions {
-        DiskScheduler.this.stop()
-      }
+      override def run() = Utils.logUncaughtExceptions(DiskScheduler.this.stop())
     })
   }
 

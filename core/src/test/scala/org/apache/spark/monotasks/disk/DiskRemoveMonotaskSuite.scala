@@ -50,7 +50,8 @@ class DiskRemoveMonotaskSuite extends FunSuite with BeforeAndAfter {
     val blockManager = mock(classOf[BlockManager])
     when(blockManager.blockFileManager).thenReturn(blockFileManager)
     when(blockManager.getStatus(any())).thenReturn(Some(mock(classOf[BlockStatus])))
-    when(blockManager.getLocalBytes(serializedDataBlockId)).thenReturn(Some(makeDataBuffer()))
+    val dataBuffer = ByteBuffer.wrap((1 to 1000).map(_.toByte).toArray)
+    when(blockManager.getLocalBytes(serializedDataBlockId)).thenReturn(Some(dataBuffer))
 
     val sparkEnv = mock(classOf[SparkEnv])
     when(sparkEnv.blockManager).thenReturn(blockManager)
@@ -60,20 +61,10 @@ class DiskRemoveMonotaskSuite extends FunSuite with BeforeAndAfter {
     when(taskContext.taskMetrics).thenReturn(TaskMetrics.empty)
   }
 
-  private def makeDataBuffer(): ByteBuffer = {
-    val dataSizeBytes = 1000
-    val dataBuffer = ByteBuffer.allocate(dataSizeBytes)
-    for (i <- 1 to dataSizeBytes) {
-      dataBuffer.put(i.toByte)
-    }
-    dataBuffer.flip().asInstanceOf[ByteBuffer]
-  }
-
   test("execute: actually deletes block") {
     val blockId = new TestBlockId("0")
     // Write a block to verify that it can be deleted correctly.
-    val writeMonotask =
-      new DiskWriteMonotask(taskContext, blockId, serializedDataBlockId)
+    val writeMonotask = new DiskWriteMonotask(taskContext, blockId, serializedDataBlockId)
     val diskId = "diskId"
     writeMonotask.diskId = Some(diskId)
 

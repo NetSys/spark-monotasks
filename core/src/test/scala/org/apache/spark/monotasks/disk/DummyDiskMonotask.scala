@@ -24,10 +24,10 @@ import org.apache.spark.TaskContextImpl
 import org.apache.spark.storage.BlockId
 
 /**
- * A simplified DiskMonotask class that keeps track of how many of its instances are currently
- * being executed and the time at which each instance's execution started. DummyDiskMonotask is a
- * subclass of DiskWriteMonotask so that it does not require a diskId to be known in advance. This
- * class does no meaningful work, so it should only be used for testing purposes.
+ * A simplified DiskMonotask class that keeps track of which disks are currently being accessed and
+ * the time at which each instance's execution started. DummyDiskMonotask is a subclass of
+ * DiskWriteMonotask so that it does not require a diskId to be known in advance. This class does no
+ * meaningful work, so it should only be used for testing purposes.
  */
 private[spark] class DummyDiskMonotask(
     taskContext: TaskContextImpl,
@@ -38,25 +38,24 @@ private[spark] class DummyDiskMonotask(
   @volatile var isFinished = false
 
   override def execute(): Unit = {
-    val taskTimes = DummyDiskMonotask.taskTimes
-    taskTimes.put(taskId, System.currentTimeMillis())
+    DummyDiskMonotask.taskTimes.put(taskId, System.currentTimeMillis())
 
-    val numRunningTasks = DummyDiskMonotask.numRunningTasks
+    val disksInUse = DummyDiskMonotask.disksInUse
     val disk = diskId.get
-    numRunningTasks.synchronized {
-      assert(!numRunningTasks.contains(disk))
-      numRunningTasks += disk
+    disksInUse.synchronized {
+      assert(!disksInUse.contains(disk))
+      disksInUse += disk
     }
 
     Thread.sleep(taskTime)
-    numRunningTasks.synchronized(numRunningTasks.remove(disk))
+    disksInUse.synchronized(disksInUse.remove(disk))
     isFinished = true
   }
 }
 
 private[spark] object DummyDiskMonotask {
-  // Maps diskId to number of DummyDiskMonotasks running on that disk.
-  val numRunningTasks = new HashSet[String]()
+  // The disks on which DummyDiskMonotasks are currently executing.
+  val disksInUse = new HashSet[String]()
   // Maps taskId to start time.
   val taskTimes = new ConcurrentHashMap[Long, Long]()
 
