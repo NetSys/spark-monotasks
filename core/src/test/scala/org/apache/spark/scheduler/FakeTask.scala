@@ -15,12 +15,30 @@
  * limitations under the License.
  */
 
+/*
+ * Copyright 2014 The Regents of The University California
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package org.apache.spark.scheduler
 
 import org.apache.spark.TaskContext
+import org.apache.spark.monotasks.Monotask
 
-class FakeTask(stageId: Int, prefLocs: Seq[TaskLocation] = Nil) extends Task[Int](stageId, 0) {
-  override def runTask(context: TaskContext): Int = 0
+class FakeTask(stageId: Int, prefLocs: Seq[TaskLocation] = Nil)
+  extends Macrotask[Int](stageId, null, null) {
+  override def getMonotasks(context: TaskContext): Seq[Monotask] = Seq.empty
 
   override def preferredLocations: Seq[TaskLocation] = prefLocs
 }
@@ -34,7 +52,7 @@ object FakeTask {
     if (prefLocs.size != 0 && prefLocs.size != numTasks) {
       throw new IllegalArgumentException("Wrong number of task locations")
     }
-    val tasks = Array.tabulate[Task[_]](numTasks) { i =>
+    val tasks = Array.tabulate[Macrotask[_]](numTasks) { i =>
       new FakeTask(i, if (prefLocs.size != 0) prefLocs(i) else Nil)
     }
     new TaskSet(tasks, 0, 0, 0, null)

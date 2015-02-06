@@ -15,6 +15,22 @@
  * limitations under the License.
  */
 
+/*
+ * Copyright 2014 The Regents of The University California
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package org.apache.spark.executor
 
 import scala.collection.JavaConversions._
@@ -39,27 +55,6 @@ private[spark] class ExecutorSource(val executor: Executor, executorId: String) 
 
   // TODO: It would be nice to pass the application name here
   override val sourceName = "executor.%s".format(executorId)
-
-  // Gauge for executor thread pool's actively executing task counts
-  metricRegistry.register(MetricRegistry.name("threadpool", "activeTasks"), new Gauge[Int] {
-    override def getValue: Int = executor.threadPool.getActiveCount()
-  })
-
-  // Gauge for executor thread pool's approximate total number of tasks that have been completed
-  metricRegistry.register(MetricRegistry.name("threadpool", "completeTasks"), new Gauge[Long] {
-    override def getValue: Long = executor.threadPool.getCompletedTaskCount()
-  })
-
-  // Gauge for executor thread pool's current number of threads
-  metricRegistry.register(MetricRegistry.name("threadpool", "currentPool_size"), new Gauge[Int] {
-    override def getValue: Int = executor.threadPool.getPoolSize()
-  })
-
-  // Gauge got executor thread pool's largest number of threads that have ever simultaneously
-  // been in th pool
-  metricRegistry.register(MetricRegistry.name("threadpool", "maxPool_size"), new Gauge[Int] {
-    override def getValue: Int = executor.threadPool.getMaximumPoolSize()
-  })
 
   // Gauge for file system stats of this executor
   for (scheme <- Array("hdfs", "file")) {

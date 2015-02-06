@@ -15,6 +15,22 @@
  * limitations under the License.
  */
 
+/*
+ * Copyright 2014 The Regents of The University California
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package org.apache.spark.scheduler
 
 import java.io.NotSerializableException
@@ -137,8 +153,8 @@ class DAGScheduler(
   initializeEventProcessActor()
 
   // Called by TaskScheduler to report task's starting.
-  def taskStarted(task: Task[_], taskInfo: TaskInfo) {
-    eventProcessActor ! BeginEvent(task, taskInfo)
+  def taskStarted(stageId: Int, taskInfo: TaskInfo) {
+    eventProcessActor ! BeginEvent(stageId, taskInfo)
   }
 
   // Called to report that a task has completed and results are being fetched remotely.
@@ -148,7 +164,7 @@ class DAGScheduler(
 
   // Called by TaskScheduler to report task completions or failures.
   def taskEnded(
-      task: Task[_],
+      task: Macrotask[_],
       reason: TaskEndReason,
       result: Any,
       accumUpdates: Map[Long, Any],
@@ -628,7 +644,9 @@ class DAGScheduler(
       val rdd = job.finalStage.rdd
       val split = rdd.partitions(job.partitions(0))
       val taskContext =
-        new TaskContext(job.finalStage.id, job.partitions(0), 0, runningLocally = true)
+        new TaskContext(env, null, 0, null, 0, runningLocally = true)
+      taskContext.stageId = job.finalStage.id
+      taskContext.partitionId = job.partitions(0)
       try {
         val result = job.func(taskContext, rdd.iterator(split, taskContext))
         job.listener.taskSucceeded(0, result)
@@ -675,11 +693,11 @@ class DAGScheduler(
     submitWaitingStages()
   }
 
-  private[scheduler] def handleBeginEvent(task: Task[_], taskInfo: TaskInfo) {
+  private[scheduler] def handleBeginEvent(stageId: Int, taskInfo: TaskInfo) {
     // Note that there is a chance that this task is launched after the stage is cancelled.
     // In that case, we wouldn't have the stage anymore in stageIdToStage.
-    val stageAttemptId = stageIdToStage.get(task.stageId).map(_.latestInfo.attemptId).getOrElse(-1)
-    listenerBus.post(SparkListenerTaskStart(task.stageId, stageAttemptId, taskInfo))
+    val stageAttemptId = stageIdToStage.get(stageId).map(_.latestInfo.attemptId).getOrElse(-1)
+    listenerBus.post(SparkListenerTaskStart(stageId, stageAttemptId, taskInfo))
     submitWaitingStages()
   }
 
@@ -838,19 +856,21 @@ class DAGScheduler(
         return
     }
 
-    val tasks: Seq[Task[_]] = if (stage.isShuffleMap) {
+    val tasks: Seq[Macrotask[_]] = if (stage.isShuffleMap) {
       partitionsToCompute.map { id =>
         val locs = getPreferredLocs(stage.rdd, id)
         val part = stage.rdd.partitions(id)
-        new ShuffleMapTask(stage.id, taskBinary, part, locs)
+        val dependencyIdToPartitions = Dependency.getDependencyIdToPartitions(stage.rdd, part.index)
+        new ShuffleMapMacrotask(stage.id, taskBinary, part, dependencyIdToPartitions, locs)
       }
     } else {
       val job = stage.resultOfJob.get
       partitionsToCompute.map { id =>
         val p: Int = job.partitions(id)
         val part = stage.rdd.partitions(p)
+        val dependencyIdToPartitions = Dependency.getDependencyIdToPartitions(stage.rdd, part.index)
         val locs = getPreferredLocs(stage.rdd, p)
-        new ResultTask(stage.id, taskBinary, part, locs, id)
+        new ResultMacrotask(stage.id, taskBinary, part, dependencyIdToPartitions, locs, id)
       }
     }
 
@@ -900,15 +920,16 @@ class DAGScheduler(
     val stageId = task.stageId
     val taskType = Utils.getFormattedClassName(task)
 
+    val stageHasBeenCancelled = !stageIdToStage.contains(task.stageId)
     // The success case is dealt with separately below, since we need to compute accumulator
     // updates before posting.
-    if (event.reason != Success) {
+    if (event.reason != Success || stageHasBeenCancelled) {
       val attemptId = stageIdToStage.get(task.stageId).map(_.latestInfo.attemptId).getOrElse(-1)
       listenerBus.post(SparkListenerTaskEnd(stageId, attemptId, taskType, event.reason,
         event.taskInfo, event.taskMetrics))
     }
 
-    if (!stageIdToStage.contains(task.stageId)) {
+    if (stageHasBeenCancelled) {
       // Skip all the actions if the stage has been cancelled.
       return
     }
@@ -956,7 +977,7 @@ class DAGScheduler(
           event.reason, event.taskInfo, event.taskMetrics))
         stage.pendingTasks -= task
         task match {
-          case rt: ResultTask[_, _] =>
+          case rt: ResultMacrotask[_, _] =>
             stage.resultOfJob match {
               case Some(job) =>
                 if (!job.finished(rt.outputId)) {
@@ -983,14 +1004,14 @@ class DAGScheduler(
                 logInfo("Ignoring result from " + rt + " because its job has finished")
             }
 
-          case smt: ShuffleMapTask =>
+          case smt: ShuffleMapMacrotask =>
             val status = event.result.asInstanceOf[MapStatus]
             val execId = status.location.executorId
             logDebug("ShuffleMapTask finished on " + execId)
             if (failedEpoch.contains(execId) && smt.epoch <= failedEpoch(execId)) {
               logInfo("Ignoring possibly bogus ShuffleMapTask completion from " + execId)
             } else {
-              stage.addOutputLoc(smt.partitionId, status)
+              stage.addOutputLoc(smt.partition.index, status)
             }
             if (runningStages.contains(stage) && stage.pendingTasks.isEmpty) {
               markStageAsFinished(stage)
@@ -1377,8 +1398,8 @@ private[scheduler] class DAGSchedulerEventProcessActor(dagScheduler: DAGSchedule
     case ExecutorLost(execId) =>
       dagScheduler.handleExecutorLost(execId)
 
-    case BeginEvent(task, taskInfo) =>
-      dagScheduler.handleBeginEvent(task, taskInfo)
+    case BeginEvent(stageId, taskInfo) =>
+      dagScheduler.handleBeginEvent(stageId, taskInfo)
 
     case GettingResultEvent(taskInfo) =>
       dagScheduler.handleGetTaskResult(taskInfo)

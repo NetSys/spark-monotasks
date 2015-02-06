@@ -20,12 +20,17 @@ import java.util.concurrent.atomic.AtomicLong
 
 import scala.collection.mutable.{ArrayBuffer, HashSet}
 
+import org.apache.spark.TaskContext
+
 /**
  * A Monotask object encapsulates information about an operation that uses only one type of
  * resource. Subclasses contain task information specific to the resource that will be operated on,
  * and may include methods to actually interact with a resource.
+ *
+ * Monotasks are responsible for notifying the localDagScheduler when they have completed
+ * successfully or when they have failed.
  */
-private[spark] abstract class Monotask(val localDagScheduler: LocalDagScheduler) {
+private[spark] abstract class Monotask(val context: TaskContext) {
   val taskId = Monotask.newId()
 
   // IDs of Monotasks that must complete before this can be run.

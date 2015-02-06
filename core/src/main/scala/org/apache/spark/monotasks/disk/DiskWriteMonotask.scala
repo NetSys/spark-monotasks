@@ -21,17 +21,13 @@ import java.nio.ByteBuffer
 
 import scala.util.control.NonFatal
 
-import org.apache.spark.Logging
-import org.apache.spark.monotasks.LocalDagScheduler
+import org.apache.spark.{Logging, TaskContext}
 import org.apache.spark.storage.BlockId
 import org.apache.spark.util.Utils
 
 /** Contains the parameters and logic necessary to write a block to a single disk. */
-private[spark] class DiskWriteMonotask(
-    localDagScheduler: LocalDagScheduler,
-    blockId: BlockId,
-    val data: ByteBuffer)
-  extends DiskMonotask(localDagScheduler, blockId) with Logging {
+private[spark] class DiskWriteMonotask(context: TaskContext, blockId: BlockId, val data: ByteBuffer)
+  extends DiskMonotask(context, blockId) with Logging {
 
   // Identifies the disk on which this DiskWriteMonotask will operate. Set by the DiskScheduler.
   var diskId: Option[String] = None

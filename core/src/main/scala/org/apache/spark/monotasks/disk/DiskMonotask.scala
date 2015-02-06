@@ -16,7 +16,8 @@
 
 package org.apache.spark.monotasks.disk
 
-import org.apache.spark.monotasks.{LocalDagScheduler, Monotask}
+import org.apache.spark.TaskContext
+import org.apache.spark.monotasks.Monotask
 import org.apache.spark.storage.BlockId
 
 /**
@@ -24,12 +25,10 @@ import org.apache.spark.storage.BlockId
  * disk operation (read, write, or remove) is represented by a different subclass of DiskMonotask.
  * Subclasses contain logic for interacting with physical disks.
  */
-private[spark] abstract class DiskMonotask(
-    localDagScheduler: LocalDagScheduler,
-    val blockId: BlockId)
-  extends Monotask(localDagScheduler) {
+private[spark] abstract class DiskMonotask(context: TaskContext, val blockId: BlockId)
+  extends Monotask(context) {
 
-  val blockManager = localDagScheduler.blockManager
+  val blockManager = context.localDagScheduler.blockManager
 
   /**
    *  Executes this DiskMonotask by interacting with a single physical disk. Notifies the

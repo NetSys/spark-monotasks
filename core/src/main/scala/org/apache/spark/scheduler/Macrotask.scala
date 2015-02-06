@@ -1,12 +1,11 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.
- * The ASF licenses this file to You under the Apache License, Version 2.0
- * (the "License"); you may not use this file except in compliance with
- * the License.  You may obtain a copy of the License at
+ * Copyright 2014 The Regents of The University California
  *
- *    http://www.apache.org/licenses/LICENSE-2.0
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -20,79 +19,40 @@ package org.apache.spark.scheduler
 import java.io.{ByteArrayOutputStream, DataInputStream, DataOutputStream}
 import java.nio.ByteBuffer
 
-import scala.collection.mutable.HashMap
+import scala.collection.mutable.{HashMap, HashSet}
 
-import org.apache.spark.TaskContext
-import org.apache.spark.executor.TaskMetrics
+import org.apache.spark.{Logging, Partition, TaskContext}
+import org.apache.spark.monotasks.Monotask
 import org.apache.spark.serializer.SerializerInstance
 import org.apache.spark.util.ByteBufferInputStream
-import org.apache.spark.util.Utils
-
 
 /**
- * A unit of execution. We have two kinds of Task's in Spark:
- * - [[org.apache.spark.scheduler.ShuffleMapTask]]
- * - [[org.apache.spark.scheduler.ResultTask]]
+ * A unit of execution. Spark has two kinds of Macrotasks:
+ * - [[org.apache.spark.scheduler.ShuffleMapMacrotask]]
+ * - [[org.apache.spark.scheduler.ResultMacrotask]]
  *
- * A Spark job consists of one or more stages. The very last stage in a job consists of multiple
- * ResultTasks, while earlier stages consist of ShuffleMapTasks. A ResultTask executes the task
- * and sends the task output back to the driver application. A ShuffleMapTask executes the task
- * and divides the task output to multiple buckets (based on the task's partitioner).
+ * Macrotasks are used to ship information from the scheduler to the executor, and are responsible
+ * for constructing the monotasks needed to complete the Macrotask.
  *
- * @param stageId id of the stage this task belongs to
- * @param partitionId index of the number in the RDD
+ * A spark job consists of one or more stages. The very last stage in a job consists of multiple
+ * ResultMacrotasks, while earlier stages consist of ShuffleMapMacrotasks. A ResultMacroTask
+ * executes the task and sends the task output back to the driver application. A
+ * ShuffleMapMacrotask executes the task and divides the task output to multiple buckets (based on
+ * the task's partitioner).
  */
-private[spark] abstract class Task[T](val stageId: Int, var partitionId: Int) extends Serializable {
-
-  final def run(attemptId: Long): T = {
-    context = new TaskContext(stageId, partitionId, attemptId, runningLocally = false)
-    context.taskMetrics.hostname = Utils.localHostName()
-    taskThread = Thread.currentThread()
-    if (_killed) {
-      kill(interruptThread = false)
-    }
-    runTask(context)
-  }
-
-  def runTask(context: TaskContext): T
-
+private[spark] abstract class Macrotask[T](val stageId: Int, val partition: Partition,
+    val dependencyIdToPartitions: HashMap[Long, HashSet[Partition]])
+  extends Serializable with Logging {
   def preferredLocations: Seq[TaskLocation] = Nil
 
   // Map output tracker epoch. Will be set by TaskScheduler.
   var epoch: Long = -1
 
-  var metrics: Option[TaskMetrics] = None
-
-  // Task context, to be initialized in run().
-  @transient protected var context: TaskContext = _
-
-  // The actual Thread on which the task is running, if any. Initialized in run().
-  @volatile @transient private var taskThread: Thread = _
-
-  // A flag to indicate whether the task is killed. This is used in case context is not yet
-  // initialized when kill() is invoked.
-  @volatile @transient private var _killed = false
-
   /**
-   * Whether the task has been killed.
+   * Returns the monotasks that need to be run in order to execute this macrotask. This is run
+   * within a compute monotask, so should not use network or disk.
    */
-  def killed: Boolean = _killed
-
-  /**
-   * Kills a task by setting the interrupted flag to true. This relies on the upper level Spark
-   * code and user code to properly handle the flag. This function should be idempotent so it can
-   * be called multiple times.
-   * If interruptThread is true, we will also call Thread.interrupt() on the Task's executor thread.
-   */
-  def kill(interruptThread: Boolean) {
-    _killed = true
-    if (context != null) {
-      context.markInterrupted()
-    }
-    if (interruptThread && taskThread != null) {
-      taskThread.interrupt()
-    }
-  }
+  def getMonotasks(context: TaskContext): Seq[Monotask]
 }
 
 /**
@@ -102,15 +62,15 @@ private[spark] abstract class Task[T](val stageId: Int, var partitionId: Int) ex
  * the task might depend on one of the JARs. Thus we serialize each task as multiple objects, by
  * first writing out its dependencies.
  */
-private[spark] object Task {
+private[spark] object Macrotask {
   /**
    * Serialize a task and the current app dependencies (files and JARs added to the SparkContext)
    */
   def serializeWithDependencies(
-      task: Task[_],
-      currentFiles: HashMap[String, Long],
-      currentJars: HashMap[String, Long],
-      serializer: SerializerInstance)
+    task: Macrotask[_],
+    currentFiles: HashMap[String, Long],
+    currentJars: HashMap[String, Long],
+    serializer: SerializerInstance)
     : ByteBuffer = {
 
     val out = new ByteArrayOutputStream(4096)
@@ -145,7 +105,7 @@ private[spark] object Task {
    * @return (taskFiles, taskJars, taskBytes)
    */
   def deserializeWithDependencies(serializedTask: ByteBuffer)
-    : (HashMap[String, Long], HashMap[String, Long], ByteBuffer) = {
+  : (HashMap[String, Long], HashMap[String, Long], ByteBuffer) = {
 
     val in = new ByteBufferInputStream(serializedTask)
     val dataIn = new DataInputStream(in)

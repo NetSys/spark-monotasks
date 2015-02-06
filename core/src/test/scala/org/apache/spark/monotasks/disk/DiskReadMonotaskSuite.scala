@@ -25,14 +25,15 @@ import org.mockito.Mockito.{mock, verify, when}
 
 import org.scalatest.{BeforeAndAfter, FunSuite}
 
-import org.apache.spark.SparkConf
+import org.apache.spark.{SparkConf, TaskContext}
 import org.apache.spark.monotasks.LocalDagScheduler
-import org.apache.spark.storage.{BlockFileManager, BlockId, BlockManager, MemoryStore,
+import org.apache.spark.storage.{BlockFileManager, BlockManager, MemoryStore,
   MonotaskResultBlockId, ResultWithDroppedBlocks, TestBlockId}
 import org.apache.spark.util.Utils
 
 class DiskReadMonotaskSuite extends FunSuite with BeforeAndAfter {
 
+  private var taskContext: TaskContext = _
   private var blockFileManager: BlockFileManager = _
   private var memoryStore: MemoryStore = _
   private var localDagScheduler: LocalDagScheduler = _
@@ -50,23 +51,16 @@ class DiskReadMonotaskSuite extends FunSuite with BeforeAndAfter {
      * regardless of the system properties. */
     when(blockManager.conf).thenReturn(new SparkConf(false))
 
-    val diskScheduler = mock(classOf[DiskScheduler])
-    when(diskScheduler.getNextDiskId()).thenReturn("diskId")
-
     localDagScheduler = mock(classOf[LocalDagScheduler])
-    when(localDagScheduler.diskScheduler).thenReturn(diskScheduler)
     when(localDagScheduler.blockManager).thenReturn(blockManager)
-  }
 
-  after {
-    blockFileManager = null
-    memoryStore = null
-    localDagScheduler = null
+    taskContext = mock(classOf[TaskContext])
+    when(taskContext.localDagScheduler).thenReturn(localDagScheduler)
   }
 
   test("execute: reading nonexistent block causes failure") {
     when(blockFileManager.getBlockFile(any(), any())).thenReturn(None)
-    assert(!(new DiskReadMonotask(localDagScheduler, new TestBlockId("0"), "nonsense")).execute())
+    assert(!(new DiskReadMonotask(taskContext, new TestBlockId("0"), "nonsense")).execute())
   }
 
   test("execute: correctly stores resulting data in the MemoryStore") {
@@ -92,12 +86,12 @@ class DiskReadMonotaskSuite extends FunSuite with BeforeAndAfter {
 
       val blockId = new TestBlockId(i.toString)
       // Write a block to verify that it can be read back correctly.
-      val writeMonotask = new DiskWriteMonotask(localDagScheduler, blockId, dataBuffer)
-      val diskId = localDagScheduler.diskScheduler.getNextDiskId()
+      val writeMonotask = new DiskWriteMonotask(taskContext, blockId, dataBuffer)
+      val diskId = "diskId"
       writeMonotask.diskId = Some(diskId)
 
       assert(writeMonotask.execute())
-      val readMonotask = new DiskReadMonotask(localDagScheduler, blockId, diskId)
+      val readMonotask = new DiskReadMonotask(taskContext, blockId, diskId)
       assert(readMonotask.execute())
       val resultBlockId = new MonotaskResultBlockId(readMonotask.taskId)
       verify(memoryStore).putValue(resultBlockId, dataBuffer)

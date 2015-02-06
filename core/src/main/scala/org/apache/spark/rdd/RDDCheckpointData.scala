@@ -22,7 +22,6 @@ import scala.reflect.ClassTag
 import org.apache.hadoop.fs.Path
 
 import org.apache.spark.{Logging, Partition, SerializableWritable, SparkException}
-import org.apache.spark.scheduler.{ResultTask, ShuffleMapTask}
 
 /**
  * Enumeration to manage state transitions of an RDD through checkpointing

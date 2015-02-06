@@ -15,33 +15,65 @@
  * limitations under the License.
  */
 
+/*
+ * Copyright 2014 The Regents of The University California
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package org.apache.spark
 
-import scala.collection.mutable.ArrayBuffer
+import scala.collection.mutable.{ArrayBuffer, Map}
 
 import org.apache.spark.annotation.DeveloperApi
-import org.apache.spark.executor.TaskMetrics
+import org.apache.spark.executor.{DependencyManager, TaskMetrics}
+import org.apache.spark.monotasks.LocalDagScheduler
 import org.apache.spark.util.TaskCompletionListener
 
 
 /**
  * :: DeveloperApi ::
- * Contextual information about a task which can be read or mutated during execution.
+ * Contextual information about a macrotask that can be read or mutated during execution.
  *
- * @param stageId stage id
- * @param partitionId index of the partition
- * @param attemptId the number of attempts to execute this task
+ * @param env A SparkEnv describing the environment for the task.
+ * @param localDagScheduler The LocalDagScheduler to be used to schedule this task's monotasks.
+ * @param maximumResultSizeBytes the largest size result (in bytes) that can be sent directly back
+ *                               to the Spark driver. Larger results will be sent via the block
+ *                               manager.
+ * @param dependencyManager a DependencyManager used to keep track of JARs and files that are
+ *                          loaded on this executor.
+ * @param taskAttemptId a unique identifier for the task
  * @param runningLocally whether the task is running locally in the driver JVM
  * @param taskMetrics performance metrics of the task
  */
 @DeveloperApi
 class TaskContext(
-    val stageId: Int,
-    val partitionId: Int,
-    val attemptId: Long,
+    val env: SparkEnv,
+    val localDagScheduler: LocalDagScheduler,
+    val maximumResultSizeBytes: Long,
+    val dependencyManager: DependencyManager,
+    val taskAttemptId: Long,
     val runningLocally: Boolean = false,
     private[spark] val taskMetrics: TaskMetrics = TaskMetrics.empty)
   extends Serializable {
+
+  /* stageId, partitionId, and accumulators are set in initialize() (which is called after the
+   * macrotask is deserialized on a executor). */
+  var stageId: Int = -1
+  var partitionId: Int = -1
+
+  // The accumulators used by this macrotask (passed back to the driver when the task completes).
+  var accumulators = Map[Long, Accumulable[_, _]]()
 
   @deprecated("use partitionId", "0.8.1")
   def splitId = partitionId
@@ -54,6 +86,11 @@ class TaskContext(
 
   // Whether the task has completed.
   @volatile private var completed: Boolean = false
+
+  def initialize(stageId: Int, partitionId: Int) {
+    this.stageId = stageId
+    this.partitionId = partitionId
+  }
 
   /** Checks whether the task has completed. */
   def isCompleted: Boolean = completed
@@ -76,7 +113,7 @@ class TaskContext(
 
   /**
    * Add a listener in the form of a Scala closure to be executed on task completion.
-   * This will be called in all situation - success, failure, or cancellation.
+   * This will be called in all situations - success, failure, or cancellation.
    *
    * An example use is for HadoopRDD to register a callback to close the input stream.
    */

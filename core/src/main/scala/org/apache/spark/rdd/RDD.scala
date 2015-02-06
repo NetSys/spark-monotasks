@@ -15,12 +15,28 @@
  * limitations under the License.
  */
 
+/*
+ * Copyright 2014 The Regents of The University California
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package org.apache.spark.rdd
 
 import java.util.{Properties, Random}
 
 import scala.collection.{mutable, Map}
-import scala.collection.mutable.ArrayBuffer
+import scala.collection.mutable.{ArrayBuffer, HashMap, HashSet}
 import scala.reflect.{classTag, ClassTag}
 
 import com.clearspring.analytics.stream.cardinality.HyperLogLogPlus
@@ -36,6 +52,7 @@ import org.apache.spark.SparkContext._
 import org.apache.spark.annotation.{DeveloperApi, Experimental}
 import org.apache.spark.api.java.JavaRDD
 import org.apache.spark.broadcast.Broadcast
+import org.apache.spark.monotasks.Monotask
 import org.apache.spark.partial.BoundedDouble
 import org.apache.spark.partial.CountEvaluator
 import org.apache.spark.partial.GroupedCountEvaluator
@@ -228,6 +245,17 @@ abstract class RDD[T: ClassTag](
     } else {
       computeOrReadCheckpoint(split, context)
     }
+  }
+
+  private[spark] final def getInputMonotasks(
+    partition: Partition,
+    dependencyIdToPartitions: HashMap[Long, HashSet[Partition]],
+    context: TaskContext)
+    : Seq[Monotask] = {
+    // TODO: Check here for whether RDD is already loaded in memory (much of the logic from
+    //       the iterator() method, which checks whether the RDD is already stored in the
+    //       CacheManager, should ultimately move here).
+    dependencies.flatMap(_.getMonotasks(partition, dependencyIdToPartitions, context))
   }
 
   /**

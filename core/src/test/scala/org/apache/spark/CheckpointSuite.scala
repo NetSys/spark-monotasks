@@ -15,20 +15,38 @@
  * limitations under the License.
  */
 
+/*
+ * Copyright 2014 The Regents of The University California
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package org.apache.spark
 
 import java.io.File
 
 import scala.reflect.ClassTag
 
-import org.scalatest.FunSuite
+import org.scalatest.{FunSuite, Ignore}
 
 import org.apache.spark.SparkContext._
 import org.apache.spark.rdd._
 import org.apache.spark.storage.{BlockId, StorageLevel, TestBlockId}
 import org.apache.spark.util.Utils
 
-class CheckpointSuite extends FunSuite with LocalSparkContext with Logging {
+// TODO: Re-enable these tests once checkpointing is supported for monotasks:
+//       https://github.com/NetSys/spark-monotasks/issues/9
+@Ignore class CheckpointSuite extends FunSuite with LocalSparkContext with Logging {
   var checkpointDir: File = _
   val partitioner = new HashPartitioner(2)
 

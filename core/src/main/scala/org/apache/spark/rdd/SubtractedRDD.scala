@@ -15,6 +15,22 @@
  * limitations under the License.
  */
 
+/*
+ * Copyright 2014 The Regents of The University California
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package org.apache.spark.rdd
 
 import java.util.{HashMap => JHashMap}
@@ -23,13 +39,8 @@ import scala.collection.JavaConversions._
 import scala.collection.mutable.ArrayBuffer
 import scala.reflect.ClassTag
 
-import org.apache.spark.Dependency
-import org.apache.spark.OneToOneDependency
-import org.apache.spark.Partition
-import org.apache.spark.Partitioner
-import org.apache.spark.ShuffleDependency
-import org.apache.spark.SparkEnv
-import org.apache.spark.TaskContext
+import org.apache.spark.{Dependency, OneToOneDependency, Partition, Partitioner, ShuffleDependency,
+  SparkException, TaskContext}
 import org.apache.spark.serializer.Serializer
 
 /**
@@ -81,9 +92,9 @@ private[spark] class SubtractedRDD[K: ClassTag, V: ClassTag, W: ClassTag](
       array(i) = new CoGroupPartition(i, Seq(rdd1, rdd2).zipWithIndex.map { case (rdd, j) =>
         dependencies(j) match {
           case s: ShuffleDependency[_, _, _] =>
-            new ShuffleCoGroupSplitDep(s.shuffleHandle)
+            None
           case _ =>
-            new NarrowCoGroupSplitDep(rdd, i, rdd.partitions(i))
+            Some(new NarrowCoGroupSplitDep(rdd, i, rdd.partitions(i)))
         }
       }.toArray)
     }
@@ -105,20 +116,33 @@ private[spark] class SubtractedRDD[K: ClassTag, V: ClassTag, W: ClassTag](
         seq
       }
     }
-    def integrate(dep: CoGroupSplitDep, op: Product2[K, V] => Unit) = dep match {
-      case NarrowCoGroupSplitDep(rdd, _, itsSplit) =>
-        rdd.iterator(itsSplit, context).asInstanceOf[Iterator[Product2[K, V]]].foreach(op)
 
-      case ShuffleCoGroupSplitDep(handle) =>
-        val iter = SparkEnv.get.shuffleManager
-          .getReader(handle, partition.index, partition.index + 1, context)
-          .read()
-        iter.foreach(op)
+    def integrate(depNum: Int, op: Product2[K, V] => Unit) = {
+      dependencies(depNum) match {
+        case oneToOneDependency: OneToOneDependency[_] =>
+          val dependencyPartition = partition.narrowDeps(depNum).get.split
+          oneToOneDependency.asInstanceOf[OneToOneDependency[Product2[K, V]]].rdd
+            .iterator(dependencyPartition, context)
+            .foreach(op)
+
+        case dependency: ShuffleDependency[_, _, _] =>
+          val shuffleDependency = dependency.asInstanceOf[ShuffleDependency[K, _, V]]
+          val iter = shuffleDependency.shuffleReader match {
+            case Some(shuffleReader) =>
+              shuffleReader.getDeserializedAggregatedSortedData()
+            case None =>
+              throw new SparkException(
+                s"No shuffle reader found for shuffle ${shuffleDependency.shuffleId} (should have " +
+                  "been set when creating the monotasks for this Macrotask)")
+          }
+          iter.foreach(op)
+      }
     }
+
     // the first dep is rdd1; add all values to the map
-    integrate(partition.deps(0), t => getSeq(t._1) += t._2)
+    integrate(0, t => getSeq(t._1) += t._2)
     // the second dep is rdd2; remove all of its keys
-    integrate(partition.deps(1), t => map.remove(t._1))
+    integrate(1, t => map.remove(t._1))
     map.iterator.map { t =>  t._2.iterator.map { (t._1, _) } }.flatten
   }
 

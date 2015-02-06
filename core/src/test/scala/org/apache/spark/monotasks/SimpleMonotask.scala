@@ -16,5 +16,8 @@
 
 package org.apache.spark.monotasks
 
+import org.apache.spark.TaskContext
+
 /** A minimal subclass of monotask for use in testing. */
-class SimpleMonotask(localDagScheduler: LocalDagScheduler) extends Monotask(localDagScheduler)
+class SimpleMonotask(taskAttemptId: Long)
+  extends Monotask(new TaskContext(null, null, 0, null, taskAttemptId))

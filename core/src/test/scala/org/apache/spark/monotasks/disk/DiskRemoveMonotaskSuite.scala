@@ -25,13 +25,14 @@ import org.mockito.Mockito.{mock, when}
 
 import org.scalatest.{BeforeAndAfter, FunSuite}
 
-import org.apache.spark.SparkConf
+import org.apache.spark.{SparkConf, TaskContext}
 import org.apache.spark.monotasks.LocalDagScheduler
 import org.apache.spark.storage.{BlockFileManager, BlockManager, TestBlockId}
 import org.apache.spark.util.Utils
 
 class DiskRemoveMonotaskSuite extends FunSuite with BeforeAndAfter {
 
+  private var taskContext: TaskContext = _
   private var blockFileManager: BlockFileManager = _
   private var localDagScheduler: LocalDagScheduler = _
 
@@ -41,16 +42,11 @@ class DiskRemoveMonotaskSuite extends FunSuite with BeforeAndAfter {
     val blockManager = mock(classOf[BlockManager])
     when(blockManager.blockFileManager).thenReturn(blockFileManager)
 
-    val diskScheduler = mock(classOf[DiskScheduler])
-    when(diskScheduler.getNextDiskId()).thenReturn("diskId")
     localDagScheduler = mock(classOf[LocalDagScheduler])
-    when(localDagScheduler.diskScheduler).thenReturn(diskScheduler)
     when(localDagScheduler.blockManager).thenReturn(blockManager)
-  }
 
-  after {
-    blockFileManager = null
-    localDagScheduler = null
+    taskContext = mock(classOf[TaskContext])
+    when(taskContext.localDagScheduler).thenReturn(localDagScheduler)
   }
 
   private def createTestFile(): File = {
@@ -63,7 +59,7 @@ class DiskRemoveMonotaskSuite extends FunSuite with BeforeAndAfter {
     // Do this here instead of in before() so that every block is given a different file.
     when(blockFileManager.getBlockFile(any(), any())).thenReturn(Some(createTestFile()))
 
-    val monotask = new DiskRemoveMonotask(localDagScheduler, new TestBlockId("0"), "nonsense")
+    val monotask = new DiskRemoveMonotask(taskContext, new TestBlockId("0"), "nonsense")
     assert(!monotask.execute())
   }
 
@@ -87,12 +83,12 @@ class DiskRemoveMonotaskSuite extends FunSuite with BeforeAndAfter {
 
       val blockId = new TestBlockId(i.toString)
       // Write a block to verify that it can be deleted correctly.
-      val writeMonotask = new DiskWriteMonotask(localDagScheduler, blockId, dataBuffer)
-      val diskId = localDagScheduler.diskScheduler.getNextDiskId()
+      val writeMonotask = new DiskWriteMonotask(taskContext, blockId, dataBuffer)
+      val diskId = "diskId"
       writeMonotask.diskId = Some(diskId)
 
       assert(writeMonotask.execute())
-      val removeMonotask = new DiskRemoveMonotask(localDagScheduler, blockId, diskId)
+      val removeMonotask = new DiskRemoveMonotask(taskContext, blockId, diskId)
       assert(removeMonotask.execute())
       assert(!testFile.exists())
     }

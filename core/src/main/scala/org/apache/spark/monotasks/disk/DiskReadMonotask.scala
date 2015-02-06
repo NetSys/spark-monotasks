@@ -22,19 +22,15 @@ import java.nio.channels.FileChannel.MapMode
 
 import scala.util.control.NonFatal
 
-import org.apache.spark.Logging
-import org.apache.spark.monotasks.LocalDagScheduler
+import org.apache.spark.{Logging, TaskContext}
 import org.apache.spark.storage.{BlockId, MonotaskResultBlockId}
 
 /**
  * Contains the parameters and logic necessary to read a block from disk. The execute() method reads
  * a block from disk and stores the resulting data in the MemoryStore.
  */
-private[spark] class DiskReadMonotask(
-    localDagScheduler: LocalDagScheduler,
-    blockId: BlockId,
-    val diskId: String)
-  extends DiskMonotask(localDagScheduler, blockId) with Logging {
+private[spark] class DiskReadMonotask(context: TaskContext, blockId: BlockId, val diskId: String)
+  extends DiskMonotask(context, blockId) with Logging {
 
   private val minMapBytes = blockManager.conf.getLong("spark.storage.memoryMapThreshold", 2 * 4096L)
 

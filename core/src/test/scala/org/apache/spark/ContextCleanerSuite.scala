@@ -15,6 +15,22 @@
  * limitations under the License.
  */
 
+/*
+ * Copyright 2014 The Regents of The University California
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package org.apache.spark
 
 import java.lang.ref.WeakReference
@@ -32,7 +48,6 @@ import org.scalatest.time.SpanSugar._
 import org.apache.spark.SparkContext._
 import org.apache.spark.rdd.RDD
 import org.apache.spark.storage._
-import org.apache.spark.shuffle.hash.HashShuffleManager
 import org.apache.spark.storage.BroadcastBlockId
 import org.apache.spark.storage.RDDBlockId
 import org.apache.spark.storage.ShuffleBlockId
@@ -43,16 +58,14 @@ import org.apache.spark.storage.ShuffleIndexBlockId
  * suitable for cleaner tests and provides some utility functions. Subclasses can use different
  * config options, in particular, a different shuffle manager class
  */
-abstract class ContextCleanerSuiteBase(val shuffleManager: Class[_] = classOf[HashShuffleManager])
-  extends FunSuite with BeforeAndAfter with LocalSparkContext
-{
+abstract class ContextCleanerSuiteBase
+  extends FunSuite with BeforeAndAfter with LocalSparkContext {
   implicit val defaultTimeout = timeout(10000 millis)
   val conf = new SparkConf()
     .setMaster("local[2]")
     .setAppName("ContextCleanerSuite")
     .set("spark.cleaner.referenceTracking.blocking", "true")
     .set("spark.cleaner.referenceTracking.blocking.shuffle", "true")
-    .set("spark.shuffle.manager", shuffleManager.getName)
 
   before {
     sc = new SparkContext(conf)
@@ -248,7 +261,6 @@ class ContextCleanerSuite extends ContextCleanerSuiteBase {
       .setAppName("ContextCleanerSuite")
       .set("spark.cleaner.referenceTracking.blocking", "true")
       .set("spark.cleaner.referenceTracking.blocking.shuffle", "true")
-      .set("spark.shuffle.manager", shuffleManager.getName)
     sc = new SparkContext(conf2)
 
     val numRdds = 10

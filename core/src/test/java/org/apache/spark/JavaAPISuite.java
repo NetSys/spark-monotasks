@@ -15,6 +15,22 @@
  * limitations under the License.
  */
 
+/*
+ * Copyright 2014 The Regents of The University California
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package org.apache.spark;
 
 import java.io.*;
@@ -46,6 +62,7 @@ import org.apache.hadoop.mapreduce.Job;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
+import org.junit.Ignore;
 import org.junit.Test;
 
 import org.apache.spark.api.java.JavaDoubleRDD;
@@ -752,7 +769,7 @@ public class JavaAPISuite implements Serializable {
   @Test
   public void iterator() {
     JavaRDD<Integer> rdd = sc.parallelize(Arrays.asList(1, 2, 3, 4, 5), 2);
-    TaskContext context = new TaskContext(0, 0, 0, false, new TaskMetrics());
+    TaskContext context = new TaskContext(null, null, 0, null, 0, false, new TaskMetrics());
     Assert.assertEquals(1, rdd.iterator(rdd.partitions().get(0), context).next().intValue());
   }
 
@@ -1084,7 +1101,7 @@ public class JavaAPISuite implements Serializable {
     Assert.assertEquals(new Tuple2<String, Integer>("2", 2), s.get(1));
   }
 
-  @Test
+  @Ignore("Checkpoint doesn't work with monotasks") @Test
   public void checkpointAndComputation() {
     JavaRDD<Integer> rdd = sc.parallelize(Arrays.asList(1, 2, 3, 4, 5));
     sc.setCheckpointDir(tempDir.getAbsolutePath());
@@ -1095,7 +1112,7 @@ public class JavaAPISuite implements Serializable {
     Assert.assertEquals(Arrays.asList(1, 2, 3, 4, 5), rdd.collect());
   }
 
-  @Test
+  @Ignore("Checkpoint doesn't work with monotasks") @Test
   public void checkpointAndRestore() {
     JavaRDD<Integer> rdd = sc.parallelize(Arrays.asList(1, 2, 3, 4, 5));
     sc.setCheckpointDir(tempDir.getAbsolutePath());

@@ -16,15 +16,12 @@
 
 package org.apache.spark.monotasks.disk
 
-import org.apache.spark.monotasks.LocalDagScheduler
+import org.apache.spark.TaskContext
 import org.apache.spark.storage.BlockId
 
 /** Contains the parameters and logic necessary to remove a single block from a single disk. */
-private[spark] class DiskRemoveMonotask(
-    localDagScheduler: LocalDagScheduler,
-    blockId: BlockId,
-    val diskId: String)
-  extends DiskMonotask(localDagScheduler, blockId) {
+private[spark] class DiskRemoveMonotask(context: TaskContext, blockId: BlockId, val diskId: String)
+  extends DiskMonotask(context, blockId) {
 
   override def execute(): Boolean =
     blockManager.blockFileManager.getBlockFile(blockId, diskId).map(_.delete()).getOrElse(false)

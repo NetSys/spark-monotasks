@@ -15,6 +15,22 @@
  * limitations under the License.
  */
 
+/*
+ * Copyright 2014 The Regents of The University California
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package org.apache.spark.scheduler
 
 import java.util.Properties
@@ -55,13 +71,13 @@ private[scheduler] case class JobGroupCancelled(groupId: String) extends DAGSche
 private[scheduler] case object AllJobsCancelled extends DAGSchedulerEvent
 
 private[scheduler]
-case class BeginEvent(task: Task[_], taskInfo: TaskInfo) extends DAGSchedulerEvent
+case class BeginEvent(stageId: Int, taskInfo: TaskInfo) extends DAGSchedulerEvent
 
 private[scheduler]
 case class GettingResultEvent(taskInfo: TaskInfo) extends DAGSchedulerEvent
 
 private[scheduler] case class CompletionEvent(
-    task: Task[_],
+    task: Macrotask[_],
     reason: TaskEndReason,
     result: Any,
     accumUpdates: Map[Long, Any],

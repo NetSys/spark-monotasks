@@ -17,8 +17,6 @@
 
 package org.apache.spark.rdd
 
-import scala.reflect.ClassTag
-
 import org.apache.spark._
 import org.apache.spark.annotation.DeveloperApi
 import org.apache.spark.serializer.Serializer
@@ -87,10 +85,15 @@ class ShuffledRDD[K, V, C](
   }
 
   override def compute(split: Partition, context: TaskContext): Iterator[(K, C)] = {
-    val dep = dependencies.head.asInstanceOf[ShuffleDependency[K, V, C]]
-    SparkEnv.get.shuffleManager.getReader(dep.shuffleHandle, split.index, split.index + 1, context)
-      .read()
-      .asInstanceOf[Iterator[(K, C)]]
+    val shuffleDependency = dependencies.head.asInstanceOf[ShuffleDependency[K, V, C]]
+    shuffleDependency.shuffleReader match {
+      case Some(shuffleReader) =>
+        shuffleReader.getDeserializedAggregatedSortedData().asInstanceOf[Iterator[(K, C)]]
+      case None =>
+        throw new SparkException(
+          s"No shuffle reader found for shuffle ${shuffleDependency.shuffleId} (should have " +
+            "been set when creating the monotasks for this Macrotask)")
+    }
   }
 
   override def clearDependencies() {
