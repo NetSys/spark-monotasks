@@ -15,6 +15,22 @@
  * limitations under the License.
  */
 
+/*
+ * Copyright 2014 The Regents of The University California
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package org.apache.spark.scheduler
 
 import java.io.{ObjectInputStream, ObjectOutputStream, IOException}
@@ -27,17 +43,18 @@ import org.scalatest.FunSuite
 
 import org.apache.spark._
 import org.apache.spark.executor.TaskMetrics
+import org.apache.spark.monotasks.Monotask
 import org.apache.spark.util.ManualClock
 
 class FakeDAGScheduler(sc: SparkContext, taskScheduler: FakeTaskScheduler)
   extends DAGScheduler(sc) {
 
-  override def taskStarted(task: Task[_], taskInfo: TaskInfo) {
+  override def taskStarted(stageId: Int, taskInfo: TaskInfo) {
     taskScheduler.startedTasks += taskInfo.index
   }
 
   override def taskEnded(
-      task: Task[_],
+      task: Macrotask[_],
       reason: TaskEndReason,
       result: Any,
       accumUpdates: mutable.Map[Long, Any],
@@ -138,12 +155,12 @@ class FakeTaskScheduler(sc: SparkContext, liveExecutors: (String, String)* /* ex
 /**
  * A Task implementation that results in a large serialized task.
  */
-class LargeTask(stageId: Int) extends Task[Array[Byte]](stageId, 0) {
+class LargeTask(stageId: Int) extends Macrotask[Array[Byte]](stageId, null, null) {
   val randomBuffer = new Array[Byte](TaskSetManager.TASK_SIZE_TO_WARN_KB * 1024)
   val random = new Random(0)
   random.nextBytes(randomBuffer)
 
-  override def runTask(context: TaskContext): Array[Byte] = randomBuffer
+  override def getMonotasks(context: TaskContextImpl): Seq[Monotask] = Seq.empty
   override def preferredLocations: Seq[TaskLocation] = Seq[TaskLocation]()
 }
 

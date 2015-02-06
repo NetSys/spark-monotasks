@@ -1189,6 +1189,7 @@ private[spark] class BlockManager(
       case _: RDDBlockId => compressRdds
       case _: TempLocalBlockId => compressShuffleSpill
       case _: TempShuffleBlockId => compressShuffle
+      case _: MonotaskResultBlockId => compressShuffle
       case _ => false
     }
   }

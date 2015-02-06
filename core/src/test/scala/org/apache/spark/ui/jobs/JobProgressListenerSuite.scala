@@ -15,6 +15,22 @@
  * limitations under the License.
  */
 
+/*
+ * Copyright 2014 The Regents of The University California
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package org.apache.spark.ui.jobs
 
 import org.scalatest.FunSuite
@@ -166,7 +182,8 @@ class JobProgressListenerSuite extends FunSuite with LocalSparkContext with Matc
     taskMetrics.setShuffleReadMetrics(Some(shuffleReadMetrics))
     var taskInfo = new TaskInfo(1234L, 0, 1, 0L, "exe-1", "host1", TaskLocality.NODE_LOCAL, false)
     taskInfo.finishTime = 1
-    var task = new ShuffleMapTask(0)
+    var task = new ShuffleMapMacrotask(
+      0, null, new Partition { override def index = 0 }, null, null)
     val taskType = Utils.getFormattedClassName(task)
     listener.onTaskEnd(
       SparkListenerTaskEnd(task.stageId, 0, taskType, Success, taskInfo, taskMetrics))
@@ -177,7 +194,7 @@ class JobProgressListenerSuite extends FunSuite with LocalSparkContext with Matc
     taskInfo =
       new TaskInfo(1234L, 0, 1, 1000L, "exe-unknown", "host1", TaskLocality.NODE_LOCAL, true)
     taskInfo.finishTime = 1
-    task = new ShuffleMapTask(0)
+    task = new ShuffleMapMacrotask(0, null, new Partition { override def index = 0 }, null, null)
     listener.onTaskEnd(
       SparkListenerTaskEnd(task.stageId, 0, taskType, Success, taskInfo, taskMetrics))
     assert(listener.stageIdToData.size === 1)
@@ -185,7 +202,7 @@ class JobProgressListenerSuite extends FunSuite with LocalSparkContext with Matc
     // finish this task, should get updated duration
     taskInfo = new TaskInfo(1235L, 0, 1, 0L, "exe-1", "host1", TaskLocality.NODE_LOCAL, false)
     taskInfo.finishTime = 1
-    task = new ShuffleMapTask(0)
+    task = new ShuffleMapMacrotask(0, null, new Partition { override def index = 0 }, null, null)
     listener.onTaskEnd(
       SparkListenerTaskEnd(task.stageId, 0, taskType, Success, taskInfo, taskMetrics))
     assert(listener.stageIdToData.getOrElse((0, 0), fail())
@@ -194,7 +211,7 @@ class JobProgressListenerSuite extends FunSuite with LocalSparkContext with Matc
     // finish this task, should get updated duration
     taskInfo = new TaskInfo(1236L, 0, 2, 0L, "exe-2", "host1", TaskLocality.NODE_LOCAL, false)
     taskInfo.finishTime = 1
-    task = new ShuffleMapTask(0)
+    task = new ShuffleMapMacrotask(0, null, new Partition { override def index = 0 }, null, null)
     listener.onTaskEnd(
       SparkListenerTaskEnd(task.stageId, 0, taskType, Success, taskInfo, taskMetrics))
     assert(listener.stageIdToData.getOrElse((0, 0), fail())
@@ -207,7 +224,8 @@ class JobProgressListenerSuite extends FunSuite with LocalSparkContext with Matc
     val metrics = new TaskMetrics()
     val taskInfo = new TaskInfo(1234L, 0, 3, 0L, "exe-1", "host1", TaskLocality.NODE_LOCAL, false)
     taskInfo.finishTime = 1
-    val task = new ShuffleMapTask(0)
+    val task = new ShuffleMapMacrotask(
+      0, null, new Partition { override def index = 0 }, null, null)
     val taskType = Utils.getFormattedClassName(task)
 
     // Go through all the failure cases to make sure we are counting them as failures.
@@ -239,7 +257,9 @@ class JobProgressListenerSuite extends FunSuite with LocalSparkContext with Matc
     val conf = new SparkConf()
     val listener = new JobProgressListener(conf)
 
-    val taskType = Utils.getFormattedClassName(new ShuffleMapTask(0))
+    val task = new ShuffleMapMacrotask(
+      0, null, new Partition { override def index = 0 }, null, null)
+    val taskType = Utils.getFormattedClassName(task)
     val execId = "exe-1"
 
     def makeTaskMetrics(base: Int) = {

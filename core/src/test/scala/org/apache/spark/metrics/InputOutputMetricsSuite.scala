@@ -195,7 +195,7 @@ class InputOutputMetricsSuite extends FunSuite with SharedSparkContext
 
   test("shuffle records read metrics") {
     val recordsRead = runAndReturnShuffleRecordsRead {
-      sc.textFile(tmpFilePath, 4)
+      sc.textFile(tmpFilePath, 1)
         .map(key => (key, 1))
         .groupByKey()
         .collect()

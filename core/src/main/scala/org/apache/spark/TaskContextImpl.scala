@@ -17,20 +17,31 @@
 
 package org.apache.spark
 
-import org.apache.spark.executor.TaskMetrics
+import scala.collection.mutable.{ArrayBuffer, Map}
+
+import org.apache.spark.executor.{DependencyManager, TaskMetrics}
+import org.apache.spark.monotasks.LocalDagScheduler
 import org.apache.spark.util.{TaskCompletionListener, TaskCompletionListenerException}
 
-import scala.collection.mutable.ArrayBuffer
-
 private[spark] class TaskContextImpl(
-    val stageId: Int,
-    val partitionId: Int,
+    val env: SparkEnv,
+    val localDagScheduler: LocalDagScheduler,
+    val maximumResultSizeBytes: Long,
+    val dependencyManager: DependencyManager,
     override val taskAttemptId: Long,
     override val attemptNumber: Int,
     val runningLocally: Boolean = false,
     val taskMetrics: TaskMetrics = TaskMetrics.empty)
   extends TaskContext
   with Logging {
+
+  /* stageId, partitionId, and accumulators are set in initialize() (which is called after the
+   * macrotask is deserialized on a executor). */
+  var stageId: Int = -1
+  var partitionId: Int = -1
+
+  // The accumulators used by this macrotask (passed back to the driver when the task completes).
+  var accumulators = Map[Long, Accumulable[_, _]]()
 
   // For backwards-compatibility; this method is now deprecated as of 1.3.0.
   override def attemptId(): Long = taskAttemptId
@@ -43,6 +54,11 @@ private[spark] class TaskContextImpl(
 
   // Whether the task has completed.
   @volatile private var completed: Boolean = false
+
+  def initialize(stageId: Int, partitionId: Int) {
+    this.stageId = stageId
+    this.partitionId = partitionId
+  }
 
   override def addTaskCompletionListener(listener: TaskCompletionListener): this.type = {
     onCompleteCallbacks += listener

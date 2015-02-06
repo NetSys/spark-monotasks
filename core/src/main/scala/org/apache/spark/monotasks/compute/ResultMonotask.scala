@@ -14,20 +14,22 @@
  * limitations under the License.
  */
 
-package org.apache.spark.monotasks
+package org.apache.spark.monotasks.compute
 
-import scala.collection.mutable.HashSet
+import scala.reflect.ClassTag
 
-import org.scalatest.{FunSuite, Matchers}
+import org.apache.spark.{Partition, TaskContextImpl}
+import org.apache.spark.rdd.RDD
 
-class MonotaskSuite extends FunSuite with Matchers {
-  test("monotasks are assigned unique IDs") {
-    val numMonotasks = 10
-    val monotaskList = Array.fill[Monotask](numMonotasks)(new SimpleMonotask(0))
+/** A task that sends back a result (based on the input RDD) to the driver application. */
+private[spark] class ResultMonotask[T, U: ClassTag](
+    context: TaskContextImpl,
+    rdd: RDD[T],
+    split: Partition,
+    val func: (TaskContextImpl, Iterator[T]) => U)
+  extends ExecutionMonotask[T, U](context, rdd, split) {
 
-    // Make sure that all of the IDs are unique.
-    val monotaskIdSet = new HashSet[Long]()
-    monotaskList.foreach(monotaskIdSet += _.taskId)
-    assert(numMonotasks === monotaskIdSet.size)
+  override def getResult(): U = {
+    func(context, rdd.iterator(split, context))
   }
 }

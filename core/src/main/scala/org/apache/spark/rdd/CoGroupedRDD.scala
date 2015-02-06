@@ -15,6 +15,22 @@
  * limitations under the License.
  */
 
+/*
+ * Copyright 2014 The Regents of The University California
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package org.apache.spark.rdd
 
 import scala.language.existentials
@@ -23,21 +39,21 @@ import java.io.{IOException, ObjectOutputStream}
 
 import scala.collection.mutable.ArrayBuffer
 
-import org.apache.spark.{InterruptibleIterator, Partition, Partitioner, SparkEnv, TaskContext}
-import org.apache.spark.{Dependency, OneToOneDependency, ShuffleDependency}
+import org.apache.spark._
 import org.apache.spark.annotation.DeveloperApi
-import org.apache.spark.util.collection.{ExternalAppendOnlyMap, AppendOnlyMap, CompactBuffer}
-import org.apache.spark.util.Utils
 import org.apache.spark.serializer.Serializer
-import org.apache.spark.shuffle.ShuffleHandle
+import org.apache.spark.util.Utils
+import org.apache.spark.util.collection.{AppendOnlyMap, CompactBuffer, ExternalAppendOnlyMap}
 
-private[spark] sealed trait CoGroupSplitDep extends Serializable
-
+/** The references to rdd and splitIndex are transient because redundant information is stored
+  * in the CoGroupedRDD object.  Because CoGroupedRDD is serialized separately from
+  * CoGroupPartition, if rdd and splitIndex aren't transient, they'll be included twice in the
+  * task closure. */
 private[spark] case class NarrowCoGroupSplitDep(
-    rdd: RDD[_],
-    splitIndex: Int,
+    @transient rdd: RDD[_],
+    @transient splitIndex: Int,
     var split: Partition
-  ) extends CoGroupSplitDep {
+  ) extends Serializable {
 
   @throws(classOf[IOException])
   private def writeObject(oos: ObjectOutputStream): Unit = Utils.tryOrIOException {
@@ -47,9 +63,14 @@ private[spark] case class NarrowCoGroupSplitDep(
   }
 }
 
-private[spark] case class ShuffleCoGroupSplitDep(handle: ShuffleHandle) extends CoGroupSplitDep
-
-private[spark] class CoGroupPartition(idx: Int, val deps: Array[CoGroupSplitDep])
+/**
+ * Stores information about the narrow dependencies used by a CoGroupedRdd.  narrowDeps maps to
+ * the dependencies variable in the parent RDD: for each OneToOneDependency in dependencies,
+ * narrowDeps has a NarrowCoGroupSplitDep (describing the partition for that dependency) at the
+ * corresponding index.
+ */
+private[spark] class CoGroupPartition(
+    idx: Int, val narrowDeps: Array[Option[NarrowCoGroupSplitDep]])
   extends Partition with Serializable {
   override val index: Int = idx
   override def hashCode(): Int = idx
@@ -105,9 +126,9 @@ class CoGroupedRDD[K](@transient var rdds: Seq[RDD[_ <: Product2[K, _]]], part: 
         // Assume each RDD contributed a single dependency, and get it
         dependencies(j) match {
           case s: ShuffleDependency[_, _, _] =>
-            new ShuffleCoGroupSplitDep(s.shuffleHandle)
+            None
           case _ =>
-            new NarrowCoGroupSplitDep(rdd, i, rdd.partitions(i))
+            Some(new NarrowCoGroupSplitDep(rdd, i, rdd.partitions(i)))
         }
       }.toArray)
     }
@@ -120,21 +141,28 @@ class CoGroupedRDD[K](@transient var rdds: Seq[RDD[_ <: Product2[K, _]]], part: 
     val sparkConf = SparkEnv.get.conf
     val externalSorting = sparkConf.getBoolean("spark.shuffle.spill", true)
     val split = s.asInstanceOf[CoGroupPartition]
-    val numRdds = split.deps.size
+    val numRdds = dependencies.size
 
     // A list of (rdd iterator, dependency number) pairs
-    val rddIterators = new ArrayBuffer[(Iterator[Product2[K, Any]], Int)]
-    for ((dep, depNum) <- split.deps.zipWithIndex) dep match {
-      case NarrowCoGroupSplitDep(rdd, _, itsSplit) =>
+    val rddIterators = new ArrayBuffer[(Iterator[Product2[K, _]], Int)]
+    for ((dep, depNum) <- dependencies.zipWithIndex) dep match {
+      case oneToOneDependency: OneToOneDependency[_] =>
+        val dependencyPartition = split.narrowDeps(depNum).get.split
         // Read them from the parent
-        val it = rdd.iterator(itsSplit, context).asInstanceOf[Iterator[Product2[K, Any]]]
+        val it = oneToOneDependency.asInstanceOf[OneToOneDependency[Product2[K, _]]].rdd.iterator(
+          dependencyPartition, context)
         rddIterators += ((it, depNum))
 
-      case ShuffleCoGroupSplitDep(handle) =>
-        // Read map outputs of shuffle
-        val it = SparkEnv.get.shuffleManager
-          .getReader(handle, split.index, split.index + 1, context)
-          .read()
+      case shuffleDependency: ShuffleDependency[_, _, _] =>
+        // Read map outputs of the shuffle
+        val it = shuffleDependency.asInstanceOf[ShuffleDependency[K, _, _]].shuffleHelper match {
+          case Some(shuffleHelper) =>
+            shuffleHelper.getDeserializedAggregatedSortedData()
+          case None =>
+            throw new SparkException(
+              s"No shuffle reader found for shuffle ${shuffleDependency.shuffleId} (should have " +
+                "been set when creating the monotasks for this Macrotask)")
+        }
         rddIterators += ((it, depNum))
     }
 

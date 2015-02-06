@@ -25,13 +25,14 @@ import org.mockito.Mockito.{mock, verify, when}
 
 import org.scalatest.{BeforeAndAfter, FunSuite}
 
-import org.apache.spark.SparkConf
+import org.apache.spark.{SparkConf, TaskContextImpl}
 import org.apache.spark.monotasks.LocalDagScheduler
 import org.apache.spark.storage.{BlockFileManager, BlockManager, TestBlockId}
 import org.apache.spark.util.Utils
 
 class DiskWriteMonotaskSuite extends FunSuite with BeforeAndAfter {
 
+  private var taskContext: TaskContextImpl = _
   private var blockFileManager: BlockFileManager = _
   private var localDagScheduler: LocalDagScheduler = _
   private val numBlocks = 10
@@ -44,17 +45,11 @@ class DiskWriteMonotaskSuite extends FunSuite with BeforeAndAfter {
     val blockManager = mock(classOf[BlockManager])
     when(blockManager.blockFileManager).thenReturn(blockFileManager)
 
-    val diskScheduler = mock(classOf[DiskScheduler])
-    when(diskScheduler.getNextDiskId()).thenReturn("diskId")
-
     localDagScheduler = mock(classOf[LocalDagScheduler])
-    when(localDagScheduler.diskScheduler).thenReturn(diskScheduler)
     when(localDagScheduler.blockManager).thenReturn(blockManager)
-  }
 
-  after {
-    blockFileManager = null
-    localDagScheduler = null
+    taskContext = mock(classOf[TaskContextImpl])
+    when(taskContext.localDagScheduler).thenReturn(localDagScheduler)
   }
 
   private def makeDataBuffer(): ByteBuffer = {
@@ -80,8 +75,8 @@ class DiskWriteMonotaskSuite extends FunSuite with BeforeAndAfter {
       when(blockFileManager.getBlockFile(any(), any())).thenReturn(Some(createTestFile()))
 
       val blockId = new TestBlockId(i.toString)
-      val monotask = new DiskWriteMonotask(localDagScheduler, blockId, dataBuffer)
-      val diskId = localDagScheduler.diskScheduler.getNextDiskId()
+      val monotask = new DiskWriteMonotask(taskContext, blockId, dataBuffer)
+      val diskId = "diskId"
       monotask.diskId = Some(diskId)
 
       assert(monotask.execute())
@@ -90,7 +85,7 @@ class DiskWriteMonotaskSuite extends FunSuite with BeforeAndAfter {
   }
 
   test("execute: empty diskId causes failure") {
-    val monotask = new DiskWriteMonotask(localDagScheduler, new TestBlockId("0"), dataBuffer)
+    val monotask = new DiskWriteMonotask(taskContext, new TestBlockId("0"), dataBuffer)
     assert(!monotask.execute())
   }
 
@@ -100,8 +95,8 @@ class DiskWriteMonotaskSuite extends FunSuite with BeforeAndAfter {
       when(blockFileManager.getBlockFile(any(), any())).thenReturn(Some(createTestFile()))
 
       val blockId = new TestBlockId(i.toString)
-      val monotask = new DiskWriteMonotask(localDagScheduler, blockId, dataBuffer)
-      val diskId = localDagScheduler.diskScheduler.getNextDiskId()
+      val monotask = new DiskWriteMonotask(taskContext, blockId, dataBuffer)
+      val diskId = "diskId"
       monotask.diskId = Some(diskId)
 
       assert(monotask.execute())

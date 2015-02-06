@@ -20,7 +20,7 @@ import java.util.concurrent.ConcurrentHashMap
 
 import scala.collection.mutable.HashSet
 
-import org.apache.spark.monotasks.LocalDagScheduler
+import org.apache.spark.TaskContextImpl
 import org.apache.spark.storage.BlockId
 
 /**
@@ -30,10 +30,10 @@ import org.apache.spark.storage.BlockId
  * class does no meaningful work, so it should only be used for testing purposes.
  */
 private[spark] class DummyDiskMonotask(
-    localDagScheduler: LocalDagScheduler,
+    taskContext: TaskContextImpl,
     blockId: BlockId,
     val taskTime: Long)
-  extends DiskWriteMonotask(localDagScheduler, blockId, null) {
+  extends DiskWriteMonotask(taskContext, blockId, null) {
 
   override def execute(): Boolean = {
     val taskTimes = DummyDiskMonotask.taskTimes

@@ -15,6 +15,22 @@
  * limitations under the License.
  */
 
+/*
+ * Copyright 2014 The Regents of The University California
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package org.apache.spark
 
 import java.io.{ObjectInputStream, Serializable}
@@ -36,6 +52,9 @@ import org.apache.spark.util.Utils
  * such as a counter, these might be the same operation. In that case, you can use the simpler
  * [[org.apache.spark.Accumulator]]. They won't always be the same, though -- e.g., imagine you are
  * accumulating a set. You will add items to the set, and you will union two sets together.
+ *
+ * Accumulators are currently only supported during an RDD's compute function; accumulator updates
+ * that occur elsewhere will be ignored.
  *
  * @param initialValue initial value of accumulator
  * @param param helper object defining how to add elements of type `R` and `T`
@@ -282,10 +301,14 @@ object AccumulatorParam {
 private[spark] object Accumulators {
   // TODO: Use soft references? => need to make readObject work properly then
   val originals = Map[Long, Accumulable[_, _]]()
-  val localAccums = new ThreadLocal[Map[Long, Accumulable[_, _]]]() {
-    override protected def initialValue() = Map[Long, Accumulable[_, _]]()
-  }
   var lastId: Long = 0
+  /**
+   * Accumulables that were registered (which happens during task deserialization) in this thread.
+   *
+   * Whenever task execution starts in a new thread, this should be set to the accumulables stored
+   * in the TaskContext for the Macrotask.
+   */
+  val registeredAccumulables = new ThreadLocal[Map[Long, Accumulable[_, _]]]()
 
   def newId(): Long = synchronized {
     lastId += 1
@@ -296,24 +319,20 @@ private[spark] object Accumulators {
     if (original) {
       originals(a.id) = a
     } else {
-      localAccums.get()(a.id) = a
+      registeredAccumulables.get()(a.id) = a
     }
   }
 
-  // Clear the local (non-original) accumulators for the current thread
-  def clear() {
-    synchronized {
-      localAccums.get.clear
-    }
-  }
-
-  // Get the values of the local accumulators for the current thread (by ID)
-  def values: Map[Long, Any] = synchronized {
-    val ret = Map[Long, Any]()
-    for ((id, accum) <- localAccums.get) {
-      ret(id) = accum.localValue
-    }
-    return ret
+  /**
+   * Returns the values of accumulators (in the form of a map of accumulable id to the local
+   * value) used in this thread.
+   */
+  def getValues: Map[Long, Any] = {
+   val ret = Map[Long, Any]()
+   for ((id, accum) <- registeredAccumulables.get()) {
+     ret(id) = accum.localValue
+   }
+   return ret
   }
 
   // Add values to the original accumulators with some given IDs

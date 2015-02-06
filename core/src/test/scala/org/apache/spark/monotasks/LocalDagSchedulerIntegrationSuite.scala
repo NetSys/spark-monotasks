@@ -20,9 +20,12 @@ import java.nio.{ByteBuffer, ByteOrder}
 
 import scala.collection.mutable.ArrayBuffer
 
+import org.mockito.Mockito.{mock, when}
+
 import org.scalatest.{BeforeAndAfter, FunSuite}
 
-import org.apache.spark.{LocalSparkContext, SparkConf, SparkContext, SparkEnv}
+import org.apache.spark.{LocalSparkContext, SparkConf, SparkContext, SparkEnv, TaskContextImpl}
+import org.apache.spark.executor.ExecutorBackend
 import org.apache.spark.monotasks.disk.{DiskMonotask, DiskReadMonotask, DiskRemoveMonotask,
   DiskWriteMonotask}
 import org.apache.spark.storage.{BlockManager, TestBlockId}
@@ -34,6 +37,7 @@ import org.apache.spark.storage.{BlockManager, TestBlockId}
 class LocalDagSchedulerIntegrationSuite extends FunSuite with BeforeAndAfter
   with LocalSparkContext {
 
+  private var taskContext: TaskContextImpl = _
   private var blockManager: BlockManager = _
   private var localDagScheduler: LocalDagScheduler = _
 
@@ -43,12 +47,10 @@ class LocalDagSchedulerIntegrationSuite extends FunSuite with BeforeAndAfter
      * that the same configuration is loaded regardless of the system properties. */
     sc = new SparkContext("local", "test", new SparkConf(false))
     blockManager = SparkEnv.get.blockManager
-    localDagScheduler = new LocalDagScheduler(blockManager)
-  }
+    localDagScheduler = new LocalDagScheduler(mock(classOf[ExecutorBackend]), blockManager)
 
-  after {
-    blockManager = null
-    localDagScheduler = null
+    taskContext = mock(classOf[TaskContextImpl])
+    when(taskContext.localDagScheduler).thenReturn(localDagScheduler)
   }
 
   test("no crashes in end-to-end operation (write, read, remove) using the DiskScheduler") {
@@ -69,7 +71,7 @@ class LocalDagSchedulerIntegrationSuite extends FunSuite with BeforeAndAfter
     val monotasks = new ArrayBuffer[DiskMonotask]()
     for (i <- 1 to numBlocks) {
       val blockId = new TestBlockId(i.toString)
-      monotasks += new DiskWriteMonotask(localDagScheduler, blockId, dataBuffer)
+      monotasks += new DiskWriteMonotask(taskContext, blockId, dataBuffer)
     }
     localDagScheduler.submitMonotasks(monotasks)
     monotasks.clear()
@@ -88,8 +90,8 @@ class LocalDagSchedulerIntegrationSuite extends FunSuite with BeforeAndAfter
       val diskIdOption = status.get.diskId
       assert(diskIdOption.isDefined)
       val diskId = diskIdOption.get
-      val readMonotask = new DiskReadMonotask(localDagScheduler, blockId, diskId)
-      val removeMonotask = new DiskRemoveMonotask(localDagScheduler, blockId, diskId)
+      val readMonotask = new DiskReadMonotask(taskContext, blockId, diskId)
+      val removeMonotask = new DiskRemoveMonotask(taskContext, blockId, diskId)
       removeMonotask.addDependency(readMonotask)
       monotasks += readMonotask
       monotasks += removeMonotask

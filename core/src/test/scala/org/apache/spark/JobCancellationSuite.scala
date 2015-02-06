@@ -141,7 +141,9 @@ class JobCancellationSuite extends FunSuite with Matchers with BeforeAndAfter
     assert(jobB.get() === 100)
   }
 
-  test("job group with interruption") {
+  // TODO: Re-enable this test once killing tasks is supported.
+  //       https://github.com/NetSys/spark-monotasks/issues/4
+  ignore("job group with interruption") {
     sc = new SparkContext("local[2]", "test")
 
     // Add a listener to release the semaphore once any tasks are launched.

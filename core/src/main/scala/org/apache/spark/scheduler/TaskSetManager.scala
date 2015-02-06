@@ -15,6 +15,22 @@
  * limitations under the License.
  */
 
+/*
+ * Copyright 2014 The Regents of The University California
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package org.apache.spark.scheduler
 
 import java.io.NotSerializableException
@@ -461,7 +477,7 @@ private[spark] class TaskSetManager(
           // Serialize and return the task
           val startTime = clock.getTimeMillis()
           val serializedTask: ByteBuffer = try {
-            Task.serializeWithDependencies(task, sched.sc.addedFiles, sched.sc.addedJars, ser)
+            Macrotask.serializeWithDependencies(task, sched.sc.addedFiles, sched.sc.addedJars, ser)
           } catch {
             // If the task cannot be serialized, then there's no point to re-attempt the task,
             // as it will always fail. So just abort the whole task-set.
@@ -487,7 +503,7 @@ private[spark] class TaskSetManager(
           logInfo("Starting %s (TID %d, %s, %s, %d bytes)".format(
               taskName, taskId, host, taskLocality, serializedTask.limit))
 
-          sched.dagScheduler.taskStarted(task, info)
+          sched.dagScheduler.taskStarted(task.stageId, info)
           return Some(new TaskDescription(taskId = taskId, attemptNumber = attemptNum, execId,
             taskName, index, serializedTask))
         }
@@ -782,7 +798,8 @@ private[spark] class TaskSetManager(
     // and we are not using an external shuffle server which could serve the shuffle outputs.
     // The reason is the next stage wouldn't be able to fetch the data from this dead executor
     // so we would need to rerun these tasks on other executors.
-    if (tasks(0).isInstanceOf[ShuffleMapTask] && !env.blockManager.externalShuffleServiceEnabled) {
+    if (tasks(0).isInstanceOf[ShuffleMapMacrotask] &&
+      !env.blockManager.externalShuffleServiceEnabled) {
       for ((tid, info) <- taskInfos if info.executorId == execId) {
         val index = taskInfos(tid).index
         if (successful(index)) {

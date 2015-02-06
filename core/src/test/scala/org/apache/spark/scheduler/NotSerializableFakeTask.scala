@@ -19,13 +19,16 @@ package org.apache.spark.scheduler
 
 import java.io.{ObjectInputStream, ObjectOutputStream, IOException}
 
-import org.apache.spark.TaskContext
+import org.apache.spark.TaskContextImpl
+import org.apache.spark.monotasks.Monotask
 
 /**
  * A Task implementation that fails to serialize.
  */
-private[spark] class NotSerializableFakeTask(myId: Int, stageId: Int) extends Task[Array[Byte]](stageId, 0) {
-  override def runTask(context: TaskContext): Array[Byte] = Array.empty[Byte]
+private[spark] class NotSerializableFakeTask(myId: Int, stageId: Int)
+  extends Macrotask[Array[Byte]](stageId, null, null) {
+
+  override def getMonotasks(context: TaskContextImpl): Seq[Monotask] = Seq.empty
   override def preferredLocations: Seq[TaskLocation] = Seq[TaskLocation]()
 
   @throws(classOf[IOException])

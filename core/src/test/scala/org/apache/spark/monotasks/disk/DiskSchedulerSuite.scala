@@ -25,7 +25,7 @@ import org.mockito.Mockito.{mock, when}
 
 import org.scalatest.{BeforeAndAfter, FunSuite}
 
-import org.apache.spark.SparkConf
+import org.apache.spark.{SparkConf, TaskContextImpl}
 import org.apache.spark.monotasks.LocalDagScheduler
 import org.apache.spark.storage.{BlockFileManager, BlockManager, TestBlockId}
 import org.apache.spark.util.Utils
@@ -34,17 +34,15 @@ class DiskSchedulerSuite extends FunSuite with BeforeAndAfter {
 
   private var blockManager: BlockManager = _
   private var localDagScheduler: LocalDagScheduler = _
+  private var taskContext: TaskContextImpl = _
   val timeoutMillis = 10000
   val numBlocks = 10
 
   before {
     blockManager = mock(classOf[BlockManager])
     DummyDiskMonotask.clearTimes()
-  }
 
-  after {
-    blockManager = null
-    localDagScheduler = null
+    taskContext = mock(classOf[TaskContextImpl])
   }
 
   private def initializeLocalDagScheduler(numDisks: Int) {
@@ -59,7 +57,8 @@ class DiskSchedulerSuite extends FunSuite with BeforeAndAfter {
       conf.set("spark.local.dir", newLocalDirs)
     }
     when(blockManager.blockFileManager).thenReturn(new BlockFileManager(conf))
-    localDagScheduler = new LocalDagScheduler(blockManager)
+    localDagScheduler = new LocalDagScheduler(null, blockManager)
+    when(taskContext.localDagScheduler).thenReturn(localDagScheduler)
   }
 
   test("when using one disk, at most one DiskMonotask is executed at a time") {
@@ -68,7 +67,7 @@ class DiskSchedulerSuite extends FunSuite with BeforeAndAfter {
     val monotasks = new ArrayBuffer[DummyDiskMonotask]()
     for (i <- 1 to numBlocks) {
       val blockId = new TestBlockId(i.toString)
-      monotasks += new DummyDiskMonotask(localDagScheduler, blockId, 100)
+      monotasks += new DummyDiskMonotask(taskContext, blockId, 100)
     }
     localDagScheduler.submitMonotasks(monotasks)
 
@@ -81,7 +80,7 @@ class DiskSchedulerSuite extends FunSuite with BeforeAndAfter {
     val monotasks = new ArrayBuffer[DummyDiskMonotask]()
     for (i <- 1 to numBlocks) {
       val blockId = new TestBlockId(i.toString)
-      monotasks += new DummyDiskMonotask(localDagScheduler, blockId, 100)
+      monotasks += new DummyDiskMonotask(taskContext, blockId, 100)
     }
     localDagScheduler.submitMonotasks(monotasks)
 
@@ -94,7 +93,7 @@ class DiskSchedulerSuite extends FunSuite with BeforeAndAfter {
     val monotasks = new ArrayBuffer[DummyDiskMonotask]()
     for (i <- 1 to numBlocks) {
       val blockId = new TestBlockId(i.toString)
-      monotasks += new DummyDiskMonotask(localDagScheduler, blockId, 100)
+      monotasks += new DummyDiskMonotask(taskContext, blockId, 100)
     }
     localDagScheduler.submitMonotasks(monotasks)
 

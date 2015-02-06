@@ -15,15 +15,32 @@
  * limitations under the License.
  */
 
+/*
+ * Copyright 2014 The Regents of The University California
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package org.apache.spark.executor
 
+import java.lang.management.ManagementFactory
 import java.util.concurrent.atomic.AtomicLong
 
-import org.apache.spark.executor.DataReadMethod.DataReadMethod
-
+import scala.collection.JavaConversions._
 import scala.collection.mutable.ArrayBuffer
 
 import org.apache.spark.annotation.DeveloperApi
+import org.apache.spark.executor.DataReadMethod.DataReadMethod
 import org.apache.spark.storage.{BlockId, BlockStatus}
 
 /**
@@ -53,8 +70,10 @@ class TaskMetrics extends Serializable {
   private var _executorDeserializeTime: Long = _
   def executorDeserializeTime = _executorDeserializeTime
   private[spark] def setExecutorDeserializeTime(value: Long) = _executorDeserializeTime = value
-  
-  
+
+  /** Time when the task started running. */
+  @transient private val startingTime = System.currentTimeMillis()
+
   /**
    * Time the executor spends actually running the task (including fetching shuffle data)
    */
@@ -76,6 +95,12 @@ class TaskMetrics extends Serializable {
   private var _jvmGCTime: Long = _
   def jvmGCTime = _jvmGCTime
   private[spark] def setJvmGCTime(value: Long) = _jvmGCTime = value
+
+  private def currentGCTotalMillis: Long = {
+    ManagementFactory.getGarbageCollectorMXBeans.map(_.getCollectionTime).sum
+  }
+
+  @transient private val startingGCTime = currentGCTotalMillis
 
   /**
    * Amount of time spent serializing the task result
@@ -154,6 +179,12 @@ class TaskMetrics extends Serializable {
    * Storage statuses of any blocks that have been updated as a result of this task.
    */
   var updatedBlocks: Option[Seq[(BlockId, BlockStatus)]] = None
+
+  /** Should be called when a macrotask completes to set metrics about the task's runtime. */
+  def setMetricsOnTaskCompletion() {
+    setExecutorRunTime(System.currentTimeMillis() - startingTime)
+    setJvmGCTime(currentGCTotalMillis - startingGCTime)
+  }
 
   /**
    * A task may have multiple shuffle readers for multiple dependencies. To avoid synchronization
