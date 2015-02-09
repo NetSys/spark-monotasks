@@ -28,7 +28,7 @@ import org.apache.spark.{LocalSparkContext, SparkConf, SparkContext, SparkEnv, T
 import org.apache.spark.executor.ExecutorBackend
 import org.apache.spark.monotasks.disk.{DiskMonotask, DiskReadMonotask, DiskRemoveMonotask,
   DiskWriteMonotask}
-import org.apache.spark.storage.{BlockManager, TestBlockId}
+import org.apache.spark.storage.{BlockManager, MonotaskResultBlockId, StorageLevel, TestBlockId}
 
 /**
  *  This suite contains tests that verify that the LocalDagScheduler performs correctly and is
@@ -42,9 +42,9 @@ class LocalDagSchedulerIntegrationSuite extends FunSuite with BeforeAndAfter
   private var localDagScheduler: LocalDagScheduler = _
 
   before {
-    /* This is required because DiskMonotasks and the LocalDagScheduler take as input a
-     * BlockManager, which is obtained from SparkEnv. Pass in false to the SparkConf constructor so
-     * that the same configuration is loaded regardless of the system properties. */
+    // This is required because the LocalDagScheduler takes as input a BlockManager, which is
+    // obtained from SparkEnv. Pass in false to the SparkConf constructor so that the same
+    // configuration is loaded regardless of the system properties.
     sc = new SparkContext("local", "test", new SparkConf(false))
     blockManager = SparkEnv.get.blockManager
     localDagScheduler = new LocalDagScheduler(mock(classOf[ExecutorBackend]), blockManager)
@@ -70,8 +70,11 @@ class LocalDagSchedulerIntegrationSuite extends FunSuite with BeforeAndAfter
     // Submit the write monotasks.
     val monotasks = new ArrayBuffer[DiskMonotask]()
     for (i <- 1 to numBlocks) {
+      val serializedDataBlockId = new MonotaskResultBlockId(i)
+      blockManager.cacheBytes(serializedDataBlockId, dataBuffer, StorageLevel.MEMORY_ONLY_SER, false)
       val blockId = new TestBlockId(i.toString)
-      monotasks += new DiskWriteMonotask(taskContext, blockId, dataBuffer)
+      monotasks +=
+        new DiskWriteMonotask(taskContext, blockId, serializedDataBlockId, StorageLevel.DISK_ONLY)
     }
     localDagScheduler.submitMonotasks(monotasks)
     monotasks.clear()

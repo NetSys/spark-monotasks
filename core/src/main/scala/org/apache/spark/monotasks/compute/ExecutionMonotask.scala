@@ -61,7 +61,7 @@ private[spark] abstract class ExecutionMonotask[T, U: ClassTag](
 
     if (resultSize >= context.maximumResultSizeBytes) {
       val blockId = TaskResultBlockId(context.taskAttemptId)
-      context.env.blockManager.putBytes(
+      context.localDagScheduler.blockManager.cacheBytes(
         blockId, serializedDirectResult, StorageLevel.MEMORY_AND_DISK_SER)
       logInfo(s"Finished TID ${context.taskAttemptId}. $resultSize bytes result will be sent " +
         "via the BlockManager)")

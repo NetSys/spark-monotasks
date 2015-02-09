@@ -34,98 +34,101 @@
 package org.apache.spark.storage
 
 import java.io.{File, FileWriter}
+import java.util.Random
 
-import scala.collection.mutable
-import scala.language.reflectiveCalls
-
-import akka.actor.Props
 import com.google.common.io.Files
+
 import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach, FunSuite}
 
 import org.apache.spark.SparkConf
-import org.apache.spark.scheduler.LiveListenerBus
-import org.apache.spark.serializer.JavaSerializer
-import org.apache.spark.util.{AkkaUtils, Utils}
-import org.apache.spark.executor.ShuffleWriteMetrics
+import org.apache.spark.util.Utils
 
-class DiskBlockManagerSuite extends FunSuite with BeforeAndAfterEach with BeforeAndAfterAll {
-  private val testConf = new SparkConf(false)
-  private var rootDir0: File = _
+class BlockFileManagerSuite extends FunSuite with BeforeAndAfterEach with BeforeAndAfterAll {
+
   private var rootDir1: File = _
+  private var rootDir2: File = _
   private var rootDirs: String = _
-
-  // This suite focuses primarily on consolidation features,
-  // so we coerce consolidation if not already enabled.
-  testConf.set("spark.shuffle.consolidateFiles", "true")
-
-  var diskBlockManager: DiskBlockManager = _
+  private var blockFileManager: BlockFileManager = _
+  private var diskIds: Array[String] = _
 
   override def beforeAll() {
     super.beforeAll()
-    rootDir0 = Files.createTempDir()
-    rootDir0.deleteOnExit()
     rootDir1 = Files.createTempDir()
     rootDir1.deleteOnExit()
-    rootDirs = rootDir0.getAbsolutePath + "," + rootDir1.getAbsolutePath
-    println("Created root dirs: " + rootDirs)
+    rootDir2 = Files.createTempDir()
+    rootDir2.deleteOnExit()
+    rootDirs = rootDir1.getAbsolutePath + "," + rootDir2.getAbsolutePath
   }
 
   override def afterAll() {
     super.afterAll()
-    Utils.deleteRecursively(rootDir0)
     Utils.deleteRecursively(rootDir1)
+    Utils.deleteRecursively(rootDir2)
   }
 
   override def beforeEach() {
-    val conf = testConf.clone
+    val conf = new SparkConf(false)
     conf.set("spark.local.dir", rootDirs)
-    diskBlockManager = new DiskBlockManager(conf)
+    blockFileManager = new BlockFileManager(conf)
+    diskIds = blockFileManager.localDirs.keys.toArray
   }
 
   override def afterEach() {
-    diskBlockManager.stop()
+    blockFileManager.stop()
   }
 
   test("basic block creation") {
     val blockId = new TestBlockId("test")
     assertFileEquals(blockId, blockId.name, 0)
-
-    val newFile = diskBlockManager.getFile(blockId)
-    writeToFile(newFile, 10)
+    val fileOpt = blockFileManager.getBlockFile(blockId, diskIds.head)
+    assert(fileOpt.isDefined)
+    val file = fileOpt.get
+    writeToFile(file, 10)
     assertFileEquals(blockId, blockId.name, 10)
-    assert(diskBlockManager.containsBlock(blockId))
-    newFile.delete()
-    assert(!diskBlockManager.containsBlock(blockId))
+    assert(blockFileManager.contains(blockId, Some(diskIds.head)))
+    file.delete()
+    assert(!blockFileManager.contains(blockId, Some(diskIds.head)))
   }
 
   test("enumerating blocks") {
-    val ids = (1 to 100).map(i => TestBlockId("test_" + i))
-    val files = ids.map(id => diskBlockManager.getFile(id))
-    files.foreach(file => writeToFile(file, 10))
-    assert(diskBlockManager.getAllBlocks.toSet === ids.toSet)
+    val ids = (1 to 100).map(i => TestBlockId(i.toString())).toSet
+    val rand = new Random()
+    val numIds = diskIds.length
+    ids.foreach { id =>
+      val fileOpt = blockFileManager.getBlockFile(id, diskIds(rand.nextInt(numIds)))
+      assert(fileOpt.isDefined)
+      writeToFile(fileOpt.get, 10)
+    }
+    assert(blockFileManager.getAllBlocks().toSet === ids)
   }
 
   test("block appending") {
     val blockId = new TestBlockId("test")
-    val newFile = diskBlockManager.getFile(blockId)
-    writeToFile(newFile, 15)
+    val file1Opt = blockFileManager.getBlockFile(blockId, diskIds.head)
+    assert(file1Opt.isDefined)
+    val file1 = file1Opt.get
+    writeToFile(file1, 15)
     assertFileEquals(blockId, blockId.name, 15)
-    val newFile2 = diskBlockManager.getFile(blockId)
-    assert(newFile === newFile2)
-    writeToFile(newFile2, 12)
+    val file2Opt = blockFileManager.getBlockFile(blockId, diskIds.head)
+    assert(file2Opt.isDefined)
+    val file2 = file2Opt.get
+    assert(file1 === file2)
+    writeToFile(file2, 12)
     assertFileEquals(blockId, blockId.name, 27)
-    newFile.delete()
+    file1.delete()
   }
 
   def assertFileEquals(blockId: BlockId, filename: String, length: Int) {
-    val file = diskBlockManager.getFile(blockId.name)
+    val fileOpt = blockFileManager.getFile(blockId.name, diskIds(0))
+    assert(fileOpt.isDefined)
+    val file = fileOpt.get
     assert(file.getName === filename)
     assert(file.length() === length)
   }
 
   def writeToFile(file: File, numBytes: Int) {
     val writer = new FileWriter(file, true)
-    for (i <- 0 until numBytes) writer.write(i)
+    for (i <- 1 to numBytes) writer.write(i)
     writer.close()
   }
 }

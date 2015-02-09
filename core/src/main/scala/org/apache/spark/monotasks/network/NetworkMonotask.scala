@@ -21,8 +21,7 @@ import scala.util.{Success, Failure}
 import org.apache.spark.{ExceptionFailure, FetchFailed, Logging, SparkException, TaskContext}
 import org.apache.spark.monotasks.Monotask
 import org.apache.spark.network.{BufferMessage, ConnectionManagerId}
-import org.apache.spark.storage.{BlockManagerId, BlockId, BlockMessage, BlockMessageArray,
-  GetBlock, MonotaskResultBlockId, ShuffleBlockId}
+import org.apache.spark.storage._
 import org.apache.spark.util.Utils
 
 /**
@@ -65,8 +64,8 @@ private[spark] class NetworkMonotask(
     implicit val futureExecContext = context.env.blockManager.futureExecContext
     future.onComplete {
       case Success(message) => {
-        context.env.blockManager.memoryStore.putValue(
-          resultBlockId, message.asInstanceOf[BufferMessage])
+        context.env.blockManager.cacheSingle(
+          resultBlockId, message.asInstanceOf[BufferMessage], StorageLevel.MEMORY_ONLY, false)
         context.localDagScheduler.handleTaskCompletion(this)
       }
 

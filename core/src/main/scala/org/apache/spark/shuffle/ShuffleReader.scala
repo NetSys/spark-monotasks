@@ -99,13 +99,13 @@ class ShuffleReader[K, V, C](
 
       case monotaskResultBlockId: MonotaskResultBlockId =>
         // TODO: handle case where the block doesn't exist.
-        val bufferMessage = context.env.blockManager.memoryStore.getValue(monotaskResultBlockId).get
-          .asInstanceOf[BufferMessage]
+        val bufferMessage =
+          context.env.blockManager.getSingle(monotaskResultBlockId).get.asInstanceOf[BufferMessage]
         // Remove the data from the memory store.
         // TODO: This should be handled by the LocalDagScheduler, so that it can ensure results
         //       get deleted in all possible failure scenarios.
         //       https://github.com/NetSys/spark-monotasks/issues/8
-        context.env.blockManager.memoryStore.remove(monotaskResultBlockId)
+        context.env.blockManager.removeBlock(monotaskResultBlockId)
         val blockMessageArray = BlockMessageArray.fromBufferMessage(bufferMessage)
         blockMessageArray.flatMap { blockMessage =>
           if (blockMessage.getType != BlockMessage.TYPE_GOT_BLOCK) {

@@ -53,11 +53,13 @@ import org.apache.spark.annotation.{DeveloperApi, Experimental}
 import org.apache.spark.api.java.JavaRDD
 import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.monotasks.Monotask
+import org.apache.spark.monotasks.compute.{RddComputeMonotask, SerializationMonotask}
+import org.apache.spark.monotasks.disk.DiskWriteMonotask
 import org.apache.spark.partial.BoundedDouble
 import org.apache.spark.partial.CountEvaluator
 import org.apache.spark.partial.GroupedCountEvaluator
 import org.apache.spark.partial.PartialResult
-import org.apache.spark.storage.StorageLevel
+import org.apache.spark.storage.{BlockException, BlockId, BlockStatus, RDDBlockId, StorageLevel}
 import org.apache.spark.util.{BoundedPriorityQueue, Utils, CallSite}
 import org.apache.spark.util.collection.OpenHashMap
 import org.apache.spark.util.random.{BernoulliSampler, PoissonSampler, SamplingUtils}
@@ -235,28 +237,157 @@ abstract class RDD[T: ClassTag](
   }
 
   /**
-   * Internal method to this RDD; will read from cache if applicable, or otherwise compute it.
+   * Internal method to this RDD; will read from the cache if applicable, or otherwise compute it.
    * This should ''not'' be called by users directly, but is available for implementors of custom
    * subclasses of RDD.
    */
   final def iterator(split: Partition, context: TaskContext): Iterator[T] = {
-    if (storageLevel != StorageLevel.NONE) {
-      SparkEnv.get.cacheManager.getOrCompute(this, split, context, storageLevel)
+    // Check if this RDD is cached in memory.
+    val blockId = new RDDBlockId(id, split.index)
+    val inMemory = context.env.blockManager.getCurrentBlockStatus(blockId).map { status =>
+      val level = status.storageLevel
+      level.useMemory || level.useOffHeap
+    }.getOrElse(false)
+
+    if (inMemory) {
+      getRdd(blockId, context)
     } else {
-      computeOrReadCheckpoint(split, context)
+      logDebug(s"Computing partition $blockId.")
+      // TODO: The logic that guarantees that a node doesn't compute two copies of an RDD has been
+      //       removed. It should be reimplemented, and supplemented with logic that makes sure that
+      //       two monotasks do not load the same RDD. See
+      //       https://github.com/NetSys/spark-monotasks/issues/14
+      val computedValues = computeOrReadCheckpoint(split, context)
+      if ((storageLevel != StorageLevel.NONE) && !context.runningLocally) {
+        cacheRdd(computedValues, blockId, context, storageLevel)
+      } else {
+        computedValues
+      }
     }
   }
 
-  private[spark] final def getInputMonotasks(
-    partition: Partition,
-    dependencyIdToPartitions: HashMap[Long, HashSet[Partition]],
-    context: TaskContext)
-    : Seq[Monotask] = {
-    // TODO: Check here for whether RDD is already loaded in memory (much of the logic from
-    //       the iterator() method, which checks whether the RDD is already stored in the
-    //       CacheManager, should ultimately move here).
-    dependencies.flatMap(_.getMonotasks(partition, dependencyIdToPartitions, context))
+  /** Fetch the specified RDD block from memory. */
+  private def getRdd(blockId: BlockId, context: TaskContext): Iterator[T] = {
+    val block = context.env.blockManager.get(blockId).map{ blockResult =>
+      logDebug(s"Found partition $blockId in memory.")
+      context.taskMetrics.inputMetrics = Some(blockResult.inputMetrics)
+      blockResult.data.asInstanceOf[Iterator[T]]
+    }.getOrElse {
+      logError(s"Rdd $blockId was not found in memory.")
+      throw new IllegalStateException(s"Rdd $blockId was not found in memory.")
+    }
+    new InterruptibleIterator(context, block)
   }
+
+  /**
+   * Cache the values of a partition, keeping track of any updates to the storage statuses of other
+   * blocks along the way. Note: Since the BlockManager no longer supports automatically dropping
+   * blocks from memory to disk in the event that memory fills up, no other blocks should be
+   * modified as a side effect of this method.
+   */
+  private def cacheRdd(
+      block: Iterator[T],
+      blockId: BlockId,
+      context: TaskContext,
+      level: StorageLevel): Iterator[T] = {
+    logDebug(s"Caching partition $blockId at level $level.")
+    val updatedBlocks = new ArrayBuffer[(BlockId, BlockStatus)]
+    val cachedValues = if (level.useMemory || level.useOffHeap) {
+      // The RDD is supposed to be cached in memory, so we can pass it directly to the BlockManager.
+      val blockManager = context.env.blockManager
+      updatedBlocks ++= blockManager.cacheIterator(blockId, block, level, true)
+      blockManager.get(blockId).map(_.data.asInstanceOf[Iterator[T]]).getOrElse {
+        val message = s"BlockManager failed to cache block $blockId at level $level."
+        logError(message)
+        throw new BlockException(blockId, message)
+      }
+    } else {
+      // The RDD is supposed to be cached on disk, but that will be taken care of by a
+      // DiskWriteMonotask.
+      block
+    }
+
+    val metrics = context.taskMetrics
+    val lastUpdatedBlocks = metrics.updatedBlocks.getOrElse(Seq[(BlockId, BlockStatus)]())
+    metrics.updatedBlocks = Some(lastUpdatedBlocks ++ updatedBlocks.toSeq)
+    new InterruptibleIterator(context, cachedValues)
+  }
+
+  /**
+   * Builds a DAG of Monotasks that will compute this RDD and load it into the MemoryStore.
+   * nextMonotask, which is the monotask that will actually use this RDD, is provided as a parameter
+   * so that it can be inserted in the correct place in the DAG. This method is recursive: if this
+   * RDD has not been computed, then this method calls RDD.getInputMonotasks(), which in turn
+   * eventually calls RDD.buildDag() on each of this RDD's dependencies. The Seq that is returned
+   * does not include nextMonotask.
+   */
+  private[spark] final def buildDag(
+      partition: Partition,
+      dependencyIdToPartitions: HashMap[Long, HashSet[Partition]],
+      context: TaskContext,
+      nextMonotask: Monotask): Seq[Monotask] = {
+    val blockId = new RDDBlockId(this.id, partition.index)
+    val blockManager = context.localDagScheduler.blockManager
+
+    if (blockManager.isStored(blockId)) {
+      // This RDD is cached and needs to be loaded into the MemoryStore. Note that it is possible
+      // that the RDD is already cached in the MemoryStore, in which case no new Monotasks are
+      // created.
+      //
+      // The DAG will look like this:
+      //   DiskReadMonotask/NetworkMonotask/None -> nextMonotask
+      blockManager.getBlockLoadMonotask(blockId, context).map { monotask =>
+        nextMonotask.addDependency(monotask)
+        monotask
+      }.toSeq
+    } else if (storageLevel.useDisk) {
+      // This RDD needs to be computed and then cached on disk. Computing the RDD loads it into the
+      // MemoryStore.
+      //
+      // The DAG will look like this:
+      //   input monotask ----> RddComputeMonotask ---> nextMonotask
+      //   input monotask --'                       `-> SerializationMonotask -> DiskWriteMonotask
+      //   input monotask --'
+      //         ...
+      val rddComputeMonotask = new RddComputeMonotask(context, this, partition)
+      nextMonotask.addDependency(rddComputeMonotask)
+      val inputMonotasks =
+        getInputMonotasks(partition, dependencyIdToPartitions, context, rddComputeMonotask)
+
+      // Create a SerializationMonotask to serialize the block and a DiskWriteMonotask to write it
+      // to disk.
+      val serializationMonotask = new SerializationMonotask(context, blockId)
+      serializationMonotask.addDependency(rddComputeMonotask)
+      val diskWriteMonotask =
+        new DiskWriteMonotask(context, blockId, serializationMonotask.resultBlockId, storageLevel)
+      diskWriteMonotask.addDependency(serializationMonotask)
+
+      inputMonotasks ++ Seq(rddComputeMonotask, serializationMonotask, diskWriteMonotask)
+    } else {
+      // This RDD needs to be computed but does not need to be cached on disk. If the RDD needs to
+      // be cached in memory/off-heap storage, that will be taken care of when nextMonotask computes
+      // the RDD.
+      //
+      // The DAG looks like this:
+      //   input monotask ----> nextMonotask
+      //   input monotask --'
+      //   input monotask --'
+      //         ...
+      getInputMonotasks(partition, dependencyIdToPartitions, context, nextMonotask)
+    }
+  }
+
+  /**
+   *  Uses this RDD's dependencies to determine which monotasks are required to compute this RDD.
+   *  Inserts nextMonotask into the correct place in the resulting DAG. The Seq that is returned
+   *  does not include nextMonotask.
+   */
+  private final def getInputMonotasks(
+      partition: Partition,
+      dependencyIdToPartitions: HashMap[Long, HashSet[Partition]],
+      context: TaskContext,
+      nextMonotask: Monotask): Seq[Monotask] =
+    dependencies.flatMap(_.getMonotasks(partition, dependencyIdToPartitions, context, nextMonotask))
 
   /**
    * Return the ancestors of the given RDD that are related to it only through a sequence of

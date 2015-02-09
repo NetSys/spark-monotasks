@@ -15,6 +15,22 @@
  * limitations under the License.
  */
 
+/*
+ * Copyright 2014 The Regents of The University California
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package org.apache.spark.broadcast
 
 import java.io.{File, FileOutputStream, ObjectInputStream, ObjectOutputStream, OutputStream}
@@ -49,7 +65,7 @@ private[spark] class HttpBroadcast[T: ClassTag](
    * does not need to be told about this block as not only need to know about this data block.
    */
   HttpBroadcast.synchronized {
-    SparkEnv.get.blockManager.putSingle(
+    SparkEnv.get.blockManager.cacheSingle(
       blockId, value_, StorageLevel.MEMORY_AND_DISK, tellMaster = false)
   }
 
@@ -92,7 +108,7 @@ private[spark] class HttpBroadcast[T: ClassTag](
            * do not need to re-fetch. This data is only used locally and no other node
            * needs to fetch this block, so we don't notify the master.
            */
-          SparkEnv.get.blockManager.putSingle(
+          SparkEnv.get.blockManager.cacheSingle(
             blockId, value_, StorageLevel.MEMORY_AND_DISK, tellMaster = false)
           val time = (System.nanoTime - start) / 1e9
           logInfo("Reading broadcast variable " + id + " took " + time + " s")

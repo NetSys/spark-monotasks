@@ -15,6 +15,22 @@
  * limitations under the License.
  */
 
+/*
+ * Copyright 2014 The Regents of The University California
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package org.apache.spark.storage
 
 import java.io.IOException
@@ -31,7 +47,7 @@ import org.apache.spark.util.Utils
 private[spark] class TachyonStore(
     blockManager: BlockManager,
     tachyonManager: TachyonBlockManager)
-  extends BlockStore(blockManager: BlockManager) with Logging {
+  extends InMemoryBlockStore(blockManager: BlockManager) with Logging {
 
   logInfo("TachyonStore started")
 
@@ -39,37 +55,37 @@ private[spark] class TachyonStore(
     tachyonManager.getFile(blockId.name).length
   }
 
-  override def putBytes(blockId: BlockId, bytes: ByteBuffer, level: StorageLevel): PutResult = {
-    putIntoTachyonStore(blockId, bytes, returnValues = true)
+  override def cacheBytes(blockId: BlockId, bytes: ByteBuffer, level: StorageLevel): CacheResult = {
+    cacheInTachyonStore(blockId, bytes, returnValues = true)
   }
 
-  override def putArray(
+  override def cacheArray(
       blockId: BlockId,
       values: Array[Any],
       level: StorageLevel,
-      returnValues: Boolean): PutResult = {
-    putIterator(blockId, values.toIterator, level, returnValues)
+      returnValues: Boolean): CacheResult = {
+    cacheIterator(blockId, values.toIterator, level, returnValues)
   }
 
-  override def putIterator(
+  override def cacheIterator(
       blockId: BlockId,
       values: Iterator[Any],
       level: StorageLevel,
-      returnValues: Boolean): PutResult = {
+      returnValues: Boolean): CacheResult = {
     logDebug(s"Attempting to write values for block $blockId")
     val bytes = blockManager.dataSerialize(blockId, values)
-    putIntoTachyonStore(blockId, bytes, returnValues)
+    cacheInTachyonStore(blockId, bytes, returnValues)
   }
 
-  private def putIntoTachyonStore(
+  private def cacheInTachyonStore(
       blockId: BlockId,
       bytes: ByteBuffer,
-      returnValues: Boolean): PutResult = {
+      returnValues: Boolean): CacheResult = {
     // So that we do not modify the input offsets !
     // duplicate does not copy buffer, so inexpensive
     val byteBuffer = bytes.duplicate()
     byteBuffer.rewind()
-    logDebug(s"Attempting to put block $blockId into Tachyon")
+    logDebug(s"Attempting to cache block $blockId in Tachyon")
     val startTime = System.currentTimeMillis
     val file = tachyonManager.getFile(blockId)
     val os = file.getOutStream(WriteType.TRY_CACHE)
@@ -80,9 +96,9 @@ private[spark] class TachyonStore(
       blockId, Utils.bytesToString(byteBuffer.limit), finishTime - startTime))
 
     if (returnValues) {
-      PutResult(bytes.limit(), Right(bytes.duplicate()), None)
+      CacheResult(bytes.limit(), Right(bytes.duplicate()))
     } else {
-      PutResult(bytes.limit(), null, None)
+      CacheResult(bytes.limit(), null)
     }
   }
 

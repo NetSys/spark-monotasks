@@ -69,7 +69,6 @@ class SparkEnv (
     val actorSystem: ActorSystem,
     val serializer: Serializer,
     val closureSerializer: Serializer,
-    val cacheManager: CacheManager,
     val mapOutputTracker: MapOutputTracker,
     val broadcastManager: BroadcastManager,
     val blockManager: BlockManager,
@@ -233,8 +232,6 @@ object SparkEnv extends Logging {
 
     val broadcastManager = new BroadcastManager(isDriver, conf, securityManager)
 
-    val cacheManager = new CacheManager(blockManager)
-
     val httpFileServer =
       if (isDriver) {
         val fileServerPort = conf.getInt("spark.fileserver.port", 0)
@@ -273,7 +270,6 @@ object SparkEnv extends Logging {
       actorSystem,
       serializer,
       closureSerializer,
-      cacheManager,
       mapOutputTracker,
       broadcastManager,
       blockManager,

@@ -63,7 +63,8 @@ abstract class Dependency[T] extends Serializable {
   def getMonotasks(
     partition: Partition,
     dependencyIdToPartitions: HashMap[Long, HashSet[Partition]],
-    context: TaskContext)
+    context: TaskContext,
+    nextMonotask: Monotask)
     : Seq[Monotask]
 }
 
@@ -87,7 +88,8 @@ abstract class NarrowDependency[T](_rdd: RDD[T]) extends Dependency[T] {
   override def getMonotasks(
     partition: Partition,
     dependencyIdToPartitions: HashMap[Long, HashSet[Partition]],
-    context: TaskContext)
+    context: TaskContext,
+    nextMonotask: Monotask)
     : Seq[Monotask] = {
     // For each of the parent partitions, get the input monotasks to generate that partition.
     val partitions = dependencyIdToPartitions.get(this.id)
@@ -96,7 +98,7 @@ abstract class NarrowDependency[T](_rdd: RDD[T]) extends Dependency[T] {
         s"${partition.index} of dependency $this (should have been set in DAGScheduler)")
     } else {
       partitions.get.toArray.flatMap { parentPartition =>
-        rdd.getInputMonotasks(parentPartition, dependencyIdToPartitions, context)
+        rdd.buildDag(parentPartition, dependencyIdToPartitions, context, nextMonotask)
       }
     }
   }
@@ -136,11 +138,14 @@ class ShuffleDependency[K, V, C](
   override def getMonotasks(
     partition: Partition,
     dependencyIdToPartitions: HashMap[Long, HashSet[Partition]],
-    context: TaskContext)
+    context: TaskContext,
+    nextMonotask: Monotask)
     : Seq[Monotask] = {
     // TODO: should the shuffle reader code just be part of the dependency?
     shuffleReader = Some(new ShuffleReader(this, partition.index, context))
-    shuffleReader.get.getReadMonotasks()
+    val monotasks = shuffleReader.get.getReadMonotasks()
+    monotasks.foreach(nextMonotask.addDependency(_))
+    monotasks
   }
 }
 

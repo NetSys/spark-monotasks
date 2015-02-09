@@ -109,9 +109,8 @@ private[spark] class BlockFileManager(conf: SparkConf) extends Logging {
   def getBlockFile(blockId: BlockId, diskId: String): Option[File] = getFile(blockId.name, diskId)
 
   /** Checks if a file for the specified block exists on the specified disk. */
-  def containsBlock(blockId: BlockId, diskId: String): Boolean = {
-    getBlockFile(blockId, diskId).map(_.exists()).getOrElse(false)
-  }
+  def contains(blockId: BlockId, diskId: Option[String]): Boolean =
+    diskId.map(getBlockFile(blockId, _).map(_.exists()).getOrElse(false)).getOrElse(false)
 
   /** Lists all files currently stored on all disks by this BlockFileManager. */
   def getAllFiles(): Seq[File] = {

@@ -102,7 +102,7 @@ import org.apache.spark.util.Utils
   test("BlockRDD") {
     val blockId = TestBlockId("id")
     val blockManager = SparkEnv.get.blockManager
-    blockManager.putSingle(blockId, "test", StorageLevel.MEMORY_ONLY)
+    blockManager.cacheSingle(blockId, "test", StorageLevel.MEMORY_ONLY)
     val blockRDD = new BlockRDD[String](sc, Array(blockId))
     val numPartitions = blockRDD.partitions.size
     blockRDD.checkpoint()

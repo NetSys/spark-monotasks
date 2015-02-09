@@ -27,25 +27,28 @@ import org.scalatest.{BeforeAndAfter, FunSuite}
 
 import org.apache.spark.{SparkConf, TaskContext}
 import org.apache.spark.monotasks.LocalDagScheduler
-import org.apache.spark.storage.{BlockFileManager, BlockManager, TestBlockId}
+import org.apache.spark.storage.{BlockFileManager, BlockManager, MonotaskResultBlockId,
+  StorageLevel, TestBlockId}
 import org.apache.spark.util.Utils
 
 class DiskWriteMonotaskSuite extends FunSuite with BeforeAndAfter {
 
+  private var blockManager: BlockManager = _
   private var taskContext: TaskContext = _
   private var blockFileManager: BlockFileManager = _
-  private var localDagScheduler: LocalDagScheduler = _
   private val numBlocks = 10
   private val dataSizeBytes = 1000
   private val dataBuffer = makeDataBuffer()
+  private val serializedDataBlockId = new MonotaskResultBlockId(0L)
 
   before {
     blockFileManager = mock(classOf[BlockFileManager])
 
-    val blockManager = mock(classOf[BlockManager])
+    blockManager = mock(classOf[BlockManager])
     when(blockManager.blockFileManager).thenReturn(blockFileManager)
+    when(blockManager.getLocalBytes(serializedDataBlockId)).thenReturn(Some(dataBuffer))
 
-    localDagScheduler = mock(classOf[LocalDagScheduler])
+    val localDagScheduler = mock(classOf[LocalDagScheduler])
     when(localDagScheduler.blockManager).thenReturn(blockManager)
 
     taskContext = mock(classOf[TaskContext])
@@ -54,8 +57,8 @@ class DiskWriteMonotaskSuite extends FunSuite with BeforeAndAfter {
 
   private def makeDataBuffer(): ByteBuffer = {
     val dataBuffer = ByteBuffer.allocateDirect(dataSizeBytes)
-    /* Sets dataBuffer's internal byte order (endianness) to the byte order used by the underlying
-     * platform. */
+    // Sets dataBuffer's internal byte order (endianness) to the byte order used by the underlying
+    // platform.
     dataBuffer.order(ByteOrder.nativeOrder())
     for (i <- 1 to dataSizeBytes) {
       dataBuffer.put(i.toByte)
@@ -64,28 +67,34 @@ class DiskWriteMonotaskSuite extends FunSuite with BeforeAndAfter {
   }
 
   private def createTestFile(): File = {
-    /* Pass in false to the SparkConf constructor so that the same configuration is loaded
-     * regardless of the system properties. */
-    new File(Utils.getLocalDir(new SparkConf(false)) + (new Random).nextInt(Integer.MAX_VALUE))
+    // Pass in false to the SparkConf constructor so that the same configuration is loaded
+    // regardless of the system properties.
+    val file =
+      new File(Utils.getLocalDir(new SparkConf(false)) + (new Random).nextInt(Integer.MAX_VALUE))
+    file.deleteOnExit()
+    file
   }
 
   test("execute: BlockManager.updateBlockInfoOnWrite() is called correctly") {
+    val size = dataBuffer.limit()
+    val level = StorageLevel.DISK_ONLY
     for (i <- 1 to numBlocks) {
       // Do this here instead of in before() so that every block is given a different file.
       when(blockFileManager.getBlockFile(any(), any())).thenReturn(Some(createTestFile()))
 
       val blockId = new TestBlockId(i.toString)
-      val monotask = new DiskWriteMonotask(taskContext, blockId, dataBuffer)
+      val monotask = new DiskWriteMonotask(taskContext, blockId, serializedDataBlockId, level)
       val diskId = "diskId"
       monotask.diskId = Some(diskId)
 
       assert(monotask.execute())
-      verify(localDagScheduler.blockManager).updateBlockInfoOnWrite(blockId, diskId)
+      verify(blockManager).updateBlockInfoOnWrite(blockId, level, diskId, size)
     }
   }
 
   test("execute: empty diskId causes failure") {
-    val monotask = new DiskWriteMonotask(taskContext, new TestBlockId("0"), dataBuffer)
+    val monotask = new DiskWriteMonotask(
+      taskContext, new TestBlockId("0"), serializedDataBlockId, StorageLevel.DISK_ONLY)
     assert(!monotask.execute())
   }
 
@@ -95,7 +104,8 @@ class DiskWriteMonotaskSuite extends FunSuite with BeforeAndAfter {
       when(blockFileManager.getBlockFile(any(), any())).thenReturn(Some(createTestFile()))
 
       val blockId = new TestBlockId(i.toString)
-      val monotask = new DiskWriteMonotask(taskContext, blockId, dataBuffer)
+      val monotask =
+        new DiskWriteMonotask(taskContext, blockId, serializedDataBlockId, StorageLevel.DISK_ONLY)
       val diskId = "diskId"
       monotask.diskId = Some(diskId)
 
@@ -119,5 +129,19 @@ class DiskWriteMonotaskSuite extends FunSuite with BeforeAndAfter {
         assert(dataBuffer.get(j) === readData(j))
       }
     }
+  }
+
+  test("execute: removes the serialized block") {
+    // Do this here instead of in before() so that every block is given a different file.
+    when(blockFileManager.getBlockFile(any(), any())).thenReturn(Some(createTestFile()))
+
+    val blockId = new TestBlockId("0")
+    val monotask =
+      new DiskWriteMonotask(taskContext, blockId, serializedDataBlockId, StorageLevel.DISK_ONLY)
+    val diskId = "diskId"
+    monotask.diskId = Some(diskId)
+
+    assert(monotask.execute())
+    verify(blockManager).removeBlockFromMemory(monotask.serializedDataBlockId, false)
   }
 }

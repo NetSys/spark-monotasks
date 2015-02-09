@@ -19,7 +19,7 @@ package org.apache.spark.monotasks.compute
 import java.io.{ByteArrayOutputStream, OutputStream}
 import java.nio.ByteBuffer
 
-import org.apache.spark.{MapOutputTracker, Partition, ShuffleDependency, SparkEnv, TaskContext}
+import org.apache.spark.{MapOutputTracker, Partition, ShuffleDependency, TaskContext}
 import org.apache.spark.executor.ShuffleWriteMetrics
 import org.apache.spark.rdd.RDD
 import org.apache.spark.scheduler.MapStatus
@@ -48,9 +48,9 @@ private[spark] class ShuffleMapMonotask[T](
     } else {
       uncombinedIterator
     }
+    val blockManager = context.localDagScheduler.blockManager
 
     // Create a different writer for each output bucket.
-    val blockManager = SparkEnv.get.blockManager
     val shuffleData = Array.tabulate[SerializedObjectWriter](dependency.partitioner.numPartitions) {
       bucketId =>
         new SerializedObjectWriter(blockManager, dependency, partition.index, bucketId)
@@ -70,7 +70,7 @@ private[spark] class ShuffleMapMonotask[T](
     }
     context.markTaskCompleted()
 
-    new MapStatus(SparkEnv.get.blockManager.blockManagerId, compressedSizes)
+    new MapStatus(blockManager.blockManagerId, compressedSizes)
   }
 }
 
@@ -116,7 +116,7 @@ private class SerializedObjectWriter(
       // TODO: Need to delete this data after the reduce task completes!
       // TODO: Don't tell block manager master about shuffle blocks! It results in many extra
       //       messages.
-      blockManager.putBytes(
+      blockManager.cacheBytes(
         blockId, ByteBuffer.wrap(byteOutputStream.toByteArray), StorageLevel.MEMORY_ONLY_SER)
       return byteOutputStream.size()
     } else {
