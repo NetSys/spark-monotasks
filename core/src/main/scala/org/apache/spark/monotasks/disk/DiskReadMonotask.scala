@@ -18,12 +18,11 @@ package org.apache.spark.monotasks.disk
 
 import java.io.FileInputStream
 import java.nio.{ByteBuffer, ByteOrder}
-import java.nio.channels.FileChannel.MapMode
 
 import scala.util.control.NonFatal
 
 import org.apache.spark.{Logging, TaskContextImpl}
-import org.apache.spark.storage.{BlockId, MonotaskResultBlockId}
+import org.apache.spark.storage.{BlockId, StorageLevel}
 
 /**
  * Contains the parameters and logic necessary to read a block from disk. The execute() method reads
@@ -33,38 +32,29 @@ private[spark] class DiskReadMonotask(
     context: TaskContextImpl, blockId: BlockId, val diskId: String)
   extends DiskMonotask(context, blockId) with Logging {
 
-  private val minMapBytes = blockManager.conf.getLong("spark.storage.memoryMapThreshold", 2 * 4096L)
-
   override def execute(): Boolean = {
-    val data = blockManager.blockFileManager.getBlockFile(blockId, diskId).map {
-      file =>
-        val stream = new FileInputStream(file)
-        val channel = stream.getChannel
-        try {
-          // For small files, directly read rather than memory map
-          if (file.length() < minMapBytes) {
-            val buf = ByteBuffer.allocateDirect(file.length().toInt)
-            /* Sets dataBuffer's internal byte order (endianness) to the byte order used by the
-             * underlying platform. */
-            buf.order(ByteOrder.nativeOrder())
-            channel.read(buf)
-            buf.flip()
-          } else {
-            channel.map(MapMode.READ_ONLY, 0, file.length())
-          }
-        } catch {
-          case NonFatal(e) =>
-            logError(s"Reading block $blockId from disk $diskId failed due to exception.", e)
-            None
-        } finally {
-          channel.close()
-          stream.close()
-        }
+    val data = blockManager.blockFileManager.getBlockFile(blockId, diskId).map { file =>
+      val stream = new FileInputStream(file)
+      val channel = stream.getChannel
+      try {
+        val buf = ByteBuffer.allocateDirect(file.length().toInt)
+        // Sets dataBuffer's internal byte order (endianness) to the byte order used by the
+        // underlying platform.
+        buf.order(ByteOrder.nativeOrder())
+        channel.read(buf)
+        buf.flip()
+      } catch {
+        case NonFatal(e) =>
+          logError(s"Reading block $blockId from disk $diskId failed due to exception.", e)
+          None
+      } finally {
+        channel.close()
+        stream.close()
       }
+    }.asInstanceOf[Option[ByteBuffer]]
     val success = data.isDefined
     if (success) {
-      val resultBlockId = new MonotaskResultBlockId(taskId)
-      blockManager.memoryStore.putValue(resultBlockId, data.get).success
+      blockManager.cacheBytes(blockId, data.get, StorageLevel.MEMORY_ONLY_SER, true)
     }
     success
   }

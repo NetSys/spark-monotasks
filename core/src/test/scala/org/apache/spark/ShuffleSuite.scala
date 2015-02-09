@@ -15,6 +15,22 @@
  * limitations under the License.
  */
 
+/*
+ * Copyright 2014 The Regents of The University California
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package org.apache.spark
 
 import org.scalatest.FunSuite
@@ -269,20 +285,9 @@ abstract class ShuffleSuite extends FunSuite with Matchers with LocalSparkContex
 
     // Delete one of the local shuffle blocks.
     val shuffleBlockId = new ShuffleBlockId(0, 0, 0)
-    val hashFile = sc.env.blockManager.diskBlockManager.getFile(shuffleBlockId)
-    val sortFile = sc.env.blockManager.diskBlockManager.getFile(new ShuffleDataBlockId(0, 0, 0))
     val memoryBlock = sc.env.blockManager.memoryStore.getBytes(shuffleBlockId)
-    assert(hashFile.exists() || sortFile.exists() || memoryBlock.isDefined)
-
-    if (hashFile.exists()) {
-      hashFile.delete()
-    }
-    if (sortFile.exists()) {
-      sortFile.delete()
-    }
-    if (memoryBlock.isDefined) {
-      sc.env.blockManager.memoryStore.remove(shuffleBlockId)
-    }
+    assert(memoryBlock.isDefined)
+    sc.env.blockManager.memoryStore.remove(shuffleBlockId)
 
     // This count should retry the execution of the previous stage and rerun shuffle.
     rdd.count()

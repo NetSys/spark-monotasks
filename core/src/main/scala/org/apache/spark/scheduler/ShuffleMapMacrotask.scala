@@ -52,13 +52,8 @@ private[spark] class ShuffleMapMacrotask(
     val (rdd, dep) = ser.deserialize[(RDD[_], ShuffleDependency[Any, Any, _])](
       ByteBuffer.wrap(taskBinary.value), context.dependencyManager.replClassLoader)
 
-    val inputMonotasks: Seq[Monotask] =
-      rdd.getInputMonotasks(partition, dependencyIdToPartitions, context)
     val computeMonotask = new ShuffleMapMonotask(context, rdd, partition, dep)
-
-    // Create dependency graph: compute monotask depends on all input monotasks.
-    inputMonotasks.foreach(computeMonotask.addDependency(_))
-
+    val inputMonotasks = rdd.buildDag(partition, dependencyIdToPartitions, context, computeMonotask)
     inputMonotasks ++ Seq(computeMonotask)
   }
 }

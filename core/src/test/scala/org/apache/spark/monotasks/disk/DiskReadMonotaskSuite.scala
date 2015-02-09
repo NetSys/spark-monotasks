@@ -26,36 +26,56 @@ import org.mockito.Mockito.{mock, verify, when}
 import org.scalatest.{BeforeAndAfter, FunSuite}
 
 import org.apache.spark.{SparkConf, TaskContextImpl}
+import org.apache.spark.executor.TaskMetrics
 import org.apache.spark.monotasks.LocalDagScheduler
-import org.apache.spark.storage.{BlockFileManager, BlockManager, MemoryStore,
-  MonotaskResultBlockId, ResultWithDroppedBlocks, TestBlockId}
+import org.apache.spark.storage.{BlockFileManager, BlockId, BlockManager, BlockStatus,
+  MonotaskResultBlockId, StorageLevel, TestBlockId}
 import org.apache.spark.util.Utils
 
 class DiskReadMonotaskSuite extends FunSuite with BeforeAndAfter {
 
   private var taskContext: TaskContextImpl = _
   private var blockFileManager: BlockFileManager = _
-  private var memoryStore: MemoryStore = _
-  private var localDagScheduler: LocalDagScheduler = _
+  private var blockManager: BlockManager = _
+  private val dataBuffer = makeDataBuffer()
+  private val serializedDataBlockId = new MonotaskResultBlockId(0L)
 
   before {
     blockFileManager = mock(classOf[BlockFileManager])
 
-    memoryStore = mock(classOf[MemoryStore])
-    when(memoryStore.putValue(any(), any())).thenReturn(new ResultWithDroppedBlocks(true, null))
+    // Pass in false to the SparkConf constructor so that the same configuration is loaded
+    // regardless of the system properties.
+    val testFile =
+      new File(Utils.getLocalDir(new SparkConf(false)) + (new Random).nextInt(Integer.MAX_VALUE))
+    testFile.deleteOnExit()
+    when(blockFileManager.getBlockFile(any(), any())).thenReturn(Some(testFile))
 
-    val blockManager = mock(classOf[BlockManager])
+    blockManager = mock(classOf[BlockManager])
     when(blockManager.blockFileManager).thenReturn(blockFileManager)
-    when(blockManager.memoryStore).thenReturn(memoryStore)
-    /* Pass in false to the SparkConf constructor so that the same configuration is loaded
-     * regardless of the system properties. */
-    when(blockManager.conf).thenReturn(new SparkConf(false))
+    when(blockManager.getCurrentBlockStatus(any())).thenReturn(Some(mock(classOf[BlockStatus])))
+    when(blockManager.getLocalBytes(serializedDataBlockId)).thenReturn(Some(dataBuffer))
 
-    localDagScheduler = mock(classOf[LocalDagScheduler])
+    val result = Seq((mock(classOf[BlockId]), mock(classOf[BlockStatus])))
+    when(blockManager.cacheBytes(any(), any(), any(), any(), any())).thenReturn(result)
+
+    val localDagScheduler = mock(classOf[LocalDagScheduler])
     when(localDagScheduler.blockManager).thenReturn(blockManager)
 
     taskContext = mock(classOf[TaskContextImpl])
     when(taskContext.localDagScheduler).thenReturn(localDagScheduler)
+    when(taskContext.taskMetrics).thenReturn(TaskMetrics.empty)
+  }
+
+  private def makeDataBuffer(): ByteBuffer = {
+    val dataSizeBytes = 1000
+    val dataBuffer = ByteBuffer.allocateDirect(dataSizeBytes)
+    // Sets dataBuffer's internal byte order (endianness) to the byte order used by the underlying
+    // platform.
+    dataBuffer.order(ByteOrder.nativeOrder())
+    for (i <- 1 to dataSizeBytes) {
+      dataBuffer.put(i.toByte)
+    }
+    dataBuffer.flip().asInstanceOf[ByteBuffer]
   }
 
   test("execute: reading nonexistent block causes failure") {
@@ -64,37 +84,15 @@ class DiskReadMonotaskSuite extends FunSuite with BeforeAndAfter {
   }
 
   test("execute: correctly stores resulting data in the MemoryStore") {
-    val numBlocks = 10
-    val dataSizeBytes = 1000
+    val blockId = new TestBlockId("0")
+    // Write a block to verify that it can be read back correctly.
+    val writeMonotask =
+      new DiskWriteMonotask(taskContext, blockId, serializedDataBlockId, StorageLevel.DISK_ONLY)
+    val diskId = "diskId"
+    writeMonotask.diskId = Some(diskId)
 
-    val dataBuffer = ByteBuffer.allocateDirect(dataSizeBytes)
-    /* Sets dataBuffer's internal byte order (endianness) to the byte order used by the underlying
-     * platform. */
-    dataBuffer.order(ByteOrder.nativeOrder())
-    for (i <- 1 to dataSizeBytes) {
-      dataBuffer.put(i.toByte)
-    }
-    dataBuffer.flip()
-
-    for (i <- 1 to numBlocks) {
-      /* Do this here instead of in before() so that every block is given a different file. Pass in
-       * false to the SparkConf constructor so that the same configuration is loaded regardless of
-       * the system properties. */
-      val testFile =
-        new File(Utils.getLocalDir(new SparkConf(false)) + (new Random).nextInt(Integer.MAX_VALUE))
-      when(blockFileManager.getBlockFile(any(), any())).thenReturn(Some(testFile))
-
-      val blockId = new TestBlockId(i.toString)
-      // Write a block to verify that it can be read back correctly.
-      val writeMonotask = new DiskWriteMonotask(taskContext, blockId, dataBuffer)
-      val diskId = "diskId"
-      writeMonotask.diskId = Some(diskId)
-
-      assert(writeMonotask.execute())
-      val readMonotask = new DiskReadMonotask(taskContext, blockId, diskId)
-      assert(readMonotask.execute())
-      val resultBlockId = new MonotaskResultBlockId(readMonotask.taskId)
-      verify(memoryStore).putValue(resultBlockId, dataBuffer)
-    }
+    assert(writeMonotask.execute())
+    assert(new DiskReadMonotask(taskContext, blockId, diskId).execute())
+    verify(blockManager).cacheBytes(blockId, dataBuffer, StorageLevel.MEMORY_ONLY_SER, true)
   }
 }

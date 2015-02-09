@@ -26,71 +26,68 @@ import org.mockito.Mockito.{mock, when}
 import org.scalatest.{BeforeAndAfter, FunSuite}
 
 import org.apache.spark.{SparkConf, TaskContextImpl}
+import org.apache.spark.executor.TaskMetrics
 import org.apache.spark.monotasks.LocalDagScheduler
-import org.apache.spark.storage.{BlockFileManager, BlockManager, TestBlockId}
+import org.apache.spark.storage.{BlockFileManager, BlockManager, BlockStatus, MonotaskResultBlockId,
+  StorageLevel, TestBlockId}
 import org.apache.spark.util.Utils
 
 class DiskRemoveMonotaskSuite extends FunSuite with BeforeAndAfter {
 
   private var taskContext: TaskContextImpl = _
-  private var blockFileManager: BlockFileManager = _
-  private var localDagScheduler: LocalDagScheduler = _
+  private var testFile: File = _
+  private val serializedDataBlockId = new MonotaskResultBlockId(0L)
 
   before {
-    blockFileManager = mock(classOf[BlockFileManager])
+    val blockFileManager = mock(classOf[BlockFileManager])
+
+    // Pass in false to the SparkConf constructor so that the same configuration is loaded
+    // regardless of the system properties.
+    testFile =
+      new File(Utils.getLocalDir(new SparkConf(false)) + (new Random).nextInt(Integer.MAX_VALUE))
+    testFile.deleteOnExit()
+    when(blockFileManager.getBlockFile(any(), any())).thenReturn(Some(testFile))
 
     val blockManager = mock(classOf[BlockManager])
     when(blockManager.blockFileManager).thenReturn(blockFileManager)
+    when(blockManager.getCurrentBlockStatus(any())).thenReturn(Some(mock(classOf[BlockStatus])))
+    when(blockManager.getLocalBytes(serializedDataBlockId)).thenReturn(Some(makeDataBuffer()))
 
-    localDagScheduler = mock(classOf[LocalDagScheduler])
+    val localDagScheduler = mock(classOf[LocalDagScheduler])
     when(localDagScheduler.blockManager).thenReturn(blockManager)
 
     taskContext = mock(classOf[TaskContextImpl])
     when(taskContext.localDagScheduler).thenReturn(localDagScheduler)
+    when(taskContext.taskMetrics).thenReturn(TaskMetrics.empty)
   }
 
-  private def createTestFile(): File = {
-    /* Pass in false to the SparkConf constructor so that the same configuration is loaded
-     * regardless of the underlying system properties. */
-    new File(Utils.getLocalDir(new SparkConf(false)) + (new Random).nextInt(Integer.MAX_VALUE))
-  }
-
-  test("execute: invalid diskId causes failure") {
-    // Do this here instead of in before() so that every block is given a different file.
-    when(blockFileManager.getBlockFile(any(), any())).thenReturn(Some(createTestFile()))
-
-    val monotask = new DiskRemoveMonotask(taskContext, new TestBlockId("0"), "nonsense")
-    assert(!monotask.execute())
-  }
-
-  test("execute: actually deletes block") {
-    val numBlocks = 10
+  private def makeDataBuffer(): ByteBuffer = {
     val dataSizeBytes = 1000
-
     val dataBuffer = ByteBuffer.allocateDirect(dataSizeBytes)
-    /* Sets dataBuffer's internal byte order (endianness) to the byte order used by the underlying
-     * platform. */
+    // Sets dataBuffer's internal byte order (endianness) to the byte order used by the underlying
+    // platform.
     dataBuffer.order(ByteOrder.nativeOrder())
     for (i <- 1 to dataSizeBytes) {
       dataBuffer.put(i.toByte)
     }
-    dataBuffer.flip()
+    dataBuffer.flip().asInstanceOf[ByteBuffer]
+  }
 
-    for (i <- 1 to numBlocks) {
-      // Do this here instead of in before() so that every block is given a different file.
-      val testFile = createTestFile()
-      when(blockFileManager.getBlockFile(any(), any())).thenReturn(Some(testFile))
+  test("execute: invalid diskId causes failure") {
+    assert(!(new DiskRemoveMonotask(taskContext, new TestBlockId("0"), "nonsense")).execute())
+  }
 
-      val blockId = new TestBlockId(i.toString)
-      // Write a block to verify that it can be deleted correctly.
-      val writeMonotask = new DiskWriteMonotask(taskContext, blockId, dataBuffer)
-      val diskId = "diskId"
-      writeMonotask.diskId = Some(diskId)
+  test("execute: actually deletes block") {
+    val blockId = new TestBlockId("0")
+    // Write a block to verify that it can be deleted correctly.
+    val writeMonotask =
+      new DiskWriteMonotask(taskContext, blockId, serializedDataBlockId, StorageLevel.DISK_ONLY)
+    val diskId = "diskId"
+    writeMonotask.diskId = Some(diskId)
 
-      assert(writeMonotask.execute())
-      val removeMonotask = new DiskRemoveMonotask(taskContext, blockId, diskId)
-      assert(removeMonotask.execute())
-      assert(!testFile.exists())
-    }
+    assert(writeMonotask.execute())
+    assert(testFile.exists())
+    assert(new DiskRemoveMonotask(taskContext, blockId, diskId).execute())
+    assert(!testFile.exists())
   }
 }

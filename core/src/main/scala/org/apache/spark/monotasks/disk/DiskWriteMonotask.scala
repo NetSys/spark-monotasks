@@ -22,12 +22,30 @@ import java.nio.ByteBuffer
 import scala.util.control.NonFatal
 
 import org.apache.spark.{Logging, TaskContextImpl}
-import org.apache.spark.storage.BlockId
+import org.apache.spark.storage.{BlockId, StorageLevel}
 import org.apache.spark.util.Utils
 
-/** Contains the parameters and logic necessary to write a block to a single disk. */
+/**
+ * Contains the logic and parameters necessary to write a single block to a single disk.
+ *
+ * A DiskWriteMonotask retrieves the block specified by serializedDataBlockId from the BlockManager
+ * and writes it to disk. If the write was successful, the DiskWriteMonotask updates the
+ * BlockManager's metadata using the blockId parameter. This separation of functionality between
+ * the two provided BlockIds allows a DiskWriteMonotask to fetch the serialized version of a block
+ * that was stored in the BlockManager by a SerializationMonotask using a MonotaskResultBlockId and
+ * then write that block to disk and update the BlockManager using the block's true BlockId.
+ *
+ * The provided StorageLevel is used to update the BlockManager's metadata if the BlockManager does
+ * not know about the block yet.
+ *
+ * After the block has been written to disk, the DiskWriteMonotask will delete the block specified
+ * by serializedDataBlockId from the MemoryStore.
+ */
 private[spark] class DiskWriteMonotask(
-    context: TaskContextImpl, blockId: BlockId, val data: ByteBuffer)
+    context: TaskContextImpl,
+    blockId: BlockId,
+    val serializedDataBlockId: BlockId,
+    val level: StorageLevel)
   extends DiskMonotask(context, blockId) with Logging {
 
   // Identifies the disk on which this DiskWriteMonotask will operate. Set by the DiskScheduler.
@@ -39,17 +57,27 @@ private[spark] class DiskWriteMonotask(
       return false
     }
     val rawDiskId = diskId.get
-    val success = putBytes(rawDiskId)
-    if (success) {
-      blockManager.updateBlockInfoOnWrite(blockId, rawDiskId)
+    blockManager.getLocalBytes(serializedDataBlockId).map { data =>
+      val success = putBytes(rawDiskId, data)
+      if (success) {
+        blockManager.updateBlockInfoOnWrite(blockId, level, rawDiskId, data.limit())
+        blockManager.removeBlockFromMemory(serializedDataBlockId, false)
+
+        val metrics = context.taskMetrics
+        val oldUpdatedBlocks = metrics.updatedBlocks.getOrElse(Seq.empty)
+        val updatedBlock = Seq((blockId, blockManager.getCurrentBlockStatus(blockId).get))
+        metrics.updatedBlocks = Some(oldUpdatedBlocks ++ updatedBlock)
+      }
+      success
+    }.getOrElse {
+      logError(s"Writing block $blockId to disk failed because the block could not be found.")
+      false
     }
-    success
   }
 
-  private def putBytes(diskId: String): Boolean = {
-    /* Copy the ByteBuffer that we are given so that the code that created this DiskWriteMonotask
-     * can continue using the ByteBuffer that it gave us. This only copies the metadata, not the
-     * buffer contents. */
+  private def putBytes(diskId: String, data: ByteBuffer): Boolean = {
+    /* Copy the ByteBuffer that we are given so that the code that created the ByteBuffer can
+     * continue using it. This only copies the metadata, not the buffer contents. */
     val dataCopy = data.duplicate()
     logDebug(s"Attempting to write block $blockId to disk $diskId")
     blockManager.blockFileManager.getBlockFile(blockId, diskId).map { file =>

@@ -14,23 +14,41 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
+/*
+ * Copyright 2014 The Regents of The University California
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package org.apache.spark.storage
 
 import org.scalatest.FunSuite
-import org.apache.spark.{SharedSparkContext, SparkConf, LocalSparkContext, SparkContext}
 
+import org.apache.spark.{LocalSparkContext, SparkConf, SparkContext}
 
 class FlatmapIteratorSuite extends FunSuite with LocalSparkContext {
-  /* Tests the ability of Spark to deal with user provided iterators from flatMap
-   * calls, that may generate more data then available memory. In any
-   * memory based persistance Spark will unroll the iterator into an ArrayBuffer
-   * for caching, however in the case that the use defines DISK_ONLY persistance,
-   * the iterator will be fed directly to the serializer and written to disk.
+
+  /* Tests the ability of Spark to deal with user provided iterators from flatMap calls that may
+   * generate more data than can fit in the available memory. In any memory based persistence, Spark
+   * will unroll the iterator into an ArrayBuffer for caching. However, in the case that the uses
+   * DISK_ONLY persistence, the iterator will be fed directly to a SerializationMonotask and then to
+   * a DiskWriteMonotask.
    *
-   * This also tests the ObjectOutputStream reset rate. When serializing using the
-   * Java serialization system, the serializer caches objects to prevent writing redundant
-   * data, however that stops GC of those objects. By calling 'reset' you flush that
-   * info from the serializer, and allow old objects to be GC'd
+   * This also tests the ObjectOutputStream reset rate. When serializing using the Java
+   * serialization system, the serializer caches objects to prevent writing redundant data, however
+   * that stops GC of those objects. By calling 'reset' you flush that info from the serializer, and
+   * allow old objects to be GC'd
    */
   test("Flatmap Iterator to Disk") {
     val sconf = new SparkConf().setMaster("local").setAppName("iterator_to_disk_test")
@@ -65,5 +83,4 @@ class FlatmapIteratorSuite extends FunSuite with LocalSparkContext {
     var persisted = data.persist(StorageLevel.MEMORY_ONLY_SER)
     assert(persisted.filter(_.startsWith("1:")).count()===2)
   }
-
 }
