@@ -15,6 +15,22 @@
  * limitations under the License.
  */
 
+/*
+ * Copyright 2014 The Regents of The University California
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package org.apache.spark
 
 import java.util.concurrent.Semaphore
@@ -84,8 +100,7 @@ class JobCancellationSuite extends FunSuite with Matchers with BeforeAndAfter
 
   test("do not put partially executed partitions into cache") {
     // In this test case, we create a scenario in which a partition is only partially executed,
-    // and make sure CacheManager does not put that partially executed partition into the
-    // BlockManager.
+    // and make sure that a partially executed partition is not put into the BlockManager.
     import JobCancellationSuite._
     sc = new SparkContext("local", "test")
 

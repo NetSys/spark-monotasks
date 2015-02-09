@@ -155,7 +155,7 @@ class ShuffleHelper[K, V, C](
 
     case monotaskResultBlockId: MonotaskResultBlockId =>
       // TODO: handle case where the block doesn't exist.
-      val bufferMessage = blockManager.memoryStore.getValue(monotaskResultBlockId).get
+      val bufferMessage = blockManager.getSingle(monotaskResultBlockId).get
         .asInstanceOf[ManagedBuffer]
       readMetrics.incRemoteBytesRead(bufferMessage.size)
       readMetrics.incRemoteBlocksFetched(1)
@@ -163,7 +163,7 @@ class ShuffleHelper[K, V, C](
       // TODO: This should be handled by the LocalDagScheduler, so that it can ensure results
       //       get deleted in all possible failure scenarios.
       //       https://github.com/NetSys/spark-monotasks/issues/8
-      context.env.blockManager.memoryStore.remove(monotaskResultBlockId)
+      blockManager.removeBlock(monotaskResultBlockId, tellMaster = false)
       bufferMessage
 
     case _ =>

@@ -15,24 +15,85 @@
  * limitations under the License.
  */
 
+/*
+ * Copyright 2014 The Regents of The University California
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package org.apache.spark.rdd
 
 import java.io.{ObjectInputStream, ObjectOutputStream, IOException}
 
 import com.esotericsoftware.kryo.KryoException
 
-import scala.collection.mutable.{ArrayBuffer, HashMap}
+import scala.collection.mutable.{ArrayBuffer, HashMap, HashSet}
 import scala.collection.JavaConverters._
 import scala.reflect.ClassTag
 
-import org.scalatest.FunSuite
+import org.mockito.Matchers.{any, eq => meq}
+import org.mockito.Mockito.{mock, never, verify, when}
+
+import org.scalatest.{BeforeAndAfter, FunSuite}
 
 import org.apache.spark._
 import org.apache.spark.api.java.{JavaRDD, JavaSparkContext}
+import org.apache.spark.monotasks.{LocalDagScheduler, Monotask}
+import org.apache.spark.monotasks.compute.{DummyComputeMonotask, RddComputeMonotask,
+  SerializationMonotask}
+import org.apache.spark.monotasks.disk.{DiskReadMonotask, DiskWriteMonotask}
 import org.apache.spark.rdd.RDDSuiteUtils._
+import org.apache.spark.storage.{BlockManager, RDDBlockId, StorageLevel}
 import org.apache.spark.util.Utils
 
-class RDDSuite extends FunSuite with SharedSparkContext {
+class RDDSuite extends FunSuite with BeforeAndAfter with SharedSparkContext {
+
+  // All of the below variables are used only for the tests of the buildDag method.
+  private var rdd1: RDD[Int] = _
+  private var rdd2: RDD[Int] = _
+  private var rdd3: RDD[Int] = _
+  private var blockId: RDDBlockId = _
+  private var blockManager: BlockManager = _
+  private var dependencyIdToPartitions: HashMap[Long, HashSet[Partition]] = _
+  private var nextMonotask: Monotask = _
+  private var partition: Partition = _
+  private var taskContext: TaskContextImpl = _
+
+  /** Initializes the objects necessary to test the buildDag method. */
+  private def initializeBuildDagTestObjects(): Unit = {
+    rdd1 = sc.parallelize(1 to 10)
+    val intermediateRdd = rdd1.map(_ + 1)
+    rdd2 = intermediateRdd.filter(_ > 10)
+    rdd3 = rdd2.map(_ + 10)
+
+    partition = rdd3.partitions.head
+    val partitionIndex = partition.index
+    blockId = new RDDBlockId(rdd3.id, partitionIndex)
+
+    blockManager = mock(classOf[BlockManager])
+    // Pass in false to the SparkConf constructor so that the same configuration is loaded
+    // regardless of the system properties.
+    when(blockManager.conf).thenReturn(new SparkConf(false))
+
+    val localDagScheduler = mock(classOf[LocalDagScheduler])
+    when(localDagScheduler.blockManager).thenReturn(blockManager)
+
+    taskContext = mock(classOf[TaskContextImpl])
+    when(taskContext.localDagScheduler).thenReturn(localDagScheduler)
+
+    dependencyIdToPartitions = Dependency.getDependencyIdToPartitions(rdd3, partitionIndex)
+    nextMonotask = new DummyComputeMonotask(taskContext)
+  }
 
   test("basic operations") {
     val nums = sc.makeRDD(Array(1, 2, 3, 4), 2)
@@ -933,6 +994,246 @@ class RDDSuite extends FunSuite with SharedSparkContext {
     }
     // Check that the context has not crashed
     sc.parallelize(1 to 100).map(x => x*2).collect
+  }
+
+  /** The RDD is already in memory, so no additional monotasks are required. */
+  test("buildDag: RDD is cached in memory") {
+    initializeBuildDagTestObjects()
+    when(blockManager.isStored(blockId)).thenReturn(true)
+    when(blockManager.getBlockLoadMonotask(meq(blockId), any())).thenReturn(None)
+
+    assert(rdd3.buildDag(partition, dependencyIdToPartitions, taskContext, nextMonotask).isEmpty)
+    assert(nextMonotask.dependencies.isEmpty)
+    verify(blockManager).isStored(blockId)
+    verify(blockManager).getBlockLoadMonotask(meq(blockId), any())
+  }
+
+  /**
+   * The RDD needs to be read from disk, so the DAG looks like:
+   *
+   * DiskReadMonotask -> nextMonotask
+   */
+  test("buildDag: RDD is cached on disk") {
+    initializeBuildDagTestObjects()
+    when(blockManager.isStored(blockId)).thenReturn(true)
+    val diskReadMonotask = new DiskReadMonotask(taskContext, blockId, "diskId")
+    when(blockManager.getBlockLoadMonotask(meq(blockId), any())).thenReturn(Some(diskReadMonotask))
+
+    val monotasks = rdd3.buildDag(partition, dependencyIdToPartitions, taskContext, nextMonotask)
+
+    assert(monotasks.size === 1)
+    assert(monotasks.head === diskReadMonotask)
+    assert(nextMonotask.dependencies.size === 1)
+    assert(nextMonotask.dependencies.head === diskReadMonotask.taskId)
+    verify(blockManager).isStored(blockId)
+    verify(blockManager).getBlockLoadMonotask(meq(blockId), any())
+  }
+
+  /**
+   * The RDD will be computed and cached by nextMonotask, so no additional monotasks are required.
+   */
+  test("buildDag: RDD is not cached but should be cached in memory") {
+    initializeBuildDagTestObjects()
+    when(blockManager.isStored(blockId)).thenReturn(false)
+    rdd3.persist(StorageLevel.MEMORY_ONLY)
+
+    assert(rdd3.buildDag(partition, dependencyIdToPartitions, taskContext, nextMonotask).isEmpty)
+    assert(nextMonotask.dependencies.size === 0)
+    verify(blockManager).isStored(blockId)
+    verify(blockManager, never()).getBlockLoadMonotask(meq(blockId), any())
+  }
+
+  /**
+   * The RDD will be computed and cached by nextMonotask, so no additional monotasks are required.
+   */
+  test("buildDag: RDD is not cached but should be cached in tachyon") {
+    initializeBuildDagTestObjects()
+    when(blockManager.isStored(blockId)).thenReturn(false)
+    rdd3.persist(StorageLevel.OFF_HEAP)
+
+    assert(rdd3.buildDag(partition, dependencyIdToPartitions, taskContext, nextMonotask).isEmpty)
+    assert(nextMonotask.dependencies.size === 0)
+    verify(blockManager).isStored(blockId)
+    verify(blockManager, never()).getBlockLoadMonotask(meq(blockId), any())
+  }
+
+  /**
+   * Returns the monotask from the list of monotasks that has the specified taskId. The caller
+   * should guarantee that the specified monotask is present in monotasks.
+   */
+  private def findMonotask(taskId: Long, monotasks: Seq[Monotask]): Monotask = {
+    val filteredMonotasks = monotasks.filter(_.taskId == taskId)
+    assert(filteredMonotasks.size === 1)
+    filteredMonotasks.head
+  }
+
+  /**
+   * The RDD needs to be cached on disk by a DiskWriteMonotask, so the DAG should look like this:
+   *
+   * RddComputeMonotask ---> nextMonotask
+   *                     `-> SerializationMonotask -> DiskWriteMonotask
+   */
+  test("buildDag: RDD is not cached but it should be cached on disk") {
+    initializeBuildDagTestObjects()
+    when(blockManager.isStored(blockId)).thenReturn(false)
+    rdd3.persist(StorageLevel.DISK_ONLY)
+
+    val monotasks = rdd3.buildDag(partition, dependencyIdToPartitions, taskContext, nextMonotask)
+
+    assert(monotasks.size === 3)
+    assert(nextMonotask.dependencies.size === 1)
+    verify(blockManager).isStored(blockId)
+    verify(blockManager, never()).getBlockLoadMonotask(meq(blockId), any())
+
+    // Verify that the RddComputeMonotask is properly formed.
+    val rddCompute_dependent = findMonotask(nextMonotask.dependencies.head, monotasks) match {
+      case rddCompute: RddComputeMonotask[_] => {
+        val dependencies = rddCompute.dependencies
+        val dependents = rddCompute.dependents
+        assert(dependencies.isEmpty)
+        assert(dependents.size === 2)
+        val filteredDependents = dependents.filter(_.taskId != nextMonotask.taskId)
+        assert(filteredDependents.size === 1)
+        filteredDependents.head
+      } case monotask: Monotask => {
+        assert(false, s"Incorrect type of monotask found: $monotask")
+      }
+    }
+
+    // Verify that the SerializationMonotask is properly formed.
+    val serialization_dependent = rddCompute_dependent match {
+      case serialization: SerializationMonotask => {
+        val dependencies = serialization.dependencies
+        val dependents = serialization.dependents
+        assert(dependencies.size === 1)
+        assert(dependents.size === 1)
+        dependents.head
+      } case monotask: Monotask => {
+        assert(false, s"Incorrect type of monotask found: $monotask")
+      }
+    }
+
+    // Verify that the DiskWriteMonotask is properly formed.
+    serialization_dependent match {
+      case diskWrite: DiskWriteMonotask => {
+        assert(diskWrite.dependencies.size === 1)
+        assert(diskWrite.dependents.isEmpty)
+      } case monotask: Monotask => {
+        assert(false, s"Incorrect type of monotask found: $monotask")
+      }
+    }
+  }
+
+  /** The RDD will be computed by nextMonotask. No additional monotasks are needed. */
+  test("buildDag: RDD is not cached and should not be cached") {
+    initializeBuildDagTestObjects()
+    when(blockManager.isStored(blockId)).thenReturn(false)
+
+    val monotasks = rdd3.buildDag(partition, dependencyIdToPartitions, taskContext, nextMonotask)
+
+    assert(monotasks.size === 0)
+    assert(nextMonotask.dependencies.size === 0)
+    verify(blockManager).isStored(blockId)
+    verify(blockManager, never()).getBlockLoadMonotask(meq(blockId), any())
+  }
+
+  /**
+   * Tests a more complicated DAG with multiple RDDs that have different persistence levels. The
+   * resulting DAG should be:
+   *
+   * parallelRdd:                               | mappedRdd2:                                  |
+   *                                            |                                              |
+   * RddCompute --------------------------------|-> RddCompute --------------------------------|-...
+   *             `-> Serialization -> DiskWrite |               `-> Serialization -> DiskWrite |
+   *                                            |                                              |
+   *
+   * ...-> nextMonotask
+   */
+  test("buildDag: complex DAG") {
+    initializeBuildDagTestObjects()
+    rdd1.persist(StorageLevel.DISK_ONLY)
+    rdd2.persist(StorageLevel.MEMORY_ONLY)
+    rdd3.persist(StorageLevel.DISK_ONLY)
+
+    val monotasks = rdd3.buildDag(partition, dependencyIdToPartitions, taskContext, nextMonotask)
+
+    assert(monotasks.size === 6)
+    assert(nextMonotask.dependencies.size === 1)
+    verify(blockManager).isStored(blockId)
+    verify(blockManager, never()).getBlockLoadMonotask(meq(blockId), any())
+
+    val nextMonotaskDependency = findMonotask(nextMonotask.dependencies.head, monotasks)
+
+    // Verify that mappedRdd2's RddComputeMonotask is properly formed.
+    val (mappedRdd2RddComputeDependency, mappedRdd2RddComputeDependent) =
+      nextMonotaskDependency match {
+      case mappedRdd2RddCompute: RddComputeMonotask[_] =>
+        val dependencies = mappedRdd2RddCompute.dependencies
+        val dependents = mappedRdd2RddCompute.dependents
+        assert(dependencies.size === 1)
+        assert(dependents.size === 2)
+        val filteredDependents = dependents.filter(_.taskId != nextMonotask.taskId)
+        assert(filteredDependents.size === 1)
+        (findMonotask(dependencies.head, monotasks), filteredDependents.head)
+      case monotask: Monotask =>
+        assert(false, s"Incorrect type of monotask found: $monotask")
+    }
+
+    // Verify that mappedRdd2's SerializationMonotask is properly formed.
+    val mappedRdd2SerializationDependent = mappedRdd2RddComputeDependent match {
+      case mappedRdd2Serialization: SerializationMonotask =>
+        val dependencies = mappedRdd2Serialization.dependencies
+        val dependents = mappedRdd2Serialization.dependents
+        assert(dependencies.size === 1)
+        assert(dependents.size === 1)
+        dependents.head
+      case monotask: Monotask =>
+        assert(false, s"Incorrect type of monotask found: $monotask")
+    }
+
+    // Verify that mappedRdd2's DiskWriteMonotask is properly formed.
+    mappedRdd2SerializationDependent match {
+      case mappedRdd2DiskWrite: DiskWriteMonotask =>
+        assert(mappedRdd2DiskWrite.dependencies.size === 1)
+        assert(mappedRdd2DiskWrite.dependents.isEmpty)
+      case monotask: Monotask =>
+        assert(false, s"Incorrect type of monotask found: $monotask")
+    }
+
+    // Verify that parallelRdd's RddComputeMonotask is properly formed.
+    val parallelRddRddComputeDependent = mappedRdd2RddComputeDependency match {
+      case parallelRddRddCompute: RddComputeMonotask[_] =>
+        val dependencies = parallelRddRddCompute.dependencies
+        val dependents = parallelRddRddCompute.dependents
+        assert(dependencies.isEmpty)
+        assert(dependents.size === 2)
+        val filteredDependents = dependents.filter(_.taskId != nextMonotaskDependency.taskId)
+        assert(filteredDependents.size === 1)
+        filteredDependents.head
+      case monotask: Monotask =>
+        assert(false, s"Incorrect type of monotask found: $monotask")
+    }
+
+    // Verify that parallelRdd's SerializationMonotask is properly formed.
+    val parallelRddSerializationDependent = parallelRddRddComputeDependent match {
+      case parallelRddSerialization: SerializationMonotask =>
+        val dependencies = parallelRddSerialization.dependencies
+        val dependents = parallelRddSerialization.dependents
+        assert(dependencies.size === 1)
+        assert(dependents.size === 1)
+        dependents.head
+      case monotask: Monotask =>
+        assert(false, s"Incorrect type of monotask found: $monotask")
+    }
+
+    // Verify that parallelRdd's DiskWriteMonotask is properly formed.
+    parallelRddSerializationDependent match {
+      case parallelRddDiskWrite: DiskWriteMonotask =>
+        assert(parallelRddDiskWrite.dependencies.size === 1)
+        assert(parallelRddDiskWrite.dependents.isEmpty)
+      case monotask: Monotask =>
+        assert(false, s"Incorrect type of monotask found: $monotask")
+    }
   }
 
   /** A contrived RDD that allows the manual addition of dependencies after creation. */

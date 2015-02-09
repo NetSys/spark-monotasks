@@ -31,22 +31,14 @@
  * limitations under the License.
  */
 
-package org.apache.spark.network
+package org.apache.spark.storage
 
-import org.apache.spark.network.buffer.ManagedBuffer
-import org.apache.spark.storage.{BlockId, StorageLevel}
+import java.nio.ByteBuffer
 
-private[spark]
-trait BlockDataManager {
-
-  /**
-   * Interface to get local block data. Throws an exception if the block cannot be found or
-   * cannot be read successfully.
-   */
-  def getBlockData(blockId: BlockId): ManagedBuffer
-
-  /**
-   * Put the block locally, using the given storage level.
-   */
-  def cacheBlockData(blockId: BlockId, data: ManagedBuffer, level: StorageLevel): Unit
-}
+/**
+ * Result of caching a block in an InMemoryBlockStore. This case class contains two things:
+ *   (1) The estimated size of the cached data.
+ *   (2) The cached values if the caller asked for them to be returned (e.g. for chaining
+ *       replication).
+ */
+private[spark] case class CacheResult(size: Long, data: Either[Iterator[_], ByteBuffer])

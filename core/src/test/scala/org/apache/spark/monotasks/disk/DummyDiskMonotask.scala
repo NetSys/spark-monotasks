@@ -33,7 +33,7 @@ private[spark] class DummyDiskMonotask(
     taskContext: TaskContextImpl,
     blockId: BlockId,
     val taskTime: Long)
-  extends DiskWriteMonotask(taskContext, blockId, null) {
+  extends DiskWriteMonotask(taskContext, blockId, null, null) {
 
   override def execute(): Boolean = {
     val taskTimes = DummyDiskMonotask.taskTimes

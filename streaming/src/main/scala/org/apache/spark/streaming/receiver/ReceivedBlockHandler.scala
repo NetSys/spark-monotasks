@@ -15,6 +15,22 @@
  * limitations under the License.
  */
 
+/*
+ * Copyright 2014 The Regents of The University California
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package org.apache.spark.streaming.receiver
 
 import scala.concurrent.{Await, ExecutionContext, Future}
@@ -66,11 +82,11 @@ private[streaming] class BlockManagerBasedBlockHandler(
   def storeBlock(blockId: StreamBlockId, block: ReceivedBlock): ReceivedBlockStoreResult = {
     val putResult: Seq[(BlockId, BlockStatus)] = block match {
       case ArrayBufferBlock(arrayBuffer) =>
-        blockManager.putIterator(blockId, arrayBuffer.iterator, storageLevel, tellMaster = true)
+        blockManager.cacheIterator(blockId, arrayBuffer.iterator, storageLevel, tellMaster = true)
       case IteratorBlock(iterator) =>
-        blockManager.putIterator(blockId, iterator, storageLevel, tellMaster = true)
+        blockManager.cacheIterator(blockId, iterator, storageLevel, tellMaster = true)
       case ByteBufferBlock(byteBuffer) =>
-        blockManager.putBytes(blockId, byteBuffer, storageLevel, tellMaster = true)
+        blockManager.cacheBytes(blockId, byteBuffer, storageLevel, tellMaster = true)
       case o =>
         throw new SparkException(
           s"Could not store $blockId to block manager, unexpected block type ${o.getClass.getName}")
@@ -174,7 +190,7 @@ private[streaming] class WriteAheadLogBasedBlockHandler(
     // Store the block in block manager
     val storeInBlockManagerFuture = Future {
       val putResult =
-        blockManager.putBytes(blockId, serializedBlock, effectiveStorageLevel, tellMaster = true)
+        blockManager.cacheBytes(blockId, serializedBlock, effectiveStorageLevel, tellMaster = true)
       if (!putResult.map { _._1 }.contains(blockId)) {
         throw new SparkException(
           s"Could not store $blockId to block manager with storage level $storageLevel")

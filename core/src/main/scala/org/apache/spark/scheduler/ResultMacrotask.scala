@@ -57,12 +57,8 @@ private[spark] class ResultMacrotask[T, U: ClassTag](
     val (rdd, func) = ser.deserialize[(RDD[T], (TaskContext, Iterator[T]) => U)](
       ByteBuffer.wrap(taskBinary.value), context.dependencyManager.replClassLoader)
 
-    val inputMonotasks: Seq[Monotask] =
-      rdd.getInputMonotasks(partition, dependencyIdToPartitions, context)
     val computeMonotask = new ResultMonotask(context, rdd, partition, func)
-    // Create dependency graph: compute monotask depends on all input monotasks.
-    inputMonotasks.foreach(computeMonotask.addDependency(_))
-
+    val inputMonotasks = rdd.buildDag(partition, dependencyIdToPartitions, context, computeMonotask)
     inputMonotasks ++ Seq(computeMonotask)
   }
 }

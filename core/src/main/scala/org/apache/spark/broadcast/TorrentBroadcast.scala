@@ -15,6 +15,22 @@
  * limitations under the License.
  */
 
+/*
+ * Copyright 2014 The Regents of The University California
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package org.apache.spark.broadcast
 
 import java.io._
@@ -95,12 +111,12 @@ private[spark] class TorrentBroadcast[T: ClassTag](obj: T, id: Long)
   private def writeBlocks(value: T): Int = {
     // Store a copy of the broadcast variable in the driver so that tasks run on the driver
     // do not create a duplicate copy of the broadcast variable's value.
-    SparkEnv.get.blockManager.putSingle(broadcastId, value, StorageLevel.MEMORY_AND_DISK,
+    SparkEnv.get.blockManager.cacheSingle(broadcastId, value, StorageLevel.MEMORY_AND_DISK,
       tellMaster = false)
     val blocks =
       TorrentBroadcast.blockifyObject(value, blockSize, SparkEnv.get.serializer, compressionCodec)
     blocks.zipWithIndex.foreach { case (block, i) =>
-      SparkEnv.get.blockManager.putBytes(
+      SparkEnv.get.blockManager.cacheBytes(
         BroadcastBlockId(id, "piece" + i),
         block,
         StorageLevel.MEMORY_AND_DISK_SER,
@@ -126,7 +142,7 @@ private[spark] class TorrentBroadcast[T: ClassTag](obj: T, id: Long)
       def getRemote: Option[ByteBuffer] = bm.getRemoteBytes(pieceId).map { block =>
         // If we found the block from remote executors/driver's BlockManager, put the block
         // in this executor's BlockManager.
-        SparkEnv.get.blockManager.putBytes(
+        SparkEnv.get.blockManager.cacheBytes(
           pieceId,
           block,
           StorageLevel.MEMORY_AND_DISK_SER,
@@ -178,7 +194,7 @@ private[spark] class TorrentBroadcast[T: ClassTag](obj: T, id: Long)
             blocks, SparkEnv.get.serializer, compressionCodec)
           // Store the merged copy in BlockManager so other tasks on this executor don't
           // need to re-fetch it.
-          SparkEnv.get.blockManager.putSingle(
+          SparkEnv.get.blockManager.cacheSingle(
             broadcastId, obj, StorageLevel.MEMORY_AND_DISK, tellMaster = false)
           obj
       }

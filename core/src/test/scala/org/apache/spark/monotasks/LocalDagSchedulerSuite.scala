@@ -19,7 +19,7 @@ package org.apache.spark.monotasks
 import java.nio.ByteBuffer
 
 import org.mockito.Matchers.{any, eq => meq}
-import org.mockito.Mockito.{mock, verify}
+import org.mockito.Mockito.{mock, never, verify}
 
 import org.scalatest.{BeforeAndAfterEach, FunSuite, Matchers}
 
@@ -87,12 +87,12 @@ class LocalDagSchedulerSuite extends FunSuite with BeforeAndAfterEach with Local
     secondMonotask.addDependency(firstMonotask)
     localDagScheduler.submitMonotasks(List(firstMonotask, secondMonotask))
 
-    assert(localDagScheduler.runningMacrotaskAttemptIds.contains(taskAttemptId),
+    assert(localDagScheduler.macrotaskRemainingMonotasks.contains(taskAttemptId),
       (s"Task attempt id $taskAttemptId should have been added to the set of running ids when " +
         "the task was submitted"))
 
     localDagScheduler.handleTaskCompletion(firstMonotask)
-    assert(localDagScheduler.runningMacrotaskAttemptIds.contains(taskAttemptId),
+    assert(localDagScheduler.macrotaskRemainingMonotasks.contains(taskAttemptId),
       (s"Task attempt id $taskAttemptId should still be in the set of running ids because no " +
         "task result was submitted, implying more monotasks for the macrotask are still running"))
 
@@ -100,7 +100,7 @@ class LocalDagSchedulerSuite extends FunSuite with BeforeAndAfterEach with Local
     localDagScheduler.handleTaskCompletion(secondMonotask, Some(result))
     assert(secondMonotask.context.isCompleted)
     verify(executorBackend).statusUpdate(meq(taskAttemptId), meq(TaskState.FINISHED), meq(result))
-    assert(localDagScheduler.runningMacrotaskAttemptIds.isEmpty,
+    assert(localDagScheduler.macrotaskRemainingMonotasks.isEmpty,
       s"Task attempt id $taskAttemptId should have been removed from running ids")
   }
 
@@ -161,6 +161,50 @@ class LocalDagSchedulerSuite extends FunSuite with BeforeAndAfterEach with Local
     // has completed.
     val result = ByteBuffer.allocate(2)
     localDagScheduler.handleTaskCompletion(monotaskE, Some(result))
+    assertDataStructuresEmpty()
+  }
+
+  /**
+   * Creates a DAG of monotasks for the same macrotask:
+   *
+   *      ,-- B (gives result)
+   * A --<
+   *      `-- C
+   *
+   * and tests that the macrotask is not completed until all of the branches of the DAG have
+   * completed, even if the macrotask result is returned while some monotasks have not completed.
+   */
+  test("handleTaskCompletion: a macrotask is not completed until all of its monotasks finish") {
+    val taskAttemptId = 42L
+    val monotaskA = new SimpleMonotask(taskAttemptId)
+    val monotaskB = new SimpleMonotask(taskAttemptId)
+    val monotaskC = new SimpleMonotask(taskAttemptId)
+
+    monotaskB.addDependency(monotaskA)
+    monotaskC.addDependency(monotaskA)
+
+    localDagScheduler.submitMonotasks(List(monotaskA, monotaskB, monotaskC))
+
+    // Make a dummy result.
+    val result = ByteBuffer.allocate(2)
+    localDagScheduler.handleTaskCompletion(monotaskA)
+    localDagScheduler.handleTaskCompletion(monotaskB, Some(result))
+
+    // Since all of the monotasks have not finished yet, the macrotask should not have been
+    // completed.
+    assert(!monotaskB.context.isCompleted)
+    verify(executorBackend, never()).statusUpdate(taskAttemptId, TaskState.FINISHED, result)
+
+    // Verify that the macrotask result is stored in the macrotaskResults map.
+    assert(localDagScheduler.macrotaskResults.contains(taskAttemptId))
+    assert(localDagScheduler.macrotaskResults(taskAttemptId) === result)
+
+    localDagScheduler.handleTaskCompletion(monotaskC)
+
+    // Now that all the monotasks have finished, the macrotask should have been marked as completed
+    // and the result that was passed in earler should have been sent to the executorBackend.
+    assert(monotaskC.context.isCompleted)
+    verify(executorBackend).statusUpdate(taskAttemptId, TaskState.FINISHED, result)
     assertDataStructuresEmpty()
   }
 
@@ -241,6 +285,86 @@ class LocalDagSchedulerSuite extends FunSuite with BeforeAndAfterEach with Local
     verify(executorBackend).statusUpdate(any(), any(), any())
   }
 
+  /**
+   * Creates a DAG of monotasks for the same macrotask:
+   *
+   *      ,-- B
+   * A --<
+   *      `-- C --,
+   *               >-- E
+   *          D --'
+   *
+   * and tests that if D fails while A is executing, then when A completes it removes B and C from
+   * the list of waiting monotasks.
+   */
+  test("handleTaskFailure: fails all of a macrotask's waiting monotasks") {
+    val taskAttemptId = 42L
+    val monotaskA = new SimpleMonotask(taskAttemptId)
+    val monotaskB = new SimpleMonotask(taskAttemptId)
+    val monotaskC = new SimpleMonotask(taskAttemptId)
+    val monotaskD = new SimpleMonotask(taskAttemptId)
+    val monotaskE = new SimpleMonotask(taskAttemptId)
+
+    monotaskB.addDependency(monotaskA)
+    monotaskC.addDependency(monotaskA)
+    monotaskE.addDependency(monotaskC)
+    monotaskE.addDependency(monotaskD)
+
+    localDagScheduler.submitMonotasks(List(monotaskA, monotaskB, monotaskC, monotaskD, monotaskE))
+
+    // Create a dummy failure reason.
+    val failureReason = ByteBuffer.allocate(2)
+    localDagScheduler.handleTaskFailure(monotaskD, failureReason)
+
+    // Verify that D removed E from the list of waiting monotask and removed the macrotask from
+    // macrotaskRemainingMonotasks.
+    assert(!localDagScheduler.waitingMonotasks.contains(monotaskE.taskId))
+    assert(!localDagScheduler.macrotaskRemainingMonotasks.contains(taskAttemptId))
+
+    // Suppose that A completed normally, uneffected by D's failure.
+    localDagScheduler.handleTaskCompletion(monotaskA)
+
+    // Make sure that A removed B and C from the list of waiting monotasks.
+    assertDataStructuresEmpty()
+  }
+
+  /**
+   * Creates a DAG of monotasks for the same macrotask:
+   *
+   *      ,-- B
+   * A --<
+   *      `-- C (gives result)
+   *
+   * and tests that if B fails, it remove the macrotask result from macrotaskResults.
+   */
+  test("handleTaskFailure: removes the macrotask result from macrotaskResults") {
+    val taskAttemptId = 42L
+    val monotaskA = new SimpleMonotask(taskAttemptId)
+    val monotaskB = new SimpleMonotask(taskAttemptId)
+    val monotaskC = new SimpleMonotask(taskAttemptId)
+
+    monotaskB.addDependency(monotaskA)
+    monotaskC.addDependency(monotaskA)
+
+    localDagScheduler.submitMonotasks(List(monotaskA, monotaskB, monotaskC))
+
+    // Make a dummy result.
+    val result = ByteBuffer.allocate(2)
+    localDagScheduler.handleTaskCompletion(monotaskA)
+    localDagScheduler.handleTaskCompletion(monotaskC, Some(result))
+
+    // Verify that the macrotask result is stored in the macrotaskResults map.
+    assert(localDagScheduler.macrotaskResults.contains(taskAttemptId))
+    assert(localDagScheduler.macrotaskResults(taskAttemptId) === result)
+
+    // Create a dummy failure reason.
+    val failureReason = ByteBuffer.allocate(2)
+    localDagScheduler.handleTaskFailure(monotaskB, failureReason)
+
+    // Verify that the macrotask result has been removed from macrotaskResults.
+    assertDataStructuresEmpty()
+  }
+
   test("waitUntilAllTasksComplete returns immediately when no tasks are running or waiting") {
     assert(localDagScheduler.waitUntilAllTasksComplete(0))
   }
@@ -272,6 +396,7 @@ class LocalDagSchedulerSuite extends FunSuite with BeforeAndAfterEach with Local
   private def assertDataStructuresEmpty() = {
     assert(localDagScheduler.waitingMonotasks.isEmpty)
     assert(localDagScheduler.runningMonotasks.isEmpty)
-    assert(localDagScheduler.runningMacrotaskAttemptIds.isEmpty)
+    assert(localDagScheduler.macrotaskRemainingMonotasks.isEmpty)
+    assert(localDagScheduler.macrotaskResults.isEmpty)
   }
 }

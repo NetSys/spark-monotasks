@@ -126,7 +126,7 @@ private[spark] class SerializedObjectWriter(
       serializationStream.flush()
       serializationStream.close()
       if (saveToBlockManager) {
-        val result = blockManager.putBytes(
+        val result = blockManager.cacheBytes(
           blockId,
           byteOutputStream.getByteBuffer(),
           StorageLevel.MEMORY_ONLY_SER,

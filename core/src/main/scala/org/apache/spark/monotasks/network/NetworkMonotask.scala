@@ -20,7 +20,8 @@ import org.apache.spark.{ExceptionFailure, FetchFailed, Logging, SparkException,
 import org.apache.spark.monotasks.Monotask
 import org.apache.spark.network.buffer.ManagedBuffer
 import org.apache.spark.network.shuffle.BlockFetchingListener
-import org.apache.spark.storage.{BlockId, BlockManagerId, MonotaskResultBlockId, ShuffleBlockId}
+import org.apache.spark.storage.{BlockId, BlockManagerId, MonotaskResultBlockId, ShuffleBlockId,
+  StorageLevel}
 import org.apache.spark.util.Utils
 
 /**
@@ -56,7 +57,7 @@ private[spark] class NetworkMonotask(
     // Increment the ref count because we need to pass this to a different thread.
     // This needs to be released after use.
     buf.retain()
-    context.env.blockManager.memoryStore.putValue(resultBlockId, buf)
+    context.env.blockManager.cacheSingle(resultBlockId, buf, StorageLevel.MEMORY_ONLY, false)
     context.localDagScheduler.handleTaskCompletion(this)
   }
 
