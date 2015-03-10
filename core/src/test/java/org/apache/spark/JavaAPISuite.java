@@ -1033,7 +1033,12 @@ public class JavaAPISuite implements Serializable {
     Assert.assertEquals(expected, readRDD.collect());
   }
 
-  @Test
+  /**
+   * TODO: This test case is ignored because the new monotasks-based interface with HDFS only
+   *       supports TextInputFormat. When the interface also supports WholeTextFileInputFormat,
+   *       this test case should be re-enabled.
+   */
+  @Ignore
   public void wholeTextFiles() throws Exception {
     byte[] content1 = "spark is easy to use.\n".getBytes("utf-8");
     byte[] content2 = "spark is also easy to use.\n".getBytes("utf-8");
@@ -1095,7 +1100,7 @@ public class JavaAPISuite implements Serializable {
     Assert.assertEquals(pairs, readRDD.collect());
   }
 
-  @Test
+  @Ignore
   public void binaryFiles() throws Exception {
     // Reusing the wholeText files example
     byte[] content1 = "spark is easy to use.\n".getBytes("utf-8");
@@ -1116,7 +1121,7 @@ public class JavaAPISuite implements Serializable {
     }
   }
 
-  @Test
+  @Ignore
   public void binaryFilesCaching() throws Exception {
     // Reusing the wholeText files example
     byte[] content1 = "spark is easy to use.\n".getBytes("utf-8");
@@ -1201,8 +1206,13 @@ public class JavaAPISuite implements Serializable {
     }).collect().toString());
   }
 
+  /**
+   * TODO: This test case is ignored because the new monotasks-based interface with HDFS only
+   *       supports TextInputFormat. When the interface also supports SequenceFileInputFormat,
+   *       this test case should be re-enabled.
+   */
   @SuppressWarnings("unchecked")
-  @Test
+  @Ignore
   public void readWithNewAPIHadoopFile() throws IOException {
     String outputDir = new File(tempDir, "output").getAbsolutePath();
     List<Tuple2<Integer, String>> pairs = Arrays.asList(

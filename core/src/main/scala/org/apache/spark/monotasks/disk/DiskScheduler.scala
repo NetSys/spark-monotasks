@@ -20,6 +20,7 @@ import java.nio.channels.ClosedByInterruptException
 import java.util.concurrent.LinkedBlockingQueue
 
 import scala.collection.mutable.HashMap
+import scala.util.Random
 
 import org.apache.spark.Logging
 import org.apache.spark.storage.BlockManager
@@ -80,6 +81,16 @@ private[spark] class DiskScheduler(blockManager: BlockManager) extends Logging {
       }
       case remove: DiskRemoveMonotask => {
         Some(remove.diskId)
+      }
+      case hdfsRead: HdfsReadMonotask => {
+        val hdfsPath = hdfsRead.path.toUri().getPath()
+        // Find which local disks contain hdfsPath (possibly none).
+        val diskIdsContainingHdfsPath = diskIds.filter(hdfsPath.contains(_))
+        diskIdsContainingHdfsPath.headOption.orElse {
+          logWarning(s"HDFS path $hdfsPath is not contained within any known local disks.")
+          // If the path is not on any local disks, choose a random diskId.
+          Some(Random.shuffle(diskIds.toList).head)
+        }
       }
       case _ => {
         None
