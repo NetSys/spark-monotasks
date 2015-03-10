@@ -406,7 +406,7 @@ abstract class RDD[T: ClassTag](
    *  Inserts nextMonotask into the correct place in the resulting DAG. The Seq that is returned
    *  does not include nextMonotask.
    */
-  private final def getInputMonotasks(
+  protected def getInputMonotasks(
       partition: Partition,
       dependencyIdToPartitions: HashMap[Long, HashSet[Partition]],
       context: TaskContextImpl,

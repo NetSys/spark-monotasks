@@ -15,27 +15,47 @@
  * limitations under the License.
  */
 
+/*
+ * Copyright 2014 The Regents of The University California
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package org.apache.spark.rdd
 
+import java.io.EOFException
 import java.text.SimpleDateFormat
 import java.util.Date
 
+import scala.collection.mutable.{HashMap, HashSet}
 import scala.reflect.ClassTag
+import scala.util.control.NonFatal
 
 import org.apache.hadoop.conf.{Configurable, Configuration}
 import org.apache.hadoop.io.Writable
 import org.apache.hadoop.mapreduce._
-import org.apache.hadoop.mapreduce.lib.input.{CombineFileSplit, FileSplit}
+import org.apache.hadoop.mapreduce.lib.input.FileSplit
 
 import org.apache.spark.annotation.DeveloperApi
 import org.apache.spark.input.WholeTextFileInputFormat
 import org.apache.spark._
 import org.apache.spark.executor.DataReadMethod
 import org.apache.spark.mapreduce.SparkHadoopMapReduceUtil
+import org.apache.spark.monotasks.Monotask
+import org.apache.spark.monotasks.disk.{HdfsReadMonotask, MemoryStoreFileSystem, MemoryStorePath}
 import org.apache.spark.rdd.NewHadoopRDD.NewHadoopMapPartitionsWithSplitRDD
-import org.apache.spark.util.Utils
-import org.apache.spark.deploy.SparkHadoopUtil
-import org.apache.spark.storage.StorageLevel
+import org.apache.spark.storage.{BlockException, BlockId, RDDBlockId, StorageLevel}
+import org.apache.spark.util.NextIterator
 
 private[spark] class NewHadoopPartition(
     rddId: Int,
@@ -44,6 +64,12 @@ private[spark] class NewHadoopPartition(
   extends Partition {
 
   val serializableHadoopSplit = new SerializableWritable(rawSplit)
+
+  // The BlockId used to cache this partition's serialized bytes in the BlockManager after it is
+  // read from disk. This is required because the process of reading a block from disk and the
+  // process of deserializing it take place in two different monotasks. This variable is set when
+  // this partition's corresponding HdfsReadMonotask is created in NewHadoopRDD.getInputMonotasks().
+  var serializedDataBlockId: Option[BlockId] = None
 
   override def hashCode(): Int = 41 * (41 + rddId) + index
 }
@@ -84,6 +110,21 @@ class NewHadoopRDD[K, V](
 
   @transient protected val jobId = new JobID(jobTrackerId, id)
 
+  override def getInputMonotasks(
+      partition: Partition,
+      dependencyIdToPartitions: HashMap[Long, HashSet[Partition]],
+      context: TaskContextImpl,
+      nextMonotask: Monotask): Seq[Monotask] = {
+    // The DAG will look like this:
+    //   HdfsReadMonotask ---> nextMonotask
+    val readMonotask =
+      new HdfsReadMonotask(context, id, partition, jobTrackerId, confBroadcast.value.value)
+    nextMonotask.addDependency(readMonotask)
+    partition.asInstanceOf[NewHadoopPartition].serializedDataBlockId =
+      Some(readMonotask.resultBlockId)
+    Seq(readMonotask)
+  }
+
   override def getPartitions: Array[Partition] = {
     val inputFormat = inputFormatClass.newInstance
     inputFormat match {
@@ -100,89 +141,74 @@ class NewHadoopRDD[K, V](
     result
   }
 
-  override def compute(theSplit: Partition, context: TaskContext): InterruptibleIterator[(K, V)] = {
-    val iter = new Iterator[(K, V)] {
-      val split = theSplit.asInstanceOf[NewHadoopPartition]
-      logInfo("Input split: " + split.serializableHadoopSplit)
-      val conf = confBroadcast.value.value
+  override def compute(
+      partition: Partition,
+      context: TaskContext): InterruptibleIterator[(K, V)] = {
+    val memoryStoreHadoopPartition = partition.asInstanceOf[NewHadoopPartition]
+    val hadoopFileSplit = memoryStoreHadoopPartition.serializableHadoopSplit.value match {
+        case file: FileSplit =>
+          file
+        case split: Any =>
+          throw new UnsupportedOperationException(s"Unsupported InputSplit: $split. " +
+            "NewHadoopRDD only supports InputSplits of type FileSplit")
+    }
 
-      val inputMetrics = context.taskMetrics
-        .getInputMetricsForReadMethod(DataReadMethod.Hadoop)
+    val memoryStoreFileSystem =
+      new MemoryStoreFileSystem(SparkEnv.get.blockManager, hadoopFileSplit.getStart())
+    val conf = confBroadcast.value.value
+    memoryStoreFileSystem.setConf(conf)
 
-      // Find a function that will return the FileSystem bytes read by this thread. Do this before
-      // creating RecordReader, because RecordReader's constructor might read some bytes
-      val bytesReadCallback = inputMetrics.bytesReadCallback.orElse {
-        split.serializableHadoopSplit.value match {
-          case _: FileSplit | _: CombineFileSplit =>
-            SparkHadoopUtil.get.getFSBytesReadOnThreadCallback()
-          case _ => None
-        }
-      }
-      inputMetrics.setBytesReadCallback(bytesReadCallback)
+    val blockId = new RDDBlockId(id, partition.index)
+    val serializedDataBlockId = memoryStoreHadoopPartition.serializedDataBlockId.getOrElse(
+      throw new BlockException(blockId, s"Could not find the serialized data for block $blockId."))
 
-      val attemptId = newTaskAttemptID(jobTrackerId, id, isMap = true, split.index, 0)
-      val hadoopAttemptContext = newTaskAttemptContext(conf, attemptId)
-      val format = inputFormatClass.newInstance
-      format match {
-        case configurable: Configurable =>
-          configurable.setConf(conf)
-        case _ =>
-      }
-      val reader = format.createRecordReader(
-        split.serializableHadoopSplit.value, hadoopAttemptContext)
-      reader.initialize(split.serializableHadoopSplit.value, hadoopAttemptContext)
+    val memoryStorePath = new MemoryStorePath(
+      hadoopFileSplit.getPath().toUri(), serializedDataBlockId, memoryStoreFileSystem)
+    val memoryStoreFileSplit =
+      new FileSplit(memoryStorePath, hadoopFileSplit.getStart(), hadoopFileSplit.getLength(), null)
 
+    val format = inputFormatClass.newInstance
+    format match {
+      case configurable: Configurable =>
+        configurable.setConf(conf)
+      case _ =>
+    }
+
+    val taskAttemptId = newTaskAttemptID(jobTrackerId, id, isMap = true, partition.index, 0)
+    val taskAttemptContext = newTaskAttemptContext(conf, taskAttemptId)
+    val reader = format.createRecordReader(memoryStoreFileSplit, taskAttemptContext)
+    reader.initialize(memoryStoreFileSplit, taskAttemptContext)
+
+    val inputMetrics = context.taskMetrics
+      .getInputMetricsForReadMethod(DataReadMethod.Hadoop)
+
+    new InterruptibleIterator[(K, V)](context, new NextIterator[(K, V)] {
       // Register an on-task-completion callback to close the input stream.
-      context.addTaskCompletionListener(context => close())
-      var havePair = false
-      var finished = false
-      var recordsSinceMetricsUpdate = 0
+      context.addTaskCompletionListener(context => closeIfNeeded())
 
-      override def hasNext: Boolean = {
-        if (!finished && !havePair) {
+      override def getNext() = {
+        try {
           finished = !reader.nextKeyValue
-          havePair = !finished
+        } catch  {
+          case eof: EOFException =>
+            finished = true
         }
-        !finished
-      }
-
-      override def next(): (K, V) = {
-        if (!hasNext) {
-          throw new java.util.NoSuchElementException("End of stream")
-        }
-        havePair = false
         if (!finished) {
           inputMetrics.incRecordsRead(1)
         }
         (reader.getCurrentKey, reader.getCurrentValue)
       }
 
-      private def close() {
+      override def close() {
         try {
           reader.close()
-          if (bytesReadCallback.isDefined) {
-            inputMetrics.updateBytesRead()
-          } else if (split.serializableHadoopSplit.value.isInstanceOf[FileSplit] ||
-                     split.serializableHadoopSplit.value.isInstanceOf[CombineFileSplit]) {
-            // If we can't get the bytes read from the FS stats, fall back to the split size,
-            // which may be inaccurate.
-            try {
-              inputMetrics.incBytesRead(split.serializableHadoopSplit.value.getLength)
-            } catch {
-              case e: java.io.IOException =>
-                logWarning("Unable to get input size to set InputMetrics for task", e)
-            }
-          }
+          SparkEnv.get.blockManager.removeBlockFromMemory(serializedDataBlockId)
         } catch {
-          case e: Exception => {
-            if (!Utils.inShutdown()) {
-              logWarning("Exception in RecordReader.close()", e)
-            }
-          }
+          case NonFatal(e) =>
+            logWarning("Exception in RecordReader.close()", e)
         }
       }
-    }
-    new InterruptibleIterator(context, iter)
+    })
   }
 
   /** Maps over a partition, providing the InputSplit that was used as the base of the partition. */
