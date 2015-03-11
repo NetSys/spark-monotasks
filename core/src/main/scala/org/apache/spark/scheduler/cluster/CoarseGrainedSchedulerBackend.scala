@@ -114,6 +114,13 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, actorSystem: A
           }
         }
 
+      case UpdateFreeCores(executorId, cores) =>
+        if (freeCores(executorId) < cores && freeCores(executorId) < scheduler.CPUS_PER_TASK) {
+          // Now a task can be scheduled, where it couldn't have been before.
+          makeOffers(executorId)
+        }
+        freeCores(executorId) = cores
+
       case ReviveOffers =>
         makeOffers()
 

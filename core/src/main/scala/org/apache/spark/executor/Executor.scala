@@ -110,9 +110,6 @@ private[spark] class Executor(
   startDriverHeartbeater()
 
   def launchTask(taskAttemptId: Long, taskName: String, serializedTask: ByteBuffer) {
-    // TODO: Do we really need to propogate this task started message back to the scheduler?
-    //       Doesn't the scheduler just drop it?
-    executorBackend.statusUpdate(taskAttemptId, TaskState.RUNNING, EMPTY_BYTE_BUFFER)
     val context = new TaskContext(
       env, localDagScheduler, maximumResultSizeBytes, dependencyManager, taskAttemptId)
     val prepareMonotask = new PrepareMonotask(context, serializedTask)
