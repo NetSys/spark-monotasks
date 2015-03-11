@@ -132,8 +132,8 @@ private[spark] class SubtractedRDD[K: ClassTag, V: ClassTag, W: ClassTag](
               shuffleReader.getDeserializedAggregatedSortedData()
             case None =>
               throw new SparkException(
-                s"No shuffle reader found for shuffle ${shuffleDependency.shuffleId} (should have " +
-                  "been set when creating the monotasks for this Macrotask)")
+                s"No shuffle reader found for shuffle ${shuffleDependency.shuffleId} (should " +
+                  "have been set when creating the monotasks for this Macrotask)")
           }
           iter.foreach(op)
       }
