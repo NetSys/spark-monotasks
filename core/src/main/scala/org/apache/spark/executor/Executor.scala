@@ -116,9 +116,6 @@ private[spark] class Executor(
       attemptNumber: Int,
       taskName: String,
       serializedTask: ByteBuffer) {
-    // TODO: Do we really need to propogate this task started message back to the scheduler?
-    //       Doesn't the scheduler just drop it?
-    executorBackend.statusUpdate(taskAttemptId, TaskState.RUNNING, EMPTY_BYTE_BUFFER)
     val context = new TaskContextImpl(
       env,
       localDagScheduler,
