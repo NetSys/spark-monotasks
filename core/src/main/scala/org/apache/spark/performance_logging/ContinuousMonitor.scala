@@ -33,6 +33,7 @@ private[spark] class ContinuousMonitor(sparkConf: SparkConf) {
     s"/tmp/spark_continuous_monitor_${System.currentTimeMillis}").toString
   private val logger = new FileLogger(logDir, sparkConf)
   logger.start()
+  logger.newFile()
 
   var previousCpuCounters = new CpuCounters()
   var previousDiskCounters = new DiskCounters()
