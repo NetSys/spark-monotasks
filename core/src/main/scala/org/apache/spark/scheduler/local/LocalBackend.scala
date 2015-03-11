@@ -49,6 +49,8 @@ private case class ReviveOffers()
 
 private case class StatusUpdate(taskId: Long, state: TaskState, serializedData: ByteBuffer)
 
+private case class UpdateFreeCores(cores: Int)
+
 private case class KillTask(taskId: Long, interruptThread: Boolean)
 
 private case class StopExecutor()
@@ -84,6 +86,9 @@ private[spark] class LocalActor(
         freeCores += scheduler.CPUS_PER_TASK
         reviveOffers()
       }
+
+    case UpdateFreeCores(cores) =>
+      freeCores = cores
 
     case KillTask(taskId, interruptThread) =>
       executor.killTask(taskId, interruptThread)
@@ -145,4 +150,7 @@ private[spark] class LocalBackend(scheduler: TaskSchedulerImpl, val totalCores: 
 
   override def applicationId(): String = appId
 
+  override def updateFreeCores(cores: Int) {
+    localActor ! UpdateFreeCores(cores)
+  }
 }

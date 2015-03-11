@@ -48,6 +48,9 @@ private[spark] object CoarseGrainedClusterMessages {
     Utils.checkHostPort(hostPort, "Expected host port")
   }
 
+  case class UpdateFreeCores(executorId: String, cores: Int)
+    extends CoarseGrainedClusterMessage
+
   case class StatusUpdate(executorId: String, taskId: Long, state: TaskState,
     data: SerializableBuffer) extends CoarseGrainedClusterMessage
 

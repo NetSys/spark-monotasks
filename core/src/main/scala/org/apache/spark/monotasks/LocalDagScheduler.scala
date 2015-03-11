@@ -41,7 +41,7 @@ private[spark] class LocalDagScheduler(
     val blockManager: BlockManager)
   extends Logging {
 
-  val computeScheduler = new ComputeScheduler
+  val computeScheduler = new ComputeScheduler(executorBackend)
   val networkScheduler = new NetworkScheduler
   val diskScheduler = new DiskScheduler(blockManager)
 
