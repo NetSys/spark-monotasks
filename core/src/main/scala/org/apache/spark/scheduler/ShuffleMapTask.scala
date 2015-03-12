@@ -147,7 +147,7 @@ private class SerializedObjectWriter(
        * messages. */
       val result = blockManager.putBytes(
         blockId, ByteBuffer.wrap(byteOutputStream.toByteArray), StorageLevel.MEMORY_ONLY_SER)
-      return result.size
+      return byteOutputStream.size()
     } else {
       return 0
     }
