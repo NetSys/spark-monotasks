@@ -1031,6 +1031,12 @@ class PairRDDFunctions[K, V](self: RDD[(K, V)])
    * MapReduce job.
    */
   def saveAsHadoopDataset(conf: JobConf) {
+    throw new UnsupportedOperationException(
+      "Saving an RDD to HDFS using the org.apache.hadoop.mapred library is not supported because " +
+      "the process does not use Monotasks. Save an RDD to HDFS using the " +
+      "org.apache.hadoop.mapreduce library instead. See " +
+      "PairRDDFunctions.saveAsNewAPIHadoopDataset().")
+
     // Rename this as hadoopConf internally to avoid shadowing (see SPARK-2038).
     val hadoopConf = conf
     val wrappedConf = new SerializableWritable(hadoopConf)

@@ -418,7 +418,12 @@ class InputOutputMetricsSuite extends FunSuite with SharedSparkContext
     }
   }
 
-  test("input metrics with old CombineFileInputFormat") {
+  /**
+   * TODO: This test case is ignored because the org.apache.hadoop.mapred library is no longer
+   *       supported. This test should be re-enabled once support for the org.apache.hadoop.mapred
+   *       library has been refactored to use monotasks.
+   */
+  ignore("input metrics with old CombineFileInputFormat") {
     val bytesRead = runAndReturnBytesRead {
       sc.hadoopFile(tmpFilePath, classOf[OldCombineTextInputFormat], classOf[LongWritable],
         classOf[Text], 2).count()
@@ -426,6 +431,11 @@ class InputOutputMetricsSuite extends FunSuite with SharedSparkContext
     assert(bytesRead >= tmpFile.length())
   }
 
+  /**
+   * TODO: This test case is ignored because the new monotasks-based interface with HDFS only
+   *       supports TextInputFormat. When the interface also supports CombineFileInputFormat,
+   *       this test case should be re-enabled.
+   */
   ignore("input metrics with new CombineFileInputFormat") {
     val bytesRead = runAndReturnBytesRead {
       sc.newAPIHadoopFile(tmpFilePath, classOf[NewCombineTextInputFormat], classOf[LongWritable],

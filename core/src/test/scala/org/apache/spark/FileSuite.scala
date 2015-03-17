@@ -67,7 +67,12 @@ class FileSuite extends FunSuite with LocalSparkContext {
     Utils.deleteRecursively(tempDir)
   }
 
-  test("text files") {
+  /**
+   * TODO: This test case is ignored because the org.apache.hadoop.mapred library is no longer
+   *       supported. This test should be re-enabled once support for the org.apache.hadoop.mapred
+   *       library has been refactored to use monotasks.
+   */
+  ignore("text files") {
     sc = new SparkContext("local", "test")
     val outputDir = new File(tempDir, "output").getAbsolutePath
     val nums = sc.makeRDD(1 to 4)
@@ -80,7 +85,12 @@ class FileSuite extends FunSuite with LocalSparkContext {
     assert(sc.textFile(outputDir).collect().toList === List("1", "2", "3", "4"))
   }
 
-  test("text files (compressed)") {
+  /**
+   * TODO: This test case is ignored because the org.apache.hadoop.mapred library is no longer
+   *       supported. This test should be re-enabled once support for the org.apache.hadoop.mapred
+   *       library has been refactored to use monotasks.
+   */
+  ignore("text files (compressed)") {
     sc = new SparkContext("local", "test")
     val normalDir = new File(tempDir, "output_normal").getAbsolutePath
     val compressedOutputDir = new File(tempDir, "output_compressed").getAbsolutePath
@@ -101,7 +111,12 @@ class FileSuite extends FunSuite with LocalSparkContext {
     assert(compressedFile.length < normalFile.length)
   }
 
-  test("SequenceFiles") {
+  /**
+   * TODO: This test case is ignored because the org.apache.hadoop.mapred library is no longer
+   *       supported. This test should be re-enabled once support for the org.apache.hadoop.mapred
+   *       library has been refactored to use monotasks.
+   */
+  ignore("SequenceFiles") {
     sc = new SparkContext("local", "test")
     val outputDir = new File(tempDir, "output").getAbsolutePath
     val nums = sc.makeRDD(1 to 3).map(x => (x, "a" * x)) // (1,a), (2,aa), (3,aaa)
@@ -111,7 +126,12 @@ class FileSuite extends FunSuite with LocalSparkContext {
     assert(output.map(_.toString).collect().toList === List("(1,a)", "(2,aa)", "(3,aaa)"))
   }
 
-  test("SequenceFile (compressed)") {
+  /**
+   * TODO: This test case is ignored because the org.apache.hadoop.mapred library is no longer
+   *       supported. This test should be re-enabled once support for the org.apache.hadoop.mapred
+   *       library has been refactored to use monotasks.
+   */
+  ignore("SequenceFile (compressed)") {
     sc = new SparkContext("local", "test")
     val normalDir = new File(tempDir, "output_normal").getAbsolutePath
     val compressedOutputDir = new File(tempDir, "output_compressed").getAbsolutePath
@@ -132,7 +152,12 @@ class FileSuite extends FunSuite with LocalSparkContext {
     assert(compressedFile.length < normalFile.length)
   }
 
-  test("SequenceFile with writable key") {
+  /**
+   * TODO: This test case is ignored because the org.apache.hadoop.mapred library is no longer
+   *       supported. This test should be re-enabled once support for the org.apache.hadoop.mapred
+   *       library has been refactored to use monotasks.
+   */
+  ignore("SequenceFile with writable key") {
     sc = new SparkContext("local", "test")
     val outputDir = new File(tempDir, "output").getAbsolutePath
     val nums = sc.makeRDD(1 to 3).map(x => (new IntWritable(x), "a" * x))
@@ -142,7 +167,12 @@ class FileSuite extends FunSuite with LocalSparkContext {
     assert(output.map(_.toString).collect().toList === List("(1,a)", "(2,aa)", "(3,aaa)"))
   }
 
-  test("SequenceFile with writable value") {
+  /**
+   * TODO: This test case is ignored because the org.apache.hadoop.mapred library is no longer
+   *       supported. This test should be re-enabled once support for the org.apache.hadoop.mapred
+   *       library has been refactored to use monotasks.
+   */
+  ignore("SequenceFile with writable value") {
     sc = new SparkContext("local", "test")
     val outputDir = new File(tempDir, "output").getAbsolutePath
     val nums = sc.makeRDD(1 to 3).map(x => (x, new Text("a" * x)))
@@ -152,7 +182,12 @@ class FileSuite extends FunSuite with LocalSparkContext {
     assert(output.map(_.toString).collect().toList === List("(1,a)", "(2,aa)", "(3,aaa)"))
   }
 
-  test("SequenceFile with writable key and value") {
+  /**
+   * TODO: This test case is ignored because the org.apache.hadoop.mapred library is no longer
+   *       supported. This test should be re-enabled once support for the org.apache.hadoop.mapred
+   *       library has been refactored to use monotasks.
+   */
+  ignore("SequenceFile with writable key and value") {
     sc = new SparkContext("local", "test")
     val outputDir = new File(tempDir, "output").getAbsolutePath
     val nums = sc.makeRDD(1 to 3).map(x => (new IntWritable(x), new Text("a" * x)))
@@ -162,7 +197,12 @@ class FileSuite extends FunSuite with LocalSparkContext {
     assert(output.map(_.toString).collect().toList === List("(1,a)", "(2,aa)", "(3,aaa)"))
   }
 
-  test("implicit conversions in reading SequenceFiles") {
+  /**
+   * TODO: This test case is ignored because the org.apache.hadoop.mapred library is no longer
+   *       supported. This test should be re-enabled once support for the org.apache.hadoop.mapred
+   *       library has been refactored to use monotasks.
+   */
+  ignore("implicit conversions in reading SequenceFiles") {
     sc = new SparkContext("local", "test")
     val outputDir = new File(tempDir, "output").getAbsolutePath
     val nums = sc.makeRDD(1 to 3).map(x => (x, "a" * x)) // (1,a), (2,aa), (3,aaa)
@@ -178,7 +218,12 @@ class FileSuite extends FunSuite with LocalSparkContext {
     assert(output3.map(_.toString).collect().toList === List("(1,a)", "(2,aa)", "(3,aaa)"))
   }
 
-  test("object files of ints") {
+  /**
+   * TODO: This test case is ignored because the org.apache.hadoop.mapred library is no longer
+   *       supported. This test should be re-enabled once support for the org.apache.hadoop.mapred
+   *       library has been refactored to use monotasks.
+   */
+  ignore("object files of ints") {
     sc = new SparkContext("local", "test")
     val outputDir = new File(tempDir, "output").getAbsolutePath
     val nums = sc.makeRDD(1 to 4)
@@ -188,7 +233,12 @@ class FileSuite extends FunSuite with LocalSparkContext {
     assert(output.collect().toList === List(1, 2, 3, 4))
   }
 
-  test("object files of complex types") {
+  /**
+   * TODO: This test case is ignored because the org.apache.hadoop.mapred library is no longer
+   *       supported. This test should be re-enabled once support for the org.apache.hadoop.mapred
+   *       library has been refactored to use monotasks.
+   */
+  ignore("object files of complex types") {
     sc = new SparkContext("local", "test")
     val outputDir = new File(tempDir, "output").getAbsolutePath
     val nums = sc.makeRDD(1 to 3).map(x => (x, "a" * x))
@@ -198,7 +248,12 @@ class FileSuite extends FunSuite with LocalSparkContext {
     assert(output.collect().toList === List((1, "a"), (2, "aa"), (3, "aaa")))
   }
 
-  test("object files of classes from a JAR") {
+  /**
+   * TODO: This test case is ignored because the org.apache.hadoop.mapred library is no longer
+   *       supported. This test should be re-enabled once support for the org.apache.hadoop.mapred
+   *       library has been refactored to use monotasks.
+   */
+  ignore("object files of classes from a JAR") {
     val original = Thread.currentThread().getContextClassLoader
     val className = "FileSuiteObjectFileTest"
     val jar = TestUtils.createJarWithClasses(Seq(className))
@@ -255,6 +310,11 @@ class FileSuite extends FunSuite with LocalSparkContext {
     assert(output.map(_.toString).collect().toList === List("(1,a)", "(2,aa)", "(3,aaa)"))
   }
 
+  /**
+   * TODO: This test case is ignored because the new monotasks-based interface with HDFS only
+   *       supports TextInputFormat. When the interface also supports CombineFileInputFormat,
+   *       this test case should be re-enabled.
+   */
   ignore("binary file input as byte array") {
     sc = new SparkContext("local", "test")
     val outFile = new File(tempDir, "record-bytestream-00000.bin")
@@ -278,6 +338,11 @@ class FileSuite extends FunSuite with LocalSparkContext {
     assert(indata.toArray === testOutput)
   }
 
+  /**
+   * TODO: This test case is ignored because the new monotasks-based interface with HDFS only
+   *       supports TextInputFormat. When the interface also supports CombineFileInputFormat,
+   *       this test case should be re-enabled.
+   */
   ignore("portabledatastream caching tests") {
     sc = new SparkContext("local", "test")
     val outFile = new File(tempDir, "record-bytestream-00000.bin")
@@ -309,6 +374,11 @@ class FileSuite extends FunSuite with LocalSparkContext {
     assert(indata.toArray === testOutput)
   }
 
+  /**
+   * TODO: This test case is ignored because the new monotasks-based interface with HDFS only
+   *       supports TextInputFormat. When the interface also supports CombineFileInputFormat,
+   *       this test case should be re-enabled.
+   */
   ignore("portabledatastream persist disk storage") {
     sc = new SparkContext("local", "test")
     val outFile = new File(tempDir, "record-bytestream-00000.bin")
@@ -340,6 +410,11 @@ class FileSuite extends FunSuite with LocalSparkContext {
     assert(indata.toArray === testOutput)
   }
 
+  /**
+   * TODO: This test case is ignored because the new monotasks-based interface with HDFS only
+   *       supports TextInputFormat. When the interface also supports CombineFileInputFormat,
+   *       this test case should be re-enabled.
+   */
   ignore("portabledatastream flatmap tests") {
     sc = new SparkContext("local", "test")
     val outFile = new File(tempDir, "record-bytestream-00000.bin")
@@ -449,7 +524,12 @@ class FileSuite extends FunSuite with LocalSparkContext {
     assert(rdd.count() === 3)
   }
 
-  test ("prevent user from overwriting the empty directory (old Hadoop API)") {
+  /**
+   * TODO: This test case is ignored because the org.apache.hadoop.mapred library is no longer
+   *       supported. This test should be re-enabled once support for the org.apache.hadoop.mapred
+   *       library has been refactored to use monotasks.
+   */
+  ignore("prevent user from overwriting the empty directory (old Hadoop API)") {
     sc = new SparkContext("local", "test")
     val randomRDD = sc.parallelize(Array((1, "a"), (1, "a"), (2, "b"), (3, "c")), 1)
     intercept[FileAlreadyExistsException] {
@@ -457,7 +537,12 @@ class FileSuite extends FunSuite with LocalSparkContext {
     }
   }
 
-  test ("prevent user from overwriting the non-empty directory (old Hadoop API)") {
+  /**
+   * TODO: This test case is ignored because the org.apache.hadoop.mapred library is no longer
+   *       supported. This test should be re-enabled once support for the org.apache.hadoop.mapred
+   *       library has been refactored to use monotasks.
+   */
+  ignore("prevent user from overwriting the non-empty directory (old Hadoop API)") {
     sc = new SparkContext("local", "test")
     val randomRDD = sc.parallelize(Array((1, "a"), (1, "a"), (2, "b"), (3, "c")), 1)
     randomRDD.saveAsTextFile(tempDir.getPath + "/output")
@@ -467,7 +552,12 @@ class FileSuite extends FunSuite with LocalSparkContext {
     }
   }
 
-  test ("allow user to disable the output directory existence checking (old Hadoop API") {
+  /**
+   * TODO: This test case is ignored because the org.apache.hadoop.mapred library is no longer
+   *       supported. This test should be re-enabled once support for the org.apache.hadoop.mapred
+   *       library has been refactored to use monotasks.
+   */
+  ignore("allow user to disable the output directory existence checking (old Hadoop API") {
     val sf = new SparkConf()
     sf.setAppName("test").setMaster("local").set("spark.hadoop.validateOutputSpecs", "false")
     sc = new SparkContext(sf)
@@ -507,7 +597,12 @@ class FileSuite extends FunSuite with LocalSparkContext {
     assert(new File(tempDir.getPath + "/output/part-r-00000").exists() === true)
   }
 
-  test ("save Hadoop Dataset through old Hadoop API") {
+  /**
+   * TODO: This test case is ignored because the org.apache.hadoop.mapred library is no longer
+   *       supported. This test should be re-enabled once support for the org.apache.hadoop.mapred
+   *       library has been refactored to use monotasks.
+   */
+  ignore("save Hadoop Dataset through old Hadoop API") {
     sc = new SparkContext("local", "test")
     val randomRDD = sc.parallelize(Array(("key1", "a"), ("key2", "a"), ("key3", "b"), ("key4", "c")), 1)
     val job = new JobConf()
@@ -531,7 +626,12 @@ class FileSuite extends FunSuite with LocalSparkContext {
     assert(new File(tempDir.getPath + "/outputDataset_new/part-r-00000").exists() === true)
   }
 
-  test("Get input files via old Hadoop API") {
+  /**
+   * TODO: This test case is ignored because the org.apache.hadoop.mapred library is no longer
+   *       supported. This test should be re-enabled once support for the org.apache.hadoop.mapred
+   *       library has been refactored to use monotasks.
+   */
+  ignore("Get input files via old Hadoop API") {
     sc = new SparkContext("local", "test")
     val outDir = new File(tempDir, "output").getAbsolutePath
     sc.makeRDD(1 to 4, 2).saveAsTextFile(outDir)
@@ -548,7 +648,7 @@ class FileSuite extends FunSuite with LocalSparkContext {
   test("Get input files via new Hadoop API") {
     sc = new SparkContext("local", "test")
     val outDir = new File(tempDir, "output").getAbsolutePath
-    sc.makeRDD(1 to 4, 2).saveAsTextFile(outDir)
+    sc.makeRDD(1 to 4, 2).saveAsNewApiTextFile(outDir)
 
     val inputPaths =
       sc.newAPIHadoopFile(outDir, classOf[NewTextInputFormat], classOf[LongWritable], classOf[Text])
@@ -556,6 +656,6 @@ class FileSuite extends FunSuite with LocalSparkContext {
         .mapPartitionsWithInputSplit { (split, part) =>
           Iterator(split.asInstanceOf[NewFileSplit].getPath.toUri.getPath)
         }.collect()
-    assert(inputPaths.toSet === Set(s"$outDir/part-00000", s"$outDir/part-00001"))
+    assert(inputPaths.toSet === Set(s"$outDir/part-r-00000", s"$outDir/part-r-00001"))
   }
 }

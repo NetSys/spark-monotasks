@@ -515,7 +515,12 @@ class PairRDDFunctionsSuite extends FunSuite with SharedSparkContext {
     pairs.saveAsNewAPIHadoopFile[ConfigTestFormat](s"$dest/test2")
   }
 
-  test("saveAsHadoopFile should respect configured output committers") {
+  /**
+   * TODO: This test case is ignored because the org.apache.hadoop.mapred library is no longer
+   *       supported. This test should be re-enabled once support for the org.apache.hadoop.mapred
+   *       library has been refactored to use monotasks.
+   */
+  ignore("saveAsHadoopFile should respect configured output committers") {
     val pairs = sc.parallelize(Array((new Integer(1), new Integer(1))))
     val conf = new JobConf()
     conf.setOutputCommitter(classOf[FakeOutputCommitter])

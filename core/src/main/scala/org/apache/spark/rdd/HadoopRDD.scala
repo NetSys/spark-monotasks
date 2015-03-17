@@ -209,6 +209,9 @@ class HadoopRDD[K, V](
   }
 
   override def compute(theSplit: Partition, context: TaskContext): InterruptibleIterator[(K, V)] = {
+    throw new UnsupportedOperationException(
+      "HadoopRDD is not supported because it does not use Monotasks. Use NewHadoopRDD instead.")
+
     val iter = new NextIterator[(K, V)] {
 
       val split = theSplit.asInstanceOf[HadoopPartition]
