@@ -35,6 +35,7 @@ private[spark] abstract class ComputeMonotask(context: TaskContextImpl)
 
   /** Runs the execute method and handles common exceptions thrown by ComputeMonotasks. */
   def executeAndHandleExceptions() {
+    val startTimeNanos = System.nanoTime()
     try {
       Accumulators.registeredAccumulables.set(context.accumulators)
       TaskContext.setTaskContext(context)
@@ -73,6 +74,8 @@ private[spark] abstract class ComputeMonotask(context: TaskContextImpl)
         val closureSerializer = context.env.closureSerializer.newInstance()
         context.localDagScheduler.handleTaskFailure(this, closureSerializer.serialize(reason))
       }
+    } finally {
+      context.taskMetrics.setComputationNanos(System.nanoTime() - startTimeNanos)
     }
   }
 }
