@@ -84,6 +84,14 @@ class TaskMetrics extends Serializable {
   private[spark] def setExecutorRunTime(value: Long) = _executorRunTime = value
   
   /**
+   * Total time consumed by compute monotasks for this macrotask. May be larger than executorRunTime
+   * if multiple compute monotasks ran simultaneously.
+   */
+  private var _computationNanos: Long = _
+  def computationNanos: Long = _computationNanos
+  private[spark] def setComputationNanos(value: Long) = _computationNanos = value
+
+  /**
    * The number of bytes this task transmitted back to the driver as the TaskResult
    */
   private var _resultSize: Long = _
