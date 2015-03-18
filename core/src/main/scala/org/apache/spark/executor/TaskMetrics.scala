@@ -76,6 +76,12 @@ class TaskMetrics extends Serializable {
   var executorRunTime: Long = _
 
   /**
+   * Total time consumed by compute monotasks for this macrotask. May be larger than executorRunTime
+   * if multiple compute monotasks ran simultaneously.
+   */
+  var computationNanos: Long = _
+
+  /**
    * The number of bytes this task transmitted back to the driver as the TaskResult
    */
   var resultSize: Long = _

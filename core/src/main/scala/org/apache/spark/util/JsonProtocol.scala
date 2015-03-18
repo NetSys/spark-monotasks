@@ -261,6 +261,7 @@ private[spark] object JsonProtocol {
     ("Host Name" -> taskMetrics.hostname) ~
     ("Executor Deserialize Time" -> taskMetrics.executorDeserializeTime) ~
     ("Executor Run Time" -> taskMetrics.executorRunTime) ~
+    ("Computation Nanos" -> taskMetrics.computationNanos) ~
     ("Result Size" -> taskMetrics.resultSize) ~
     ("JVM GC Time" -> taskMetrics.jvmGCTime) ~
     ("Result Serialization Time" -> taskMetrics.resultSerializationTime) ~
@@ -619,6 +620,8 @@ private[spark] object JsonProtocol {
     metrics.hostname = (json \ "Host Name").extract[String]
     metrics.executorDeserializeTime = (json \ "Executor Deserialize Time").extract[Long]
     metrics.executorRunTime = (json \ "Executor Run Time").extract[Long]
+    metrics.computationNanos =
+      Utils.jsonOption(json \ "Computation Nanos").map(_.extract[Long]).getOrElse(0L)
     metrics.resultSize = (json \ "Result Size").extract[Long]
     metrics.jvmGCTime = (json \ "JVM GC Time").extract[Long]
     metrics.resultSerializationTime = (json \ "Result Serialization Time").extract[Long]
