@@ -33,14 +33,10 @@
 
 package org.apache.spark.executor
 
-import java.lang.management.ManagementFactory
-
-import scala.collection.JavaConversions._
 import scala.collection.mutable.ArrayBuffer
 
 import org.apache.spark.annotation.DeveloperApi
-import org.apache.spark.performance_logging.{CpuCounters, CpuUtilization, DiskCounters,
-  DiskUtilization, NetworkCounters, NetworkUtilization}
+import org.apache.spark.performance_logging._
 import org.apache.spark.storage.{BlockId, BlockStatus}
 
 /**
@@ -91,11 +87,7 @@ class TaskMetrics extends Serializable {
    */
   var jvmGCTime: Long = _
 
-  private def currentGCTotalMillis: Long = {
-    ManagementFactory.getGarbageCollectorMXBeans.map(_.getCollectionTime).sum
-  }
-
-  @transient private val startingGCTime = currentGCTotalMillis
+  @transient private val startingGCMillis = Utils.totalGarbageCollectionMillis
 
   /**
    * Amount of time spent serializing the task result
@@ -159,7 +151,7 @@ class TaskMetrics extends Serializable {
   /** Should be called when a macrotask completes to set metrics about the task's runtime. */
   def setMetricsOnTaskCompletion() {
     executorRunTime = System.currentTimeMillis() - startingTime
-    jvmGCTime = currentGCTotalMillis - startingGCTime
+    jvmGCTime = Utils.totalGarbageCollectionMillis - startingGCMillis
     cpuUtilization = Some(new CpuUtilization(startCpuCounters))
     networkUtilization = Some(new NetworkUtilization(startNetworkCounters))
     diskUtilization = Some(DiskUtilization(startDiskCounters))
