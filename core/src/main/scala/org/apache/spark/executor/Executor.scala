@@ -35,7 +35,9 @@ package org.apache.spark.executor
 
 import java.nio.ByteBuffer
 
-import org.apache.spark.{Logging, SparkConf, SparkEnv, TaskContext, TaskState}
+import scala.util.control.NonFatal
+
+import org.apache.spark._
 import org.apache.spark.util.{AkkaUtils, Utils}
 import org.apache.spark.monotasks.LocalDagScheduler
 import org.apache.spark.monotasks.compute.PrepareMonotask
@@ -105,6 +107,8 @@ private[spark] class Executor(
     localDagScheduler.getNumRunningMacrotasks)
   continuousMonitor.start(env)
 
+  startDriverHeartbeater()
+
   def launchTask(taskAttemptId: Long, taskName: String, serializedTask: ByteBuffer) {
     // TODO: Do we really need to propogate this task started message back to the scheduler?
     //       Doesn't the scheduler just drop it?
@@ -117,6 +121,45 @@ private[spark] class Executor(
 
   def killTask(taskId: Long, interruptThread: Boolean) {
     // TODO: Support killing tasks: https://github.com/NetSys/spark-monotasks/issues/4
+  }
+
+  def startDriverHeartbeater() {
+    val interval = conf.getInt("spark.executor.heartbeatInterval", 10000)
+    val timeout = AkkaUtils.lookupTimeout(conf)
+    val retryAttempts = AkkaUtils.numRetries(conf)
+    val retryIntervalMs = AkkaUtils.retryWaitMs(conf)
+    val heartbeatReceiverRef = AkkaUtils.makeDriverRef("HeartbeatReceiver", conf, env.actorSystem)
+
+    val t = new Thread() {
+      override def run() {
+        // Sleep a random interval so the heartbeats don't end up in sync
+        Thread.sleep(interval + (math.random * interval).asInstanceOf[Int])
+
+        while (!isStopped) {
+          // TODO: Include task metrics updates here. Currently, the only purpose of this
+          //       heartbeat is as a block manager heartbeat, so that the driver knows that the
+          //       block manager on this machine is still alive.
+          //       https://github.com/NetSys/spark-monotasks/issues/6
+          val message = Heartbeat(
+            executorId, Array.empty[(Long, TaskMetrics)], env.blockManager.blockManagerId)
+          try {
+            val response = AkkaUtils.askWithReply[HeartbeatResponse](message, heartbeatReceiverRef,
+              retryAttempts, retryIntervalMs, timeout)
+            if (response.reregisterBlockManager) {
+              logWarning("Told to re-register on heartbeat")
+              env.blockManager.reregister()
+            }
+          } catch {
+            case NonFatal(t) => logWarning("Issue communicating with driver in heartbeater", t)
+          }
+
+          Thread.sleep(interval)
+        }
+      }
+    }
+    t.setDaemon(true)
+    t.setName("Driver Heartbeater")
+    t.start()
   }
 
   def stop() {
