@@ -45,9 +45,12 @@ case class NetworkCounters() extends Serializable with Logging {
     }
   } catch {
     case e: FileNotFoundException =>
-      logWarning(
-        s"Unable to record network counters because ${NetworkCounters.NETWORK_TOTALS_FILENAME} " +
-        "could not be found")
+      if (!NetworkCounters.emittedMissingFileWarning) {
+        logWarning(
+          s"Unable to record network counters because ${NetworkCounters.NETWORK_TOTALS_FILENAME} " +
+            "could not be found")
+        NetworkCounters.emittedMissingFileWarning = true
+      }
   }
 }
 
@@ -59,4 +62,8 @@ object NetworkCounters {
   val RECEIVED_PACKETS_INDEX = 1
   val TRANSMITTED_BYTES_INDEX = 8
   val TRANSMITTED_PACKETS_INDEX = 9
+
+  // Keep track of whether we've emitted a warning that the files in the /proc file system couldn't
+  // be found, so we don't output endless warnings.
+  var emittedMissingFileWarning = false
 }
