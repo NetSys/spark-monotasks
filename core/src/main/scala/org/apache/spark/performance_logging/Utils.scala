@@ -18,8 +18,13 @@ package org.apache.spark.performance_logging
 
 import java.lang.management.ManagementFactory
 
+import scala.collection.JavaConversions._
+
 object Utils {
   // Beware that the name returned by getName() is not guaranteed to keep following the pid@X
   // format.
   def getPid(): String = ManagementFactory.getRuntimeMXBean().getName().split("@")(0)
+
+  def totalGarbageCollectionMillis: Long =
+    ManagementFactory.getGarbageCollectorMXBeans.map(_.getCollectionTime).sum
 }
