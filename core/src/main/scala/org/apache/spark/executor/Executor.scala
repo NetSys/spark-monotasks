@@ -221,7 +221,7 @@ private[spark] class Executor(
         for (m <- task.metrics) {
           m.setExecutorDeserializeTime(taskStart - deserializeStartTime)
           m.setExecutorRunTime(taskFinish - taskStart)
-          m.setJvmGCTime(gcTime - startGCTime)
+          m.setMetricsOnTaskCompletion()
           m.setResultSerializationTime(afterSerialization - beforeSerialization)
         }
 
@@ -279,8 +279,7 @@ private[spark] class Executor(
           val metrics = attemptedTask.flatMap(t => t.metrics)
           for (m <- metrics) {
             m.setExecutorRunTime(serviceTime)
-            m.setJvmGCTime(gcTime - startGCTime)
-            m.setUtilization()
+            m.setMetricsOnTaskCompletion()
           }
           val reason = new ExceptionFailure(t, metrics)
           execBackend.statusUpdate(taskId, TaskState.FAILED, ser.serialize(reason))

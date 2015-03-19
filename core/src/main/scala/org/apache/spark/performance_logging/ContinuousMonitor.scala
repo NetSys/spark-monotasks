@@ -36,6 +36,7 @@ private[spark] class ContinuousMonitor(sparkConf: SparkConf) {
   val printWriter = new PrintWriter(
     new File(s"/tmp/spark_continuous_monitor_${System.currentTimeMillis}"))
 
+  private var previousGcMillis = Utils.totalGarbageCollectionMillis
   private var previousCpuCounters = new CpuCounters()
   private var previousDiskCounters = new DiskCounters()
   private var previousNetworkCounters = new NetworkCounters()
@@ -44,17 +45,22 @@ private[spark] class ContinuousMonitor(sparkConf: SparkConf) {
     val currentCpuCounters = new CpuCounters()
     val currentDiskCounters = new DiskCounters()
     val currentNetworkCounters = new NetworkCounters()
+    val currentGcMillis = Utils.totalGarbageCollectionMillis
 
     val cpuUtilization = new CpuUtilization(previousCpuCounters, currentCpuCounters)
     val diskUtilization = DiskUtilization(previousDiskCounters, currentDiskCounters)
     val networkUtilization = new NetworkUtilization(previousNetworkCounters, currentNetworkCounters)
+    val elapsedMillis = currentCpuCounters.timeMillis - previousCpuCounters.timeMillis
+    val fractionGcTime = (currentGcMillis - previousGcMillis).toDouble / elapsedMillis
 
     previousCpuCounters = currentCpuCounters
     previousDiskCounters = currentDiskCounters
     previousNetworkCounters = currentNetworkCounters
+    previousGcMillis = currentGcMillis
 
     ("Current Time" -> currentCpuCounters.timeMillis) ~
     ("Previous Time" -> previousCpuCounters.timeMillis) ~
+    ("Fraction GC Time" -> fractionGcTime) ~
     ("Cpu Utilization" -> JsonProtocol.cpuUtilizationToJson(cpuUtilization)) ~
     ("Disk Utilization" -> JsonProtocol.diskUtilizationToJson(diskUtilization)) ~
     ("Network Utilization" -> JsonProtocol.networkUtilizationToJson(networkUtilization))
