@@ -92,9 +92,6 @@ private[spark] class Executor(
   private val executorActor = env.actorSystem.actorOf(
     Props(new ExecutorActor(executorId)), "ExecutorActor")
 
-  private val continuousMonitor = new ContinuousMonitor(conf)
-  continuousMonitor.start(env)
-
   // Create our DependencyManager, which manages the class loader.
   private val dependencyManager = new DependencyManager(env, conf, userClassPath, isLocal)
 
@@ -103,6 +100,12 @@ private[spark] class Executor(
     AkkaUtils.maxFrameSizeBytes(conf) - AkkaUtils.reservedSizeBytes
 
   private val localDagScheduler = new LocalDagScheduler(executorBackend, env.blockManager)
+
+  private val continuousMonitor = new ContinuousMonitor(
+    conf,
+    localDagScheduler.getNumRunningComputeMonotasks,
+    localDagScheduler.getNumRunningMacrotasks)
+  continuousMonitor.start(env)
 
   def launchTask(
       taskAttemptId: Long,
