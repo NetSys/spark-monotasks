@@ -30,7 +30,10 @@ import org.apache.spark.util.{FileLogger, JsonProtocol}
 /**
  * Periodically logs information about CPU, network, and disk utilization on the machine to a file.
  */
-private[spark] class ContinuousMonitor(sparkConf: SparkConf) {
+private[spark] class ContinuousMonitor(
+    sparkConf: SparkConf,
+    getNumRunningComputeMonotasks: () => Int,
+    getNumRunningMacrotasks: () => Int) {
   private val logIntervalMillis = sparkConf.getInt("spark.continuousMonitor.logIntervalMillis", 10)
   private val logDir = org.apache.spark.util.Utils.resolveURI(
     s"/tmp/spark_continuous_monitor_${System.currentTimeMillis}").toString
@@ -65,7 +68,9 @@ private[spark] class ContinuousMonitor(sparkConf: SparkConf) {
     ("Fraction GC Time" -> fractionGcTime) ~
     ("Cpu Utilization" -> JsonProtocol.cpuUtilizationToJson(cpuUtilization)) ~
     ("Disk Utilization" -> JsonProtocol.diskUtilizationToJson(diskUtilization)) ~
-    ("Network Utilization" -> JsonProtocol.networkUtilizationToJson(networkUtilization))
+    ("Network Utilization" -> JsonProtocol.networkUtilizationToJson(networkUtilization)) ~
+    ("Running Compute Monotasks" -> getNumRunningComputeMonotasks()) ~
+    ("Running Macrotasks" -> getNumRunningMacrotasks())
   }
 
   def start(env: SparkEnv) {
