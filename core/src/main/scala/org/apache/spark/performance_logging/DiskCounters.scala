@@ -52,9 +52,12 @@ class DiskCounters(
       }
     } catch {
       case e: FileNotFoundException =>
-        logWarning(
-          s"Unable to record disk counters because ${DiskCounters.DISK_TOTALS_FILENAME} " +
-          "could not be found")
+        if (!DiskCounters.emittedMissingFileWarning) {
+          logWarning(
+            s"Unable to record disk counters because ${DiskCounters.DISK_TOTALS_FILENAME} " +
+              "could not be found")
+          DiskCounters.emittedMissingFileWarning = true
+        }
     }
   }
 }
@@ -69,4 +72,8 @@ object DiskCounters {
   val SECTORS_WRITTEN_INDEX = 9
   val MILLIS_WRITING_INDEX = 10
   val MILLIS_TOTAL_INDEX = 12
+
+  // Keep track of whether we've emitted a warning that the files in the /proc file system couldn't
+  // be found, so we don't output endless warnings.
+  var emittedMissingFileWarning = false
 }
