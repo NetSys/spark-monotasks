@@ -89,7 +89,7 @@ class TaskMetrics extends Serializable {
    */
   private var _computationNanos: Long = _
   def computationNanos: Long = _computationNanos
-  private[spark] def setComputationNanos(value: Long) = _computationNanos = value
+  private[spark] def incComputationNanos(value: Long) = _computationNanos += value
 
   /**
    * The number of bytes this task transmitted back to the driver as the TaskResult
