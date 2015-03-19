@@ -52,6 +52,7 @@ private[spark] abstract class ExecutionMonotask[T, U: ClassTag](
     val valueBytes = resultSer.serialize(result)
     context.taskMetrics.resultSerializationTime =
       System.currentTimeMillis() - serializationStartTime
+    accountForComputeTime()
 
     context.taskMetrics.setMetricsOnTaskCompletion()
     val accumulatorValues = Accumulators.getValues

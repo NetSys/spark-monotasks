@@ -33,9 +33,12 @@ private[spark] abstract class ComputeMonotask(context: TaskContext)
    */
   protected def execute(): Option[ByteBuffer]
 
+  private var accountingDone = false
+  private var startTimeNanos = 0L
+
   /** Runs the execute method and handles common exceptions thrown by ComputeMonotasks. */
   def executeAndHandleExceptions() {
-    val startTimeNanos = System.nanoTime()
+    startTimeNanos = System.nanoTime()
     try {
       Accumulators.registeredAccumulables.set(context.accumulators)
       val result = execute()
@@ -68,7 +71,21 @@ private[spark] abstract class ComputeMonotask(context: TaskContext)
         context.localDagScheduler.handleTaskFailure(this, closureSerializer.serialize(reason))
       }
     } finally {
-      context.taskMetrics.computationNanos = System.nanoTime() - startTimeNanos
+      accountForComputeTime()
+    }
+  }
+
+  /**
+   * Adds the time taken by this monotask to the macrotask's TaskMetrics, if it hasn't already been
+   * done for this monotask. This method needs to check whether it was already called because
+   * ExecutionMonotasks need to call this method themselves, before serializing the task result
+   * (otherwise the update to the metrics won't be reflected in the serialized TaskMetrics
+   * that are sent back to the driver).
+   */
+  protected def accountForComputeTime() {
+    if (!accountingDone) {
+      context.taskMetrics.computationNanos += System.nanoTime - startTimeNanos
+      accountingDone = true
     }
   }
 }
