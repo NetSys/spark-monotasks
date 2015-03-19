@@ -726,7 +726,7 @@ private[spark] object JsonProtocol {
     metrics.setHostname((json \ "Host Name").extract[String])
     metrics.setExecutorDeserializeTime((json \ "Executor Deserialize Time").extract[Long])
     metrics.setExecutorRunTime((json \ "Executor Run Time").extract[Long])
-    metrics.setComputationNanos(
+    metrics.incComputationNanos(
       Utils.jsonOption(json \ "Computation Nanos").map(_.extract[Long]).getOrElse(0L))
     metrics.setResultSize((json \ "Result Size").extract[Long])
     metrics.setJvmGCTime((json \ "JVM GC Time").extract[Long])
