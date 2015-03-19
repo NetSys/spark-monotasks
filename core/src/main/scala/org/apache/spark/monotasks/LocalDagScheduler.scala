@@ -65,6 +65,14 @@ private[spark] class LocalDagScheduler(
    * return its result until all of its monotasks have finished). */
   val macrotaskResults = new HashMap[Long, ByteBuffer]()
 
+  def getNumRunningComputeMonotasks(): Int = {
+    computeScheduler.numRunningTasks.get()
+  }
+
+  def getNumRunningMacrotasks(): Int = {
+    macrotaskRemainingMonotasks.keySet.size
+  }
+
   def submitMonotask(monotask: Monotask) = synchronized {
     if (monotask.dependencies.isEmpty) {
       scheduleMonotask(monotask)

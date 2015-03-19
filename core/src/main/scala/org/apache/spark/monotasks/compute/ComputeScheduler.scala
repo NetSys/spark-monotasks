@@ -16,6 +16,8 @@
 
 package org.apache.spark.monotasks.compute
 
+import java.util.concurrent.atomic.AtomicInteger
+
 import org.apache.spark.Logging
 import org.apache.spark.util.Utils
 
@@ -26,11 +28,14 @@ private[spark] class ComputeScheduler() extends Logging {
   //       number of threads; eventually, we'll want a smarter queueing strategy.
   private val computeThreadpool = Utils.newDaemonFixedThreadPool(threads, "compute-monotask-thread")
 
+  val numRunningTasks = new AtomicInteger(0)
+
   logDebug(s"Started ComputeScheduler with $threads parallel threads")
 
   def submitTask(monotask: ComputeMonotask) {
     computeThreadpool.execute(new Runnable {
       override def run(): Unit = {
+        numRunningTasks.incrementAndGet()
         // Set the class loader for the thread, which will be used by any broadcast variables that
         // are deserialized as part of the compute monotask.
         // TODO: Consider instead changing the thread factory to just
@@ -39,6 +44,7 @@ private[spark] class ComputeScheduler() extends Logging {
         Thread.currentThread.setContextClassLoader(
           monotask.context.dependencyManager.replClassLoader)
         monotask.executeAndHandleExceptions()
+        numRunningTasks.decrementAndGet()
       }
     })
   }
