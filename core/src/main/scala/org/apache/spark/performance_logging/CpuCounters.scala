@@ -53,8 +53,11 @@ class CpuCounters(val timeMillis: Long) extends Serializable with Logging {
     }
   } catch {
     case e: FileNotFoundException =>
-      logWarning(
-        "Unable to record CPU counters because files in /proc filesystem could not be found")
+      if (!CpuCounters.emittedMissingFilesWarning) {
+        logWarning(
+          "Unable to record CPU counters because files in /proc filesystem could not be found")
+        CpuCounters.emittedMissingFilesWarning = true
+      }
   }
 }
 
@@ -72,4 +75,8 @@ object CpuCounters {
   // 0-based index in /proc/pid/stat file of the user CPU time. Not necessarily portable.
   val UTIME_INDEX = 13
   val STIME_INDEX = 14
+
+  // Keep track of whether we've emitted a warning that the files in the /proc file system couldn't
+  // be found, so we don't output endless warnings.
+  var emittedMissingFilesWarning = false
 }
