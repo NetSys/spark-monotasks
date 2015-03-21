@@ -72,7 +72,7 @@ class DiskUtilizationSuite extends FunSuite {
 
     val endCounters = new DiskCounters(2048, endNameToCounters)
 
-    val utilization = new DiskUtilization(startCounters, endCounters)
+    val utilization = DiskUtilization(startCounters, endCounters)
     assert(utilization.deviceNameToUtilization.contains("disk1"))
     val disk1Utilization = utilization.deviceNameToUtilization("disk1")
     assert(0 === disk1Utilization.readThroughput)

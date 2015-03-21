@@ -176,7 +176,7 @@ class TaskMetrics extends Serializable {
   def setUtilization() {
     cpuUtilization = Some(new CpuUtilization(startCpuCounters))
     networkUtilization = Some(new NetworkUtilization(startNetworkCounters))
-    diskUtilization = Some(new DiskUtilization(startDiskCounters))
+    diskUtilization = Some(DiskUtilization(startDiskCounters))
   }
 
   /**

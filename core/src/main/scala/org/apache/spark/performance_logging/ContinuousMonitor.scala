@@ -46,7 +46,7 @@ private[spark] class ContinuousMonitor(sparkConf: SparkConf) {
     val currentNetworkCounters = new NetworkCounters()
 
     val cpuUtilization = new CpuUtilization(previousCpuCounters, currentCpuCounters)
-    val diskUtilization = new DiskUtilization(previousDiskCounters, currentDiskCounters)
+    val diskUtilization = DiskUtilization(previousDiskCounters, currentDiskCounters)
     val networkUtilization = new NetworkUtilization(previousNetworkCounters, currentNetworkCounters)
 
     previousCpuCounters = currentCpuCounters
