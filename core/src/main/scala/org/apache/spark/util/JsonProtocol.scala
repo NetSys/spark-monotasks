@@ -39,6 +39,7 @@ import org.apache.spark.scheduler.cluster.ExecutorInfo
 
 import scala.collection.JavaConverters._
 import scala.collection.Map
+import scala.collection.mutable.HashMap
 
 import org.json4s.DefaultFormats
 import org.json4s.JsonDSL._
@@ -317,7 +318,6 @@ private[spark] object JsonProtocol {
     ("Input Metrics" -> inputMetrics) ~
     ("Output Metrics" -> outputMetrics) ~
     ("Updated Blocks" -> updatedBlocks) ~
-    ("Updated Blocks" -> updatedBlocks) ~
     ("Cpu Utilization" -> cpuUtilization) ~
     ("Disk Utilization" -> diskUtilization) ~
     ("Network Utilization" -> networkUtilization)
@@ -353,6 +353,7 @@ private[spark] object JsonProtocol {
   }
 
   def networkUtilizationToJson(networkUtilization: NetworkUtilization): JValue = {
+    ("Elapsed Millis" -> networkUtilization.elapsedMillis) ~
     ("Bytes Received Per Second" -> networkUtilization.bytesReceivedPerSecond) ~
     ("Bytes Transmitted Per Second" -> networkUtilization.bytesTransmittedPerSecond) ~
     ("Packets Received Per Second" -> networkUtilization.packetsReceivedPerSecond) ~
@@ -745,6 +746,12 @@ private[spark] object JsonProtocol {
           (id, status)
         }
       }
+    metrics.cpuUtilization =
+      Utils.jsonOption(json \ "Cpu Utilization").map(cpuUtilizationFromJson)
+    metrics.diskUtilization =
+      Utils.jsonOption(json \ "Disk Utilization").map(diskUtilizationFromJson)
+    metrics.networkUtilization =
+      Utils.jsonOption(json \ "Network Utilization").map(networkUtilizationFromJson)
     metrics
   }
 
@@ -782,6 +789,47 @@ private[spark] object JsonProtocol {
     metrics.setBytesWritten((json \ "Bytes Written").extract[Long])
     metrics.setRecordsWritten((json \ "Records Written").extractOpt[Long].getOrElse(0))
     metrics
+  }
+
+  def cpuCountersFromJson(json: JValue): CpuCounters = {
+    val cpuCounters = new CpuCounters((json \ "Time Milliseconds").extract[Long])
+    cpuCounters.processUserJiffies = (json \ "Process User Jiffies").extract[Long]
+    cpuCounters.processSystemJiffies = (json \ "Process System Jiffies").extract[Long]
+    cpuCounters.totalUserJiffies = (json \ "Total User Jiffies").extract[Long]
+    cpuCounters.totalSystemJiffies = (json \ "Total System Jiffies").extract[Long]
+    cpuCounters
+  }
+
+  def cpuUtilizationFromJson(json: JValue): CpuUtilization = {
+    val startCounters = cpuCountersFromJson(json \ "Start Counters")
+    val endCounters = cpuCountersFromJson(json \ "End Counters")
+    new CpuUtilization(startCounters, endCounters)
+  }
+
+  def blockDeviceUtilizationFromJson(json: JValue): BlockDeviceUtilization = {
+    new BlockDeviceUtilization(
+      (json \ "Disk Utilization").extract[Float],
+      (json \ "Read Throughput").extract[Float],
+      (json \ "Write Throughput").extract[Float])
+  }
+
+  def diskUtilizationFromJson(json: JValue): DiskUtilization = {
+    // TODO: This does not currently decode the block device utilization, which should be done
+    //       using blockDeviceUtilizationFromJson! Decoding the mapping of names to utilizations is
+    //       tricky because of the way the Json object is structured.
+    //       https://github.com/NetSys/spark-monotasks/issues/18
+    new DiskUtilization(
+      (json \ "Elapsed Millis").extract[Long],
+      new HashMap[String, BlockDeviceUtilization]())
+  }
+
+  def networkUtilizationFromJson(json: JValue): NetworkUtilization = {
+    new NetworkUtilization(
+      (json \ "Elapsed Millis").extract[Long],
+      (json \ "Bytes Received Per Second").extract[Float],
+      (json \ "Bytes Transmitted Per Second").extract[Float],
+      (json \ "Packets Received Per Second").extract[Float],
+      (json \ "Packets Transmitted Per Second").extract[Float])
   }
 
   def taskEndReasonFromJson(json: JValue): TaskEndReason = {

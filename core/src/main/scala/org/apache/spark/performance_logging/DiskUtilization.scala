@@ -20,32 +20,50 @@ import scala.collection.mutable.HashMap
 
 /** Utilization of a particular block device. */
 class BlockDeviceUtilization(
-    startCounters: BlockDeviceCounters,
-    endCounters: BlockDeviceCounters,
-    elapsedMillis: Long) extends Serializable {
-  val diskUtilization = ((endCounters.millisTotal - startCounters.millisTotal).toFloat /
-    elapsedMillis)
-  val readThroughput = ((endCounters.sectorsRead - startCounters.sectorsRead).toFloat *
-    DiskUtilization.SECTOR_SIZE_BYTES * 1000 / elapsedMillis)
-  val writeThroughput = ((endCounters.sectorsWritten - startCounters.sectorsWritten).toFloat *
-    DiskUtilization.SECTOR_SIZE_BYTES * 1000 / elapsedMillis)
-}
+    val diskUtilization: Float,
+    val readThroughput: Float,
+    val writeThroughput: Float)
+  extends Serializable {
 
-class DiskUtilization(startCounters: DiskCounters, endCounters: DiskCounters) extends Serializable {
-  val deviceNameToUtilization = HashMap[String, BlockDeviceUtilization]()
-  val elapsedMillis = endCounters.timeMillis - startCounters.timeMillis
-  endCounters.deviceNameToCounters.foreach {
-    case (deviceName: String, endCounters: BlockDeviceCounters) =>
-      startCounters.deviceNameToCounters.get(deviceName).foreach {
-        deviceNameToUtilization +=
-          deviceName -> new BlockDeviceUtilization(_, endCounters, elapsedMillis)
-      }
+  def this(
+      startCounters: BlockDeviceCounters, endCounters: BlockDeviceCounters, elapsedMillis: Long) {
+    this(
+      (endCounters.millisTotal - startCounters.millisTotal).toFloat / elapsedMillis,
+      ((endCounters.sectorsRead - startCounters.sectorsRead).toFloat *
+        DiskUtilization.SECTOR_SIZE_BYTES * 1000 / elapsedMillis),
+      ((endCounters.sectorsWritten - startCounters.sectorsWritten).toFloat *
+        DiskUtilization.SECTOR_SIZE_BYTES * 1000 / elapsedMillis))
   }
-
-  def this(startCounters: DiskCounters) = this(startCounters, new DiskCounters())
 }
+
+class DiskUtilization(
+    val elapsedMillis: Long,
+    val deviceNameToUtilization: HashMap[String, BlockDeviceUtilization])
+  extends Serializable
 
 object DiskUtilization {
   // This is not at all portable -- can be obtained for a particular machine with "fdisk -l".
   val SECTOR_SIZE_BYTES = 512
+
+  /**
+   * Creates a DiskUtilization based on two sets of disk counters.
+   *
+   * This constructor lives in this companion object because it needs to do some computation
+   * (to construct the map of device name to device utilization) before constructing the
+   * DiskUtilization object.
+   */
+  def apply(startCounters: DiskCounters, endCounters: DiskCounters): DiskUtilization = {
+    val deviceNameToUtilization = HashMap[String, BlockDeviceUtilization]()
+    val elapsedMillis = endCounters.timeMillis - startCounters.timeMillis
+    endCounters.deviceNameToCounters.foreach {
+      case (deviceName: String, endCounters: BlockDeviceCounters) =>
+        startCounters.deviceNameToCounters.get(deviceName).foreach {
+          deviceNameToUtilization +=
+            deviceName -> new BlockDeviceUtilization(_, endCounters, elapsedMillis)
+        }
+    }
+    new DiskUtilization(elapsedMillis, deviceNameToUtilization)
+  }
+
+  def apply(startCounters: DiskCounters): DiskUtilization = apply(startCounters, new DiskCounters())
 }

@@ -22,8 +22,9 @@ import scala.io.Source
 
 import org.apache.spark.Logging
 
-class CpuCounters() extends Serializable with Logging {
-  val timeMillis = System.currentTimeMillis()
+class CpuCounters(val timeMillis: Long) extends Serializable with Logging {
+
+  def this() = this(System.currentTimeMillis)
 
   // Total CPU time used by the Spark process.
   var processUserJiffies = 0L
