@@ -521,6 +521,7 @@ class JsonProtocolSuite extends FunSuite {
     t.hostname = "localhost"
     t.executorDeserializeTime = a
     t.executorRunTime = b
+    t.computationNanos = b + 50
     t.resultSize = c
     t.jvmGCTime = d
     t.resultSerializationTime = a + b
@@ -764,6 +765,7 @@ class JsonProtocolSuite extends FunSuite {
       |    "Host Name": "localhost",
       |    "Executor Deserialize Time": 300,
       |    "Executor Run Time": 400,
+      |    "Computation Nanos": 450,
       |    "Result Size": 500,
       |    "JVM GC Time": 600,
       |    "Result Serialization Time": 700,
@@ -846,6 +848,7 @@ class JsonProtocolSuite extends FunSuite {
       |    "Host Name": "localhost",
       |    "Executor Deserialize Time": 300,
       |    "Executor Run Time": 400,
+      |    "Computation Nanos": 450,
       |    "Result Size": 500,
       |    "JVM GC Time": 600,
       |    "Result Serialization Time": 700,
