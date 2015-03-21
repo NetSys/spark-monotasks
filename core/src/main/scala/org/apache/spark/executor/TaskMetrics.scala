@@ -211,7 +211,7 @@ class TaskMetrics extends Serializable {
     setJvmGCTime(currentGCTotalMillis - startingGCTime)
     cpuUtilization = Some(new CpuUtilization(startCpuCounters))
     networkUtilization = Some(new NetworkUtilization(startNetworkCounters))
-    diskUtilization = Some(new DiskUtilization(startDiskCounters))
+    diskUtilization = Some(DiskUtilization(startDiskCounters))
   }
 
   /**

@@ -16,19 +16,37 @@
 
 package org.apache.spark.performance_logging
 
-class NetworkUtilization(startCounters: NetworkCounters, endCounters: NetworkCounters)
-    extends Serializable {
-  val elapsedMillis = endCounters.timeMillis - startCounters.timeMillis
+class NetworkUtilization(
+    val elapsedMillis: Long,
+    val bytesReceivedPerSecond: Float,
+    val bytesTransmittedPerSecond: Float,
+    val packetsReceivedPerSecond: Float,
+    val packetsTransmittedPerSecond: Float)
+  extends Serializable {
 
-  val bytesReceivedPerSecond =
-    (endCounters.receivedBytes - startCounters.receivedBytes).toFloat * 1000 / elapsedMillis
-  val bytesTransmittedPerSecond =
-    (endCounters.transmittedBytes - startCounters.transmittedBytes).toFloat * 1000 / elapsedMillis
-  val packetsReceivedPerSecond =
-    (endCounters.receivedPackets - startCounters.receivedPackets).toFloat * 1000 / elapsedMillis
-  val packetsTransmittedPerSecond =
-    ((endCounters.transmittedPackets - startCounters.transmittedPackets).toFloat * 1000 /
-      elapsedMillis)
+  /**
+   * This constructor is private because it is used only by other constructors, so they can
+   * re-use elapsedMillis for all of the throughput calculations.
+   */
+  private def this(
+      startCounters: NetworkCounters,
+      endCounters: NetworkCounters,
+      elapsedMillis: Long) = {
+    this(
+      elapsedMillis,
+      (endCounters.receivedBytes - startCounters.receivedBytes).toFloat * 1000 / elapsedMillis,
+      ((endCounters.transmittedBytes - startCounters.transmittedBytes).toFloat * 1000 /
+        elapsedMillis),
+      (endCounters.receivedPackets - startCounters.receivedPackets).toFloat * 1000 / elapsedMillis,
+      ((endCounters.transmittedPackets - startCounters.transmittedPackets).toFloat * 1000 /
+        elapsedMillis))
+  }
 
-  def this(startCounters: NetworkCounters) = this(startCounters, new NetworkCounters())
+  def this(startCounters: NetworkCounters, endCounters: NetworkCounters) = {
+    this(startCounters, endCounters, endCounters.timeMillis - startCounters.timeMillis)
+  }
+
+  def this(startCounters: NetworkCounters) = {
+    this(startCounters, new NetworkCounters())
+  }
 }
