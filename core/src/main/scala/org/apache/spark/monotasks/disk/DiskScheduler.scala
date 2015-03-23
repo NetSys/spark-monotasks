@@ -21,7 +21,6 @@ import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.atomic.AtomicInteger
 
 import scala.collection.mutable.HashMap
-import scala.util.Random
 
 import org.apache.spark.{Logging, SparkEnv, SparkException}
 import org.apache.spark.monotasks.TaskSuccess
@@ -81,46 +80,37 @@ private[spark] class DiskScheduler(blockFileManager: BlockFileManager) extends L
    * task queue.
    */
   def submitTask(task: DiskMonotask) {
-    // Extract the identifier of the disk on which this task will operate. If the task is a write,
-    // a new disk identifier must be chosen.
-    val diskId: Option[String] = task match {
-      case write: DiskWriteMonotask => {
-        val id = Some(getNextDiskId())
-        write.diskId = id
+    // Extract the identifier of the disk on which this task will operate.
+    val diskId = task match {
+      case write: DiskWriteMonotask =>
+        // If the task is a write, then a new disk identifier must be chosen.
+        val id = getNextDiskId()
+        write.diskId = Some(id)
         id
-      }
-      case read: DiskReadMonotask => {
-        Some(read.diskId)
-      }
-      case remove: DiskRemoveMonotask => {
-        Some(remove.diskId)
-      }
-      case hdfsRead: HdfsReadMonotask => {
-        val hdfsPath = hdfsRead.path.toUri().getPath()
-        // Find which local disks contain hdfsPath (possibly none).
-        val diskIdsContainingHdfsPath = diskIds.filter(hdfsPath.contains(_))
-        diskIdsContainingHdfsPath.headOption.orElse {
-          logWarning(s"HDFS path $hdfsPath is not contained within any known local disks.")
-          // If the path is not on any local disks, choose a random diskId.
-          Some(Random.shuffle(diskIds.toList).head)
-        }
-      }
-      case _ => {
+
+      case read: DiskReadMonotask =>
+        read.diskId
+
+      case remove: DiskRemoveMonotask =>
+        remove.diskId
+
+      case hdfs: HdfsDiskMonotask =>
+        hdfs.chooseLocalDir(diskIds)
+
+      case _ =>
         val exception = new SparkException(
           s"DiskMonotask $task (id: ${task.taskId}) rejected because its subtype is not supported.")
         task.handleException(exception)
         return
-      }
     }
-    val rawDiskId = diskId.get
-    if (!diskIds.contains(rawDiskId)) {
+    if (diskIds.contains(diskId)) {
+      diskAccessors(diskId).submitMonotask(task)
+    } else {
       val exception = new SparkException(s"DiskMonotask $task (id: ${task.taskId}) has an " +
         s"invalid diskId: $diskId. Valid diskIds are: ${diskIds.mkString(", ")}")
       task.handleException(exception)
       return
     }
-
-    diskAccessors(rawDiskId).submitMonotask(task)
   }
 
   /**

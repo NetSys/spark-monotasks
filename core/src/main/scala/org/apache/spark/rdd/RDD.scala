@@ -41,17 +41,24 @@ import scala.language.implicitConversions
 import scala.reflect.{classTag, ClassTag}
 
 import com.clearspring.analytics.stream.cardinality.HyperLogLogPlus
+
+import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.io.{BytesWritable, NullWritable, Text}
-import org.apache.hadoop.io.compress.CompressionCodec
+import org.apache.hadoop.io.compress.{CompressionCodec, GzipCodec}
 import org.apache.hadoop.mapred.TextOutputFormat
+import org.apache.hadoop.mapreduce.lib.output.{FileOutputFormat,
+  TextOutputFormat => NewTextOutputFormat}
+import org.apache.hadoop.util.ReflectionUtils
 
 import org.apache.spark._
 import org.apache.spark.Partitioner._
 import org.apache.spark.annotation.{DeveloperApi, Experimental}
 import org.apache.spark.api.java.JavaRDD
+import org.apache.spark.mapreduce.SparkHadoopMapReduceUtil
 import org.apache.spark.monotasks.Monotask
-import org.apache.spark.monotasks.compute.{RddComputeMonotask, SerializationMonotask}
-import org.apache.spark.monotasks.disk.DiskWriteMonotask
+import org.apache.spark.monotasks.compute.{HdfsSerializationMonotask, RddComputeMonotask,
+  SerializationMonotask}
+import org.apache.spark.monotasks.disk.{DiskWriteMonotask, HdfsWriteMonotask}
 import org.apache.spark.partial.BoundedDouble
 import org.apache.spark.partial.CountEvaluator
 import org.apache.spark.partial.GroupedCountEvaluator
@@ -94,7 +101,7 @@ import org.apache.spark.util.random.{BernoulliSampler, PoissonSampler, Bernoulli
 abstract class RDD[T: ClassTag](
     @transient private var _sc: SparkContext,
     @transient private var deps: Seq[Dependency[_]]
-  ) extends Serializable with Logging {
+  ) extends Serializable with SparkHadoopMapReduceUtil with Logging {
 
   if (classOf[RDD[_]].isAssignableFrom(elementClassTag.runtimeClass)) {
     // This is a warning instead of an exception in order to avoid breaking user programs that
@@ -158,6 +165,13 @@ abstract class RDD[T: ClassTag](
 
   /** A unique ID for this RDD (within its SparkContext). */
   val id: Int = sc.newRddId()
+
+  /**
+   * If this field is defined, then `RDD.buildDag()` will construct a DAG of monotasks that will
+   * save this RDD to HDFS using the parameters in the Configuration object. The second item in the
+   * tuple is a job tracker id.
+   */
+  var configForHdfsWrite: Option[(SerializableWritable[Configuration], String)] = None
 
   /** A friendly name for this RDD */
   @transient var name: String = null
@@ -339,40 +353,95 @@ abstract class RDD[T: ClassTag](
   }
 
   /**
-   * Builds a DAG of Monotasks that will compute this RDD and performs any necessary caching.  If
-   * the RDD is already stored on disk, computing the RDD requires loading the RDD from
-   * disk using a DiskMonotask.  If the RDD is marked as being persisted to disk but hasn't been
-   * written to disk yet, the method will return a monotask to compute the RDD and another monotask
-   * to store the result on disk.
+   * Builds a DAG of Monotasks that will compute this RDD and perform any necessary caching.  If the
+   * RDD is already stored on disk, computing the RDD requires loading it from disk using a
+   * DiskMonotask. If the RDD is marked as being persisted to disk but has not been written to disk
+   * yet, then this method will return a monotask to compute the RDD and additional monotasks to
+   * store the result on disk. If the RDD needs to be written to the Hadoop Distributed File System,
+   * then this method will create the appropriate monotasks.
    *
-   * This method is recursive: if this RDD has not been computed, then this method calls
-   * RDD.getInputMonotasks(), which in turn eventually calls RDD.buildDag() on each of this RDD's
-   * dependencies.
+   * This method is recursive: if this RDD has not been computed, then this method will call
+   * `RDD.getInputMonotasks()`, which in turn will eventually call `RDD.buildDag()` on each of this
+   * RDD's dependencies.
    *
    * @param partition The RDD partition that this macrotask is responible for calculating.
    * @param dependencyIdToPartitions For each dependency of this RDD, the list of partitions
    *                                 in that dependency that this RDD relies on.
    * @param context Describes the Macrotask that this DAG is being built for.
-   * @param nextMonotask A monotask that performs some computation on this RDD. It will be inserted
-   *                     in the DAG at the appropriate location.
+   * @param workerMonotask A monotask that performs some computation on this RDD. It will be
+   *                       inserted into the DAG at the appropriate location.
    * @return All of the monotasks that have been added to the DAG (this Seq will not include
-   *         nextMonotask).
+   *         `workerMonotask`).
    */
   private[spark] final def buildDag(
       partition: Partition,
       dependencyIdToPartitions: HashMap[Long, HashSet[Partition]],
       context: TaskContextImpl,
-      nextMonotask: Monotask,
+      workerMonotask: Monotask,
       blockManager: BlockManager = SparkEnv.get.blockManager): Seq[Monotask] = {
     val blockId = new RDDBlockId(this.id, partition.index)
 
-    if (blockManager.isStored(blockId)) {
-      // This RDD is stored locally and might need to be loaded into the MemoryStore (if it is
-      // stored on disk). If the RDD is already cached in the MemoryStore, then no new Monotasks are
-      // created.
+    val (nextMonotask, hdfsMonotasks) = configForHdfsWrite.map { config =>
+      // If the purpose of the current Spark job is to save this RDD to HDFS, then workerMonotask
+      // will be the last monotask in the DAG of monotasks (except for the
+      // ResultSerializationMonotask). Furthermore, workerMonotask will not operate on the RDD's
+      // values (it will just return true), so it does not need the RDD to be loaded into memory
+      // (all of the important work will be done by the HdfsSerializationMonotask and
+      // HdfsWriteMonotask that are created below). For this reason, workerMonotask does not need to
+      // have any dependencies. Instead, the monotasks that load this RDD into memory are doing so
+      // in service of the HdfsSerializationMonotask.
       //
       // The DAG will look like this:
-      //   DiskReadMonotask/None -> nextMonotask
+      //   DAG to still be
+      //   created, see below -> HdfsSerializationMonotask -> HdfsWriteMonotask
+      val (serializedConf, jobTrackerId) = config
+      val hadoopConf = serializedConf.value
+
+      // Hadoop wants a 32-bit task attempt ID, so if ours is bigger than Int.MaxValue, roll it
+      // around by taking a mod. We expect that no task will be attempted 2 billion times.
+      val shortenedTaskId = (context.taskAttemptId % Int.MaxValue).toInt
+      val hadoopTaskId =
+        newTaskAttemptID(jobTrackerId, id, isMap = false, context.partitionId, shortenedTaskId)
+      val hadoopContext = newTaskAttemptContext(hadoopConf, hadoopTaskId)
+
+      val codec = if (FileOutputFormat.getCompressOutput(hadoopContext)) {
+        val codecClass =
+          FileOutputFormat.getOutputCompressorClass(hadoopContext, classOf[GzipCodec])
+        Some(ReflectionUtils.newInstance(codecClass, hadoopConf).asInstanceOf[CompressionCodec])
+      } else {
+        None
+      }
+
+      val pairRdd = try {
+        this.asInstanceOf[RDD[(_, _)]]
+      } catch {
+        case _: ClassCastException =>
+          throw new UnsupportedOperationException(s"The RDD $this is not a pair RDD.")
+      }
+      val serializationMonotask =
+        new HdfsSerializationMonotask(context, pairRdd, partition, hadoopContext, hadoopConf, codec)
+      val serializedDataBlockId = serializationMonotask.getResultBlockId()
+
+      val writeMonotask = new HdfsWriteMonotask(
+        context,
+        blockId,
+        serializedDataBlockId,
+        hadoopConf,
+        hadoopContext,
+        codec,
+        serializationMonotask.getNumRecordsSerialized)
+      writeMonotask.addDependency(serializationMonotask)
+
+      (serializationMonotask, Seq(serializationMonotask, writeMonotask))
+    }.getOrElse((workerMonotask, Seq.empty))
+
+    hdfsMonotasks ++ (if (blockManager.isStored(blockId)) {
+      // This RDD is stored locally and needs to be loaded into the MemoryStore. Note that it is
+      // possible that the RDD is already cached in the MemoryStore, in which case no new Monotasks
+      // will be created.
+      //
+      // The DAG will look like this:
+      //   DiskReadMonotask or None -> nextMonotask
       logDebug(s"buildDag: Block $blockId is already stored locally, either in memory or on disk.")
       blockManager.getBlockLoadMonotask(blockId, context).map { monotask =>
         nextMonotask.addDependency(monotask)
@@ -387,6 +456,7 @@ abstract class RDD[T: ClassTag](
       //   input monotask --'                       `-> SerializationMonotask -> DiskWriteMonotask
       //   input monotask --'
       //         ...
+      //
       // TODO: Handle the case where the storage level is MEMORY_AND_DISK (we currently always write
       //       RDDs with this storage level to disk, and don't even attempt to store them in
       //       memory).
@@ -408,7 +478,7 @@ abstract class RDD[T: ClassTag](
       inputMonotasks ++ Seq(rddComputeMonotask, serializationMonotask, diskWriteMonotask)
     } else {
       // This RDD needs to be computed but does not need to be cached on disk. If the RDD needs to
-      // be cached in memory/off-heap storage, that will be taken care of automatically when
+      // be cached in memory/off-heap storage, then that will be taken care of automatically when
       // nextMonotask computes the RDD.
       //
       // The DAG looks like this:
@@ -418,7 +488,7 @@ abstract class RDD[T: ClassTag](
       //         ...
       logDebug(s"buildDag: Block $blockId needs to be computed but not written to disk.")
       getInputMonotasks(partition, dependencyIdToPartitions, context, nextMonotask)
-    }
+    })
   }
 
   /**
@@ -1494,6 +1564,15 @@ abstract class RDD[T: ClassTag](
     }
     RDD.rddToPairRDDFunctions(r)(nullWritableClassTag, textClassTag, null)
       .saveAsHadoopFile[TextOutputFormat[NullWritable, Text]](path, codec)
+  }
+
+  /**
+   * Saves this RDD as a text file, using String representations of elements. Uses the new
+   * org.apache.hadoop.mapreduce API.
+   */
+  def saveAsNewApiTextFile(path: String): Unit = {
+    this.map(x => (NullWritable.get(), new Text(x.toString)))
+      .saveAsNewAPIHadoopFile[NewTextOutputFormat[NullWritable, Text]](path)
   }
 
   /**

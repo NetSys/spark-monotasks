@@ -24,7 +24,7 @@ import org.apache.hadoop.fs._
 import org.apache.hadoop.fs.permission.FsPermission
 import org.apache.hadoop.util.Progressable
 
-import org.apache.spark.{Logging, SparkEnv}
+import org.apache.spark.Logging
 import org.apache.spark.storage.{BlockException, BlockManager}
 import org.apache.spark.util.ByteBufferInputStream
 
@@ -105,15 +105,11 @@ class MemoryStoreFileSystem(blockManager: BlockManager, startPosition: Long)
  * must implement the PositionedReadable and Seekable interfaces. This class is simply a wrapper for
  * ByteBufferInputStream that implemenents the required interfaces.
  */
-private class ByteBufferFSDataInputStream(buffer: ByteBuffer, startPosition: Long)
-  extends ByteBufferInputStream(buffer, false) with PositionedReadable with Seekable with Logging {
-
-  // If this is not the first split, then the first byte in the buffer is actually the last byte
-  // from the previous split. See HdfsReadMonotask.execute().
-  private val bytesFromPreviousSplit = if (startPosition == 0) 0 else 1
+private class ByteBufferFSDataInputStream(buffer: ByteBuffer, private val startPosition: Long)
+  extends ByteBufferInputStream(buffer, false) with PositionedReadable with Seekable {
 
   def read(position: Long, dst: Array[Byte], offset: Int, length: Int): Int = {
-    val newPosition = (position - startPosition + bytesFromPreviousSplit).toInt
+    val newPosition = (position - startPosition).toInt
     val newPositionBuffer = buffer.duplicate().position(newPosition).asInstanceOf[ByteBuffer]
     new ByteBufferInputStream(newPositionBuffer, false).read(dst, offset, length)
   }
@@ -123,17 +119,17 @@ private class ByteBufferFSDataInputStream(buffer: ByteBuffer, startPosition: Lon
   }
 
   def readFully(position: Long, dst: Array[Byte], offset: Int, length: Int): Unit = {
-    if ((position - startPosition + bytesFromPreviousSplit) + length >= buffer.limit()) {
+    if ((position - startPosition) + length >= buffer.limit()) {
       throw new EOFException("Reached end of file while reading.")
     }
     read(position, dst, offset, length)
   }
 
   def getPos(): Long =
-    buffer.position() + startPosition - bytesFromPreviousSplit
+    buffer.position() + startPosition
 
   def seek(pos: Long) =
-    buffer.position((pos - startPosition + bytesFromPreviousSplit).toInt)
+    buffer.position((pos - startPosition).toInt)
 
   def seekToNewSource(targetPos: Long): Boolean =
     throw new UnsupportedOperationException("Cannot seek to a new source.")

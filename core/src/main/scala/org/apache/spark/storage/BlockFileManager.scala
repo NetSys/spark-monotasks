@@ -169,7 +169,7 @@ private[spark] class BlockFileManager(conf: SparkConf) extends Logging {
       }
     }
     val localDirsPaths = localDirs.keys.toArray
-    val diskIds = localDirsPaths.map(path => Files.getFileStore(new File(path).toPath()).name())
+    val diskIds = localDirsPaths.map(BlockFileManager.pathToDiskId)
     /* Since Sets do not contain duplicates, if diskIds.toSet contains more elements than diskIds,
      * then diskIds must contain duplicates. If diskIds contains duplicates, then multiple Spark
      * local directories reside on the same physical disk. Having multiple Spark local directories
@@ -190,4 +190,9 @@ private[spark] class BlockFileManager(conf: SparkConf) extends Logging {
     }
     subDirs
   }
+}
+
+private[spark] object BlockFileManager {
+
+  def pathToDiskId(path: String): String = Files.getFileStore(new File(path).toPath()).name()
 }

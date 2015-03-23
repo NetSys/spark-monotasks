@@ -16,8 +16,7 @@
 
 package org.apache.spark.shuffle.memory
 
-import java.io.{ByteArrayOutputStream, OutputStream}
-import java.nio.ByteBuffer
+import java.io.OutputStream
 
 import org.apache.spark.{ShuffleDependency, SparkEnv, TaskContext}
 import org.apache.spark.executor.ShuffleWriteMetrics
@@ -25,6 +24,7 @@ import org.apache.spark.scheduler.MapStatus
 import org.apache.spark.serializer.{SerializationStream, Serializer}
 import org.apache.spark.shuffle.{BaseShuffleHandle, ShuffleWriter}
 import org.apache.spark.storage.{BlockManager, ShuffleBlockId, StorageLevel}
+import org.apache.spark.util.ByteArrayOutputStreamWithZeroCopyByteBuffer
 
 /** A ShuffleWriter that stores all shuffle data in memory using the block manager. */
 private[spark] class MemoryShuffleWriter[K, V](
@@ -88,15 +88,6 @@ private[spark] class MemoryShuffleWriter[K, V](
 /** Serializes and optionally compresses data into an in-memory byte stream. */
 private[spark] class SerializedObjectWriter(
     blockManager: BlockManager, dep: ShuffleDependency[_,_,_], partitionId: Int, bucketId: Int) {
-
-  /**
-   * A ByteArrayOutputStream that will convert the underlying byte array to a byte buffer without
-   * copying all of the data. This is to avoid calling the ByteArrayOutputStream.toByteArray
-   * method, because that method makes a copy of the byte array.
-   */
-  private class ByteArrayOutputStreamWithZeroCopyByteBuffer extends ByteArrayOutputStream {
-    def getByteBuffer(): ByteBuffer = ByteBuffer.wrap(buf, 0, size())
-  }
 
   private val byteOutputStream = new ByteArrayOutputStreamWithZeroCopyByteBuffer()
   private val ser = Serializer.getSerializer(dep.serializer.getOrElse(null))

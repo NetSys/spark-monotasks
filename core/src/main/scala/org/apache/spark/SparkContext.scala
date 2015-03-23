@@ -15,6 +15,22 @@
  * limitations under the License.
  */
 
+/*
+ * Copyright 2014 The Regents of The University California
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package org.apache.spark
 
 import scala.language.implicitConversions
@@ -41,7 +57,8 @@ import org.apache.hadoop.io.{ArrayWritable, BooleanWritable, BytesWritable, Doub
 import org.apache.hadoop.mapred.{FileInputFormat, InputFormat, JobConf, SequenceFileInputFormat,
   TextInputFormat}
 import org.apache.hadoop.mapreduce.{InputFormat => NewInputFormat, Job => NewHadoopJob}
-import org.apache.hadoop.mapreduce.lib.input.{FileInputFormat => NewFileInputFormat}
+import org.apache.hadoop.mapreduce.lib.input.{FileInputFormat => NewFileInputFormat,
+  TextInputFormat => NewTextInputFormat}
 
 import org.apache.mesos.MesosNativeLibrary
 
@@ -812,7 +829,7 @@ class SparkContext(config: SparkConf) extends Logging with ExecutorAllocationCli
       (implicit km: ClassTag[K], vm: ClassTag[V], fm: ClassTag[F]): RDD[(K, V)] =
     hadoopFile[K, V, F](path, defaultMinPartitions)
 
-  /** Get an RDD for a Hadoop file with an arbitrary new API InputFormat. */
+  /** Gets an RDD for a Hadoop file with an arbitrary new API InputFormat. */
   def newAPIHadoopFile[K, V, F <: NewInputFormat[K, V]]
       (path: String)
       (implicit km: ClassTag[K], vm: ClassTag[V], fm: ClassTag[F]): RDD[(K, V)] = {
@@ -824,7 +841,7 @@ class SparkContext(config: SparkConf) extends Logging with ExecutorAllocationCli
   }
 
   /**
-   * Get an RDD for a given Hadoop file with an arbitrary new API InputFormat
+   * Gets an RDD for a given Hadoop file with an arbitrary new API InputFormat
    * and extra configuration options to pass to the input format.
    *
    * '''Note:''' Because Hadoop's RecordReader class re-uses the same Writable object for each
@@ -849,7 +866,7 @@ class SparkContext(config: SparkConf) extends Logging with ExecutorAllocationCli
   }
 
   /**
-   * Get an RDD for a given Hadoop file with an arbitrary new API InputFormat
+   * Gets an RDD for a given Hadoop file with an arbitrary new API InputFormat
    * and extra configuration options to pass to the input format.
    *
    * @param conf Configuration for setting up the dataset. Note: This will be put into a Broadcast.
@@ -876,6 +893,20 @@ class SparkContext(config: SparkConf) extends Logging with ExecutorAllocationCli
     val jconf = new JobConf(conf)
     SparkHadoopUtil.get.addCredentials(jconf)
     new NewHadoopRDD(this, fClass, kClass, vClass, jconf)
+  }
+
+  /**
+   * Reads a text file from HDFS, a local file system (available on all nodes), or any
+   * Hadoop-supported file system URI using the org.apache.hadoop.mapreduce API, and returns it as
+   * an RDD of Strings.
+   */
+  def newApiTextFile(path: String, minPartitions: Int = defaultMinPartitions): RDD[String] = {
+    assertNotStopped()
+    newAPIHadoopFile(
+      path,
+      classOf[NewTextInputFormat],
+      classOf[LongWritable],
+      classOf[Text]).map(pair => pair._2.toString).setName(path)
   }
 
   /** Get an RDD for a Hadoop SequenceFile with given key and value types.

@@ -40,7 +40,6 @@ import java.net.URI;
 import java.util.*;
 import java.util.concurrent.*;
 
-import org.apache.spark.input.PortableDataStream;
 import scala.Tuple2;
 import scala.Tuple3;
 import scala.Tuple4;
@@ -68,6 +67,7 @@ import org.junit.Test;
 import org.apache.spark.api.java.*;
 import org.apache.spark.api.java.function.*;
 import org.apache.spark.executor.TaskMetrics;
+import org.apache.spark.input.PortableDataStream;
 import org.apache.spark.partial.BoundedDouble;
 import org.apache.spark.partial.PartialResult;
 import org.apache.spark.storage.StorageLevel;
@@ -1174,8 +1174,13 @@ public class JavaAPISuite implements Serializable {
     }
   }
 
+  /**
+   * TODO: This test case is ignored because the new monotasks-based interface with HDFS only
+   *       supports TextOutputFormat. When the interface also supports SequenceFileOutputFormat,
+   *       this test case should be re-enabled.
+   */
   @SuppressWarnings("unchecked")
-  @Test
+  @Ignore
   public void writeWithNewAPIHadoopFile() {
     String outputDir = new File(tempDir, "output").getAbsolutePath();
     List<Tuple2<Integer, String>> pairs = Arrays.asList(

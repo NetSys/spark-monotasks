@@ -117,8 +117,7 @@ class NewHadoopRDD[K, V](
       nextMonotask: Monotask): Seq[Monotask] = {
     // The DAG will look like this:
     //   HdfsReadMonotask ---> nextMonotask
-    val readMonotask =
-      new HdfsReadMonotask(context, id, partition, jobTrackerId, confBroadcast.value.value)
+    val readMonotask = new HdfsReadMonotask(context, id, partition, confBroadcast.value.value)
     nextMonotask.addDependency(readMonotask)
     partition.asInstanceOf[NewHadoopPartition].serializedDataBlockId =
       Some(readMonotask.getResultBlockId())

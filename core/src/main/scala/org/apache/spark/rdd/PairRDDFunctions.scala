@@ -15,38 +15,57 @@
  * limitations under the License.
  */
 
+/*
+ * Copyright 2014 The Regents of The University California
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package org.apache.spark.rdd
 
 import java.nio.ByteBuffer
 import java.text.SimpleDateFormat
 import java.util.{Date, HashMap => JHashMap}
 
-import scala.collection.{Map, mutable}
 import scala.collection.JavaConversions._
+import scala.collection.{Map, mutable}
 import scala.collection.mutable.ArrayBuffer
 import scala.reflect.ClassTag
+import scala.util.control.NonFatal
 import scala.util.DynamicVariable
 
 import com.clearspring.analytics.stream.cardinality.HyperLogLogPlus
+
 import org.apache.hadoop.conf.{Configurable, Configuration}
-import org.apache.hadoop.fs.{FileSystem, Path}
-import org.apache.hadoop.io.SequenceFile.CompressionType
+import org.apache.hadoop.fs.FileSystem
 import org.apache.hadoop.io.compress.CompressionCodec
+import org.apache.hadoop.io.SequenceFile.CompressionType
 import org.apache.hadoop.mapred.{FileOutputCommitter, FileOutputFormat, JobConf, OutputFormat}
-import org.apache.hadoop.mapreduce.{Job => NewAPIHadoopJob, OutputFormat => NewOutputFormat,
-  RecordWriter => NewRecordWriter}
+import org.apache.hadoop.mapreduce.{Job => NewHadoopJob, OutputFormat => NewOutputFormat}
+import org.apache.hadoop.mapreduce.lib.output.{FileOutputFormat => NewFileOutputFormat}
+import org.apache.hadoop.mapreduce.JobStatus.State
 
 import org.apache.spark._
-import org.apache.spark.Partitioner.defaultPartitioner
 import org.apache.spark.annotation.Experimental
 import org.apache.spark.deploy.SparkHadoopUtil
 import org.apache.spark.executor.{DataWriteMethod, OutputMetrics}
 import org.apache.spark.mapreduce.SparkHadoopMapReduceUtil
 import org.apache.spark.partial.{BoundedDouble, PartialResult}
+import org.apache.spark.Partitioner.defaultPartitioner
 import org.apache.spark.serializer.Serializer
-import org.apache.spark.util.Utils
 import org.apache.spark.util.collection.CompactBuffer
 import org.apache.spark.util.random.StratifiedSamplingUtils
+import org.apache.spark.util.Utils
 
 /**
  * Extra functions available on RDDs of (key, value) pairs through an implicit conversion.
@@ -319,7 +338,7 @@ class PairRDDFunctions[K, V](self: RDD[(K, V)])
   @deprecated("Use reduceByKeyLocally", "1.0.0")
   def reduceByKeyToDriver(func: (V, V) => V): Map[K, V] = reduceByKeyLocally(func)
 
-  /** 
+  /**
    * Count the number of elements for each key, collecting the results to a local Map.
    *
    * Note that this method should only be used if the resulting map is expected to be small, as
@@ -891,11 +910,10 @@ class PairRDDFunctions[K, V](self: RDD[(K, V)])
       keyClass: Class[_],
       valueClass: Class[_],
       outputFormatClass: Class[_ <: NewOutputFormat[_, _]],
-      conf: Configuration = self.context.hadoopConfiguration)
-  {
+      conf: Configuration = self.context.hadoopConfiguration) {
     // Rename this as hadoopConf internally to avoid shadowing (see SPARK-2038).
     val hadoopConf = conf
-    val job = new NewAPIHadoopJob(hadoopConf)
+    val job = new NewHadoopJob(hadoopConf)
     job.setOutputKeyClass(keyClass)
     job.setOutputValueClass(valueClass)
     job.setOutputFormatClass(outputFormatClass)
@@ -960,64 +978,50 @@ class PairRDDFunctions[K, V](self: RDD[(K, V)])
    * output paths required (e.g. a table name to write to) in the same way as it would be
    * configured for a Hadoop MapReduce job.
    */
-  def saveAsNewAPIHadoopDataset(conf: Configuration) {
-    // Rename this as hadoopConf internally to avoid shadowing (see SPARK-2038).
-    val hadoopConf = conf
-    val job = new NewAPIHadoopJob(hadoopConf)
-    val formatter = new SimpleDateFormat("yyyyMMddHHmm")
-    val jobtrackerID = formatter.format(new Date())
-    val stageId = self.id
-    val wrappedConf = new SerializableWritable(job.getConfiguration)
-    val outfmt = job.getOutputFormatClass
-    val jobFormat = outfmt.newInstance
+  def saveAsNewAPIHadoopDataset(conf: Configuration): Unit = {
+    // Rename this internally to avoid shadowing (see SPARK-2038).
+    val renamedHadoopConf = conf
+    saveAsNewAPIHadoopDataset(new NewHadoopJob(renamedHadoopConf))
+  }
 
+  def saveAsNewAPIHadoopDataset(job: NewHadoopJob) {
+    val hadoopConf = job.getConfiguration()
+    val outputFormat = job.getOutputFormatClass().newInstance()
+    outputFormat match {
+      case configurable: Configurable => configurable.setConf(hadoopConf)
+      case _ =>
+    }
     if (isOutputSpecValidationEnabled) {
       // FileOutputFormat ignores the filesystem parameter
-      jobFormat.checkOutputSpecs(job)
+      outputFormat.checkOutputSpecs(job)
     }
 
-    val writeShard = (context: TaskContext, iter: Iterator[(K,V)]) => {
-      val config = wrappedConf.value
-      /* "reduce task" <split #> <attempt # = spark task #> */
-      val attemptId = newTaskAttemptID(jobtrackerID, stageId, isMap = false, context.partitionId,
-        context.attemptNumber)
-      val hadoopContext = newTaskAttemptContext(config, attemptId)
-      val format = outfmt.newInstance
-      format match {
-        case c: Configurable => c.setConf(config)
-        case _ => ()
-      }
-      val committer = format.getOutputCommitter(hadoopContext)
-      committer.setupTask(hadoopContext)
+    val wrappedHadoopConf = new SerializableWritable(hadoopConf)
+    val jobTrackerId = new SimpleDateFormat("yyyyMMddHHmm").format(new Date())
+    self.configForHdfsWrite = Some((wrappedHadoopConf, jobTrackerId))
 
-      val (outputMetrics, bytesWrittenCallback) = initHadoopOutputMetrics(context)
+    val hadoopTaskId = newTaskAttemptID(jobTrackerId, self.id, isMap = false, 0, 0)
+    val hadoopTaskContext = newTaskAttemptContext(hadoopConf, hadoopTaskId)
+    val jobCommitter = outputFormat.getOutputCommitter(hadoopTaskContext)
+    var isSetUp = false
+    try {
+      jobCommitter.setupJob(hadoopTaskContext)
+      isSetUp = true
 
-      val writer = format.getRecordWriter(hadoopContext).asInstanceOf[NewRecordWriter[K,V]]
-      var recordsWritten = 0L
-      try {
-        while (iter.hasNext) {
-          val pair = iter.next()
-          writer.write(pair._1, pair._2)
-
-          // Update bytes written metric every few records
-          maybeUpdateOutputMetrics(bytesWrittenCallback, outputMetrics, recordsWritten)
-          recordsWritten += 1
+      self.context.runJob(self, (context: TaskContext, iter: Iterator[(K, V)]) => true)
+    } catch {
+      case NonFatal(e) =>
+        if (isSetUp) {
+          jobCommitter.abortJob(hadoopTaskContext, State.FAILED)
         }
-      } finally {
-        writer.close(hadoopContext)
-      }
-      committer.commitTask(hadoopContext)
-      bytesWrittenCallback.foreach { fn => outputMetrics.setBytesWritten(fn()) }
-      outputMetrics.setRecordsWritten(recordsWritten)
-      1
-    } : Int
+        throw e
 
-    val jobAttemptId = newTaskAttemptID(jobtrackerID, stageId, isMap = true, 0, 0)
-    val jobTaskContext = newTaskAttemptContext(wrappedConf.value, jobAttemptId)
-    val jobCommitter = jobFormat.getOutputCommitter(jobTaskContext)
-    jobCommitter.setupJob(jobTaskContext)
-    self.context.runJob(self, writeShard)
-    jobCommitter.commitJob(jobTaskContext)
+    } finally {
+      // Clear configForHdfsWrite so that future jobs that use this RDD do not also save it to HDFS.
+      self.configForHdfsWrite = None
+    }
+
+    jobCommitter.commitJob(hadoopTaskContext)
   }
 
   /**

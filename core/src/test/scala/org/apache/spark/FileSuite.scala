@@ -35,20 +35,23 @@ package org.apache.spark
 
 import java.io.{File, FileWriter}
 
-import org.apache.spark.input.PortableDataStream
-import org.apache.spark.storage.StorageLevel
-
 import scala.io.Source
 
+import org.apache.hadoop.fs.{FileAlreadyExistsException => NewFileAlreadyExistsException}
 import org.apache.hadoop.io._
 import org.apache.hadoop.io.compress.DefaultCodec
-import org.apache.hadoop.mapred.{JobConf, FileAlreadyExistsException, FileSplit, TextInputFormat, TextOutputFormat}
+import org.apache.hadoop.mapred.{FileAlreadyExistsException, FileSplit, JobConf, TextInputFormat,
+  TextOutputFormat}
 import org.apache.hadoop.mapreduce.Job
-import org.apache.hadoop.mapreduce.lib.input.{FileSplit => NewFileSplit, TextInputFormat => NewTextInputFormat}
-import org.apache.hadoop.mapreduce.lib.output.{TextOutputFormat => NewTextOutputFormat}
+import org.apache.hadoop.mapreduce.lib.input.{FileSplit => NewFileSplit,
+  TextInputFormat => NewTextInputFormat}
+import org.apache.hadoop.mapreduce.lib.output.{FileOutputFormat,
+  TextOutputFormat => NewTextOutputFormat}
 import org.scalatest.{FunSuite, Ignore}
 
-import org.apache.spark.rdd.{NewHadoopRDD, HadoopRDD}
+import org.apache.spark.input.PortableDataStream
+import org.apache.spark.rdd.{HadoopRDD, NewHadoopRDD}
+import org.apache.spark.storage.StorageLevel
 import org.apache.spark.util.Utils
 
 class FileSuite extends FunSuite with LocalSparkContext {
@@ -220,7 +223,12 @@ class FileSuite extends FunSuite with LocalSparkContext {
     }
   }
 
-  test("write SequenceFile using new Hadoop API") {
+  /**
+   * TODO: This test case is ignored because the new monotasks-based interface with HDFS only
+   *       supports TextOutputFormat. When the interface also supports SequenceFileOutputFormat,
+   *       this test case should be re-enabled.
+   */
+  ignore("write SequenceFile using new Hadoop API") {
     import org.apache.hadoop.mapreduce.lib.output.SequenceFileOutputFormat
     sc = new SparkContext("local", "test")
     val outputDir = new File(tempDir, "output").getAbsolutePath
@@ -473,7 +481,7 @@ class FileSuite extends FunSuite with LocalSparkContext {
   test ("prevent user from overwriting the empty directory (new Hadoop API)") {
     sc = new SparkContext("local", "test")
     val randomRDD = sc.parallelize(Array(("key1", "a"), ("key2", "a"), ("key3", "b"), ("key4", "c")), 1)
-    intercept[FileAlreadyExistsException] {
+    intercept[NewFileAlreadyExistsException] {
       randomRDD.saveAsNewAPIHadoopFile[NewTextOutputFormat[String, String]](tempDir.getPath)
     }
   }
@@ -482,8 +490,8 @@ class FileSuite extends FunSuite with LocalSparkContext {
     sc = new SparkContext("local", "test")
     val randomRDD = sc.parallelize(Array(("key1", "a"), ("key2", "a"), ("key3", "b"), ("key4", "c")), 1)
     randomRDD.saveAsNewAPIHadoopFile[NewTextOutputFormat[String, String]](tempDir.getPath + "/output")
-    assert(new File(tempDir.getPath + "/output/part-r-00000").exists() === true)
-    intercept[FileAlreadyExistsException] {
+    assert(new File(tempDir.getPath + "/output/part-r-00000").exists())
+    intercept[NewFileAlreadyExistsException] {
       randomRDD.saveAsNewAPIHadoopFile[NewTextOutputFormat[String, String]](tempDir.getPath)
     }
   }

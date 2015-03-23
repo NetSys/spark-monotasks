@@ -15,23 +15,39 @@
  * limitations under the License.
  */
 
-package org.apache.spark.rdd
+/*
+ * Copyright 2014 The Regents of The University California
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 
-import org.apache.hadoop.fs.FileSystem
-import org.apache.hadoop.mapred._
-import org.apache.hadoop.util.Progressable
+package org.apache.spark.rdd
 
 import scala.collection.mutable.{ArrayBuffer, HashSet}
 import scala.util.Random
 
+import com.google.common.io.Files
 import org.apache.hadoop.conf.{Configurable, Configuration}
-import org.apache.hadoop.mapreduce.{JobContext => NewJobContext, OutputCommitter => NewOutputCommitter,
-OutputFormat => NewOutputFormat, RecordWriter => NewRecordWriter,
-TaskAttemptContext => NewTaskAttempContext}
-import org.apache.spark.{Partitioner, SharedSparkContext}
-import org.apache.spark.util.Utils
-
+import org.apache.hadoop.fs.FileSystem
+import org.apache.hadoop.mapred._
+import org.apache.hadoop.mapreduce.{OutputCommitter => NewOutputCommitter,
+  TaskAttemptContext => NewTaskAttemptContext}
+import org.apache.hadoop.mapreduce.lib.output.{TextOutputFormat => NewTextOutputFormat}
+import org.apache.hadoop.util.Progressable
 import org.scalatest.FunSuite
+
+import org.apache.spark.{Partitioner, SharedSparkContext, SparkEnv}
+import org.apache.spark.util.Utils
 
 class PairRDDFunctionsSuite extends FunSuite with SharedSparkContext {
   test("aggregateByKey") {
@@ -484,19 +500,19 @@ class PairRDDFunctionsSuite extends FunSuite with SharedSparkContext {
       (2, ArrayBuffer(1))))
   }
 
-  test("saveNewAPIHadoopFile should call setConf if format is configurable") {
+  test("saveAsNewAPIHadoopFile should call setConf() if format is configurable") {
     val pairs = sc.parallelize(Array((new Integer(1), new Integer(1))))
+    val tempDir = Files.createTempDir()
+    tempDir.deleteOnExit()
+    val dest = s"file://${tempDir.getPath}"
 
-    // No error, non-configurable formats still work
-    pairs.saveAsNewAPIHadoopFile[NewFakeFormat]("ignored")
+    // No error, non-configurable formats still work.
+    pairs.saveAsNewAPIHadoopFile[NewTextOutputFormat[Integer, Integer]](s"$dest/test1")
 
-    /*
-      Check that configurable formats get configured:
-      ConfigTestFormat throws an exception if we try to write
-      to it when setConf hasn't been called first.
-      Assertion is in ConfigTestFormat.getRecordWriter.
-     */
-    pairs.saveAsNewAPIHadoopFile[ConfigTestFormat]("ignored")
+    // Check that configurable formats get configured:
+    // ConfigTestFormat throws an exception if we try to use it when setConf() hasn't been called
+    // first. Assertion is in ConfigTestFormat.getOutputCommitter().
+    pairs.saveAsNewAPIHadoopFile[ConfigTestFormat](s"$dest/test2")
   }
 
   test("saveAsHadoopFile should respect configured output committers") {
@@ -508,6 +524,41 @@ class PairRDDFunctionsSuite extends FunSuite with SharedSparkContext {
     pairs.saveAsHadoopFile("ignored", pairs.keyClass, pairs.valueClass, classOf[FakeOutputFormat], conf)
 
     assert(FakeOutputCommitter.ran, "OutputCommitter was never called")
+  }
+
+  // These collect() tests are end-to-end tests of writing and reading text files using the
+  // org.apache.hadoop.mapreduce library.
+
+  test("collect(): one partitions")(
+    testCollect("test-collect-one-partition", 10000, 1))
+
+  test("collect(): two partitions")(
+    testCollect("test-collect-two-partitions", 20000, 2))
+
+  test("collect(): three partitions")(
+    testCollect("test-collect-three-partitions", 30000, 3))
+
+  test("collect(): twenty partitions")(
+    testCollect("test-collect-twenty-partitions", 200000, 20))
+
+  test("collect(): large file, twenty partitions")(
+    testCollect("test-collect-large-file-twenty-partitions", 2000000, 20))
+
+  /**
+   * Writes a sequence of `numInts` integers to an HDFS file with the specified filename using the
+   * new HDFS API, then reads the file using the new HDFS API and verifies that it contains the
+   * correct values. The file is written to the local filesystem, since the machine running the unit
+   * tests might not be running HDFS.
+   */
+  private def testCollect(filename: String, numInts: Int, numPartitions: Int): Unit = {
+    val sourceArray = 0 to (numInts - 1)
+    val diskId = SparkEnv.get.blockManager.blockFileManager.localDirs.values.head.getPath()
+    val outputPath = s"file://$diskId/$filename"
+    sc.parallelize(sourceArray, numPartitions).saveAsNewApiTextFile(outputPath)
+
+    val rddArray = sc.newApiTextFile(outputPath).sortBy(_.toInt).collect()
+    assert(rddArray.size === numInts, "The RDD that was read back is not the correct length.")
+    sourceArray.foreach(i => assert(rddArray(i).toInt === i))
   }
 
   test("lookup") {
@@ -645,16 +696,7 @@ class PairRDDFunctionsSuite extends FunSuite with SharedSparkContext {
 
 }
 
-/*
-  These classes are fakes for testing
-    "saveNewAPIHadoopFile should call setConf if format is configurable".
-  Unfortunately, they have to be top level classes, and not defined in
-  the test method, because otherwise Scala won't generate no-args constructors
-  and the test will therefore throw InstantiationException when saveAsNewAPIHadoopFile
-  tries to instantiate them with Class.newInstance.
- */
-
-/*
+/**
  * Original Hadoop API
  */
 class FakeWriter extends RecordWriter[Integer, Integer] {
@@ -696,54 +738,24 @@ class FakeOutputFormat() extends OutputFormat[Integer, Integer]() {
   override def checkOutputSpecs(ignored: FileSystem, job: JobConf): Unit = ()
 }
 
-/*
- * New-style Hadoop API
+/**
+ * This class is a wrapper for TextOutputFormat that implements the Configurable interface. It is
+ * only used by the "saveNewAPIHadoopFile should call setConf if format is configurable" test case,
+ * but it must be defined here instead of in the test because otherwise Scala will not generate a
+ * no-args constructor, causing the test to throw an InstantiationException when
+ * `HdfsWriteMonotask.constructOutputCommitter()` tries to instantiate it with
+ * `ConfigTestFormat.newInstance`.
  */
-class NewFakeWriter extends NewRecordWriter[Integer, Integer] {
+private class ConfigTestFormat() extends NewTextOutputFormat[Integer, Integer]() with Configurable {
 
-  def close(p1: NewTaskAttempContext) = ()
+  private var setConfCalled = false
 
-  def write(p1: Integer, p2: Integer) = ()
+  def setConf(conf: Configuration): Unit = setConfCalled = true
 
-}
+  def getConf(): Configuration = null
 
-class NewFakeCommitter extends NewOutputCommitter {
-  def setupJob(p1: NewJobContext) = ()
-
-  def needsTaskCommit(p1: NewTaskAttempContext): Boolean = false
-
-  def setupTask(p1: NewTaskAttempContext) = ()
-
-  def commitTask(p1: NewTaskAttempContext) = ()
-
-  def abortTask(p1: NewTaskAttempContext) = ()
-}
-
-class NewFakeFormat() extends NewOutputFormat[Integer, Integer]() {
-
-  def checkOutputSpecs(p1: NewJobContext)  = ()
-
-  def getRecordWriter(p1: NewTaskAttempContext): NewRecordWriter[Integer, Integer] = {
-    new NewFakeWriter()
-  }
-
-  def getOutputCommitter(p1: NewTaskAttempContext): NewOutputCommitter = {
-    new NewFakeCommitter()
-  }
-}
-
-class ConfigTestFormat() extends NewFakeFormat() with Configurable {
-
-  var setConfCalled = false
-  def setConf(p1: Configuration) = {
-    setConfCalled = true
-    ()
-  }
-
-  def getConf: Configuration = null
-
-  override def getRecordWriter(p1: NewTaskAttempContext): NewRecordWriter[Integer, Integer] = {
-    assert(setConfCalled, "setConf was never called")
-    super.getRecordWriter(p1)
+  override def getOutputCommitter(context: NewTaskAttemptContext): NewOutputCommitter = {
+    assert(setConfCalled, "setConf() was never called!")
+    super.getOutputCommitter(context)
   }
 }
