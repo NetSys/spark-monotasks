@@ -16,13 +16,11 @@
 
 package org.apache.spark.monotasks.disk
 
-import java.io.FileOutputStream
+import java.io.{File, FileOutputStream}
 import java.nio.ByteBuffer
 
-import scala.util.control.NonFatal
-
 import org.apache.spark.{Logging, TaskContextImpl}
-import org.apache.spark.storage.{BlockId, StorageLevel}
+import org.apache.spark.storage.BlockId
 import org.apache.spark.util.Utils
 
 /**
@@ -47,58 +45,47 @@ private[spark] class DiskWriteMonotask(
   // Identifies the disk on which this DiskWriteMonotask will operate. Set by the DiskScheduler.
   var diskId: Option[String] = None
 
-  override def execute(): Boolean = {
-    if (diskId.isEmpty) {
-      logError(s"Writing block $blockId to disk failed because of empty diskId parameter.")
-      return false
-    }
-    val rawDiskId = diskId.get
-    blockManager.getLocalBytes(serializedDataBlockId).map { data =>
-      val success = putBytes(rawDiskId, data)
-      if (success) {
-        blockManager.updateBlockInfoOnWrite(blockId, rawDiskId, data.limit())
+  override def execute(): Unit = {
+    val rawDiskId = diskId.getOrElse(throw new IllegalStateException(
+      s"Writing block $blockId to disk failed because the diskId parameter was not set."))
+    val blockFileManager = blockManager.blockFileManager
 
-        val metrics = context.taskMetrics
-        val oldUpdatedBlocks = metrics.updatedBlocks.getOrElse(Seq.empty)
-        val updatedBlock = Seq((blockId, blockManager.getCurrentBlockStatus(blockId).get))
-        metrics.updatedBlocks = Some(oldUpdatedBlocks ++ updatedBlock)
-      }
-      success
-    }.getOrElse {
-      logError(s"Writing block $blockId to disk failed because the block could not be found.")
-      false
-    }
+    val file = blockFileManager.getBlockFile(blockId, rawDiskId).getOrElse(
+      throw new IllegalStateException(s"Writing block $blockId to disk $rawDiskId failed " +
+        "because the BlockFileManager could not provide the appropriate file."))
+    val data = blockManager.getLocalBytes(serializedDataBlockId).getOrElse(
+      throw new IllegalStateException(s"Writing block $blockId to disk $rawDiskId failed " +
+        "because the block's serialized bytes could not be found in memory."))
+    putBytes(file, data)
+    blockManager.updateBlockInfoOnWrite(blockId, rawDiskId, data.limit())
+
+    val metrics = context.taskMetrics
+    val oldUpdatedBlocks = metrics.updatedBlocks.getOrElse(Seq.empty)
+    val updatedBlock = Seq((blockId, blockManager.getCurrentBlockStatus(blockId).get))
+    metrics.updatedBlocks = Some(oldUpdatedBlocks ++ updatedBlock)
   }
 
-  private def putBytes(diskId: String, data: ByteBuffer): Boolean = {
-    /* Copy the ByteBuffer that we are given so that the code that created the ByteBuffer can
-     * continue using it. This only copies the metadata, not the buffer contents. */
-    val dataCopy = data.duplicate()
+  private def putBytes(file: File, data: ByteBuffer): Unit = {
     logDebug(s"Attempting to write block $blockId to disk $diskId")
-    blockManager.blockFileManager.getBlockFile(blockId, diskId).map { file =>
-      try {
-        val stream = new FileOutputStream(file)
-        val channel = stream.getChannel()
-        val startTimeMillis = System.currentTimeMillis()
-        while (dataCopy.hasRemaining()) {
-          channel.write(dataCopy)
-        }
-        channel.force(true)
-        val endTimeMillis = System.currentTimeMillis()
-        channel.close()
-        stream.close()
-        logDebug(s"Block ${file.getName()} stored as ${Utils.bytesToString(dataCopy.limit)} file " +
-          s"(${file.getAbsolutePath()}) on disk $diskId in ${endTimeMillis - startTimeMillis} ms.")
-        true
-      } catch {
-        case NonFatal(e) =>
-          logError(s"Writing block $blockId to disk $diskId failed due to exception.", e)
-          false
+    // Copy the ByteBuffer that we are given so that the code that created the ByteBuffer can
+    // continue using it. This only copies the metadata, not the buffer contents.
+    val dataCopy = data.duplicate()
+    val stream = new FileOutputStream(file)
+    val channel = stream.getChannel()
+    try {
+      val startTimeMillis = System.currentTimeMillis()
+
+      while (dataCopy.hasRemaining()) {
+        channel.write(dataCopy)
       }
-    }.getOrElse {
-      logError(s"Writing block $blockId to disk $diskId failed " +
-        "because the BlockFileManager could not provide the file.")
-      false
+      channel.force(true)
+
+      val endTimeMillis = System.currentTimeMillis()
+      logDebug(s"Block ${file.getName()} stored as ${Utils.bytesToString(dataCopy.limit)} file " +
+        s"(${file.getAbsolutePath()}) on disk $diskId in ${endTimeMillis - startTimeMillis} ms.")
+    } finally {
+      channel.close()
+      stream.close()
     }
   }
 }

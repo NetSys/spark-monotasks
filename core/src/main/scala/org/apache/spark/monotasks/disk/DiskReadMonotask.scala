@@ -19,9 +19,7 @@ package org.apache.spark.monotasks.disk
 import java.io.FileInputStream
 import java.nio.ByteBuffer
 
-import scala.util.control.NonFatal
-
-import org.apache.spark.{Logging, TaskContextImpl}
+import org.apache.spark.TaskContextImpl
 import org.apache.spark.storage.{BlockId, StorageLevel}
 
 /**
@@ -30,31 +28,24 @@ import org.apache.spark.storage.{BlockId, StorageLevel}
  */
 private[spark] class DiskReadMonotask(
     context: TaskContextImpl, blockId: BlockId, val diskId: String)
-  extends DiskMonotask(context, blockId) with Logging {
+  extends DiskMonotask(context, blockId) {
 
   resultBlockId = Some(blockId)
 
-  override def execute(): Boolean = {
-    val data = blockManager.blockFileManager.getBlockFile(blockId, diskId).map { file =>
-      val stream = new FileInputStream(file)
-      val channel = stream.getChannel
-      try {
-        val buf = ByteBuffer.allocate(file.length().toInt)
-        channel.read(buf)
-        buf.flip()
-      } catch {
-        case NonFatal(e) =>
-          logError(s"Reading block $blockId from disk $diskId failed due to exception.", e)
-          None
-      } finally {
-        channel.close()
-        stream.close()
-      }
-    }.asInstanceOf[Option[ByteBuffer]]
-    val success = data.isDefined
-    if (success) {
-      blockManager.cacheBytes(getResultBlockId(), data.get, StorageLevel.MEMORY_ONLY_SER, true)
+  override def execute(): Unit = {
+    val file = blockManager.blockFileManager.getBlockFile(blockId, diskId).getOrElse(
+      throw new IllegalStateException(
+        s"Could not read block $blockId from disk $diskId because its file could not be found."))
+    val stream = new FileInputStream(file)
+    val channel = stream.getChannel
+    try {
+      val buf = ByteBuffer.allocate(file.length().toInt)
+      channel.read(buf)
+      buf.flip()
+      blockManager.cacheBytes(getResultBlockId(), buf, StorageLevel.MEMORY_ONLY_SER, true)
+    } finally {
+      channel.close()
+      stream.close()
     }
-    success
   }
 }

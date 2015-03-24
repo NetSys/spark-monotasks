@@ -70,10 +70,6 @@ class DiskRemoveMonotaskSuite extends FunSuite with BeforeAndAfter {
     dataBuffer.flip().asInstanceOf[ByteBuffer]
   }
 
-  test("execute: invalid diskId causes failure") {
-    assert(!(new DiskRemoveMonotask(taskContext, new TestBlockId("0"), "nonsense")).execute())
-  }
-
   test("execute: actually deletes block") {
     val blockId = new TestBlockId("0")
     // Write a block to verify that it can be deleted correctly.
@@ -82,9 +78,9 @@ class DiskRemoveMonotaskSuite extends FunSuite with BeforeAndAfter {
     val diskId = "diskId"
     writeMonotask.diskId = Some(diskId)
 
-    assert(writeMonotask.execute())
+    writeMonotask.execute()
     assert(testFile.exists())
-    assert(new DiskRemoveMonotask(taskContext, blockId, diskId).execute())
+    new DiskRemoveMonotask(taskContext, blockId, diskId).execute()
     assert(!testFile.exists())
   }
 }

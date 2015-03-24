@@ -24,6 +24,6 @@ private[spark] class DiskRemoveMonotask(
     context: TaskContextImpl, blockId: BlockId, val diskId: String)
   extends DiskMonotask(context, blockId) {
 
-  override def execute(): Boolean =
-    blockManager.blockFileManager.getBlockFile(blockId, diskId).map(_.delete()).getOrElse(false)
+  override def execute(): Unit =
+    blockManager.blockFileManager.getBlockFile(blockId, diskId).map(_.delete())
 }

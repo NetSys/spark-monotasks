@@ -28,8 +28,7 @@ import org.scalatest.{BeforeAndAfter, FunSuite}
 import org.apache.spark.{SparkConf, TaskContextImpl}
 import org.apache.spark.executor.TaskMetrics
 import org.apache.spark.monotasks.LocalDagScheduler
-import org.apache.spark.storage.{BlockFileManager, BlockId, BlockManager, BlockStatus,
-  MonotaskResultBlockId, StorageLevel, TestBlockId}
+import org.apache.spark.storage._
 import org.apache.spark.util.Utils
 
 class DiskReadMonotaskSuite extends FunSuite with BeforeAndAfter {
@@ -75,9 +74,16 @@ class DiskReadMonotaskSuite extends FunSuite with BeforeAndAfter {
     dataBuffer.flip().asInstanceOf[ByteBuffer]
   }
 
-  test("execute: reading nonexistent block causes failure") {
+  test("execute: throws an exception when trying to read a nonexistent block") {
     when(blockFileManager.getBlockFile(any(), any())).thenReturn(None)
-    assert(!(new DiskReadMonotask(taskContext, new TestBlockId("0"), "nonsense")).execute())
+    try {
+      new DiskReadMonotask(taskContext, mock(classOf[BlockId]), "nonsense").execute()
+      fail(
+        "This line should not have been reached because execute() should have thrown an exception.")
+    } catch {
+      case _: IllegalStateException => // Okay
+      case _: Throwable => fail("execute() should have thrown an IllegalStateException")
+    }
   }
 
   test("execute: correctly stores resulting data in the MemoryStore") {
@@ -88,8 +94,8 @@ class DiskReadMonotaskSuite extends FunSuite with BeforeAndAfter {
     val diskId = "diskId"
     writeMonotask.diskId = Some(diskId)
 
-    assert(writeMonotask.execute())
-    assert(new DiskReadMonotask(taskContext, blockId, diskId).execute())
+    writeMonotask.execute()
+    new DiskReadMonotask(taskContext, blockId, diskId).execute()
     verify(blockManager).cacheBytes(blockId, dataBuffer, StorageLevel.MEMORY_ONLY_SER, true)
   }
 }

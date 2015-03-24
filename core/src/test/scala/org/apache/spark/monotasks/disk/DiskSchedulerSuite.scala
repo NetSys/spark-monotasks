@@ -18,37 +18,52 @@ package org.apache.spark.monotasks.disk
 
 import java.util.Map.Entry
 
-import org.mockito.Mockito.{mock, when}
+import scala.collection.JavaConversions._
+import scala.collection.mutable.HashSet
+
+import org.mockito.ArgumentMatcher
+import org.mockito.Matchers.argThat
+import org.mockito.Mockito.{mock, timeout, verify, when}
 
 import org.scalatest.{BeforeAndAfter, FunSuite}
+import org.scalatest.concurrent.Timeouts
+import org.scalatest.time.SpanSugar._
 
-import org.apache.spark.{SparkConf, TaskContextImpl}
-import org.apache.spark.monotasks.LocalDagScheduler
-import org.apache.spark.storage.{BlockFileManager, BlockManager, TestBlockId}
+import org.apache.spark.{LocalSparkContext, SparkConf, SparkContext, SparkEnv, TaskContextImpl}
+import org.apache.spark.executor.TaskMetrics
+import org.apache.spark.monotasks.{LocalDagScheduler, TaskFailure, TaskSuccess}
+import org.apache.spark.storage.{BlockFileManager, BlockId, BlockManager, TestBlockId}
 import org.apache.spark.util.Utils
 
-class DiskSchedulerSuite extends FunSuite with BeforeAndAfter {
+class DiskSchedulerSuite extends FunSuite with BeforeAndAfter with Timeouts with LocalSparkContext {
 
+  private var conf: SparkConf = _
   private var blockManager: BlockManager = _
   private var diskScheduler: DiskScheduler = _
   private var taskContext: TaskContextImpl = _
+  private var localDagScheduler: LocalDagScheduler =_
   val timeoutMillis = 10000
   val numBlocks = 10
 
   before {
-    blockManager = mock(classOf[BlockManager])
-    DummyDiskMonotask.clearTimes()
+    // Pass in false to the SparkConf constructor so that the same configuration is loaded
+    // regardless of the system properties.
+    conf = new SparkConf(false)
+    // This is required because we need a SparkEnv to construct a TaskContextImpl.
+    sc = new SparkContext("local", "test", conf)
 
-    val localDagScheduler = mock(classOf[LocalDagScheduler])
     taskContext = mock(classOf[TaskContextImpl])
-    when(taskContext.localDagScheduler).thenReturn(localDagScheduler)
+    when(taskContext.env).thenReturn(SparkEnv.get)
+    when(taskContext.taskMetrics).thenReturn(TaskMetrics.empty)
+    localDagScheduler = mock(classOf[LocalDagScheduler])
+    blockManager = mock(classOf[BlockManager])
     when(localDagScheduler.blockManager).thenReturn(blockManager)
+    when(taskContext.localDagScheduler).thenReturn(localDagScheduler)
+
+    DummyDiskMonotask.clearTimes()
   }
 
   private def initializeDiskScheduler(numDisks: Int) {
-    /* Pass in false to the SparkConf constructor so that the same configuration is loaded
-     * regardless of the system properties. */
-    val conf = new SparkConf(false)
     if (numDisks > 1) {
       /* Create numDisks sub-directories in the current Spark local directory and make them the
        * Spark local directories. */
@@ -58,6 +73,14 @@ class DiskSchedulerSuite extends FunSuite with BeforeAndAfter {
     }
     when(blockManager.blockFileManager).thenReturn(new BlockFileManager(conf))
     diskScheduler = new DiskScheduler(blockManager)
+  }
+
+  test("submitTask: fails a DiskMonotask if its diskId is invalid") {
+    initializeDiskScheduler(1)
+
+    val monotask = new DiskReadMonotask(taskContext, mock(classOf[BlockId]), "nonsense")
+    diskScheduler.submitTask(monotask)
+    verify(localDagScheduler).post(argThat(new TaskFailureContainsMonotask(monotask)))
   }
 
   test("when using one disk, at most one DiskMonotask is executed at a time") {
@@ -96,6 +119,66 @@ class DiskSchedulerSuite extends FunSuite with BeforeAndAfter {
     assert(ids.sameElements(sortedIds))
   }
 
+  test("the LocalDagScheduler is notified when a DiskMonotask completes successfully") {
+    initializeDiskScheduler(1)
+    val monotask = new DummyDiskMonotask(taskContext, mock(classOf[BlockId]), 0L)
+    diskScheduler.submitTask(monotask)
+    verify(localDagScheduler, timeout(timeoutMillis)).post(TaskSuccess(monotask, None))
+  }
+
+  test("the LocalDagScheduler is notified when a DiskMonotask fails") {
+    initializeDiskScheduler(1)
+
+    val monotask = new DiskWriteMonotask(
+      taskContext, mock(classOf[BlockId]), mock(classOf[BlockId])) {
+        override def execute() { throw new Exception("Error!") }
+    }
+    diskScheduler.submitTask(monotask)
+
+    verify(localDagScheduler, timeout(timeoutMillis)).post(
+      argThat(new TaskFailureContainsMonotask(monotask)))
+  }
+
+  test("interrupting a DiskAccessor thread prevents queued DiskMonotasks from being executed") {
+    initializeDiskScheduler(1)
+
+    val idsOfStartedMonotasks = new HashSet[Long]()
+    var diskAccessorThreadId = 0L
+    // This monotask will interrupt the DiskAccessor thread that is executing it.
+    val firstMonotask = new DiskWriteMonotask(
+      taskContext, mock(classOf[BlockId]), mock(classOf[BlockId])) {
+        override def execute() {
+          idsOfStartedMonotasks += taskId
+          diskAccessorThreadId = Thread.currentThread().getId()
+
+          // This will cause the DiskAccessor thread to expire.
+          Thread.currentThread().interrupt()
+        }
+      }
+    // These monotasks will be queued in the DiskAccessor when it is interrupted, so they should not
+    // be executed.
+    val otherMonotasks = (1 to 10).map { i =>
+      new DiskWriteMonotask(taskContext, mock(classOf[BlockId]), mock(classOf[BlockId])) {
+        override def execute() { idsOfStartedMonotasks += taskId }
+      }
+    }
+    (Seq(firstMonotask) ++ otherMonotasks).foreach(diskScheduler.submitTask(_))
+
+    failAfter(timeoutMillis millis) {
+      // Loop until the DiskAccessor thread is no longer running.
+      var allThreadIds: Seq[Long] = Seq.empty
+      do {
+        Thread.sleep(10L)
+        allThreadIds = Thread.getAllStackTraces().keySet().map(_.getId()).toSeq
+      } while (allThreadIds.contains(diskAccessorThreadId))
+    }
+
+    // Once the DiskAccessor thread has been interrupted, no more DiskMonotasks should be executed.
+    // Only "firstMonotask" should have started executing before the DiskAccessor thread stopped.
+    assert(idsOfStartedMonotasks.contains(firstMonotask.taskId))
+    otherMonotasks.foreach(monotask => assert(!idsOfStartedMonotasks.contains(monotask.taskId)))
+  }
+
   private def submitTasksAndWaitForCompletion(
       monotasks: Seq[DummyDiskMonotask], timeoutMillis: Long): Boolean = {
     monotasks.foreach { diskScheduler.submitTask(_) }
@@ -108,5 +191,20 @@ class DiskSchedulerSuite extends FunSuite with BeforeAndAfter {
       Thread.sleep(10)
     }
     true
+  }
+
+  /**
+   * This is a custom matcher that ensures that the task failure includes the provided monotask and
+   * that the failure reason is non-null.
+   */
+  private class TaskFailureContainsMonotask(monotask: DiskMonotask)
+    extends ArgumentMatcher[TaskFailure] {
+
+    override def matches(o: Object): Boolean = o match {
+      case failure: TaskFailure =>
+        (failure.failedMonotask == monotask) && (failure.serializedFailureReason != null)
+      case _ =>
+        false
+    }
   }
 }

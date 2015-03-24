@@ -22,10 +22,10 @@ import java.util.concurrent.LinkedBlockingQueue
 import scala.collection.mutable.HashMap
 import scala.util.Random
 
-import org.apache.spark.Logging
-import org.apache.spark.monotasks.TaskSuccess
+import org.apache.spark.{ExceptionFailure, Logging, SparkException}
+import org.apache.spark.monotasks.{TaskFailure, TaskSuccess}
 import org.apache.spark.storage.BlockManager
-import org.apache.spark.util.Utils
+import org.apache.spark.util.{SparkUncaughtExceptionHandler, Utils}
 
 /**
  * Schedules DiskMonotasks for execution on the appropriate disk. If the DiskMonotask is writing a
@@ -69,8 +69,8 @@ private[spark] class DiskScheduler(blockManager: BlockManager) extends Logging {
    * task queue.
    */
   def submitTask(task: DiskMonotask) {
-    /* Extract the identifier of the disk on which this task will operate. If the task is a write,
-     * a new disk identifier must be created. */
+    // Extract the identifier of the disk on which this task will operate. If the task is a write,
+    // a new disk identifier must be chosen.
     val diskId: Option[String] = task match {
       case write: DiskWriteMonotask => {
         val id = Some(getNextDiskId())
@@ -94,16 +94,21 @@ private[spark] class DiskScheduler(blockManager: BlockManager) extends Logging {
         }
       }
       case _ => {
-        None
+        val exception = new SparkException(
+          s"DiskMonotask $task (id: ${task.taskId}) rejected because its subtype is not supported.")
+        failDiskMonotask(task, exception)
+        return
       }
     }
-    if (diskId.isEmpty) {
-      logError(s"DiskMonotask ${task.taskId} rejected because its subtype is not supported.")
-      // TODO: Tell the LocalDagScheduler that this DiskMonotask failed.
-      task.context.localDagScheduler.post(TaskSuccess(task))
-    } else {
-      diskAccessors(diskId.get).taskQueue.add(task)
+    val rawDiskId = diskId.get
+    if (!diskIds.contains(rawDiskId)) {
+      val exception = new SparkException(s"DiskMonotask $task (id: ${task.taskId}) has an " +
+        s"invalid diskId: $diskId. Valid diskIds are: ${diskIds.mkString(", ")}")
+      failDiskMonotask(task, exception)
+      return
     }
+
+    diskAccessors(rawDiskId).taskQueue.add(task)
   }
 
   /**
@@ -114,6 +119,22 @@ private[spark] class DiskScheduler(blockManager: BlockManager) extends Logging {
     val diskId = diskIds(nextDisk)
     nextDisk = (nextDisk + 1) % diskIds.length
     diskId
+  }
+
+  /**
+   * Notifies the LocalDagScheduler that the provided DiskMonotask failed to complete. The provided
+   * Throwable details the reason for the failure. This method serializes the Throwable and passes
+   * it to the LocalDagScheduler, along with the failed DiskMonotask.
+   */
+  private def failDiskMonotask(monotask: DiskMonotask, reason: Throwable) {
+    logError(s"Executing DiskMonotask $monotask (id: ${monotask.taskId}) on " +
+      s"block ${monotask.blockId} failed.", reason)
+    val context = monotask.context
+    context.taskMetrics.setMetricsOnTaskCompletion()
+    val taskFailedReason = new ExceptionFailure(reason, Some(context.taskMetrics))
+    val closureSerializer = context.env.closureSerializer.newInstance()
+    context.localDagScheduler.post(
+      TaskFailure(monotask, closureSerializer.serialize(taskFailedReason)))
   }
 
   private def addShutdownHook() {
@@ -143,6 +164,37 @@ private[spark] class DiskScheduler(blockManager: BlockManager) extends Logging {
   }
 
   /**
+   * Executes the provided monotask and catches any exceptions that it throws. Communicates to the
+   * LocalDagScheduler whether the monotask completed successfully or failed.
+   */
+  private def executeMonotask(monotask: DiskMonotask): Unit = {
+    try {
+      monotask.execute()
+
+      logDebug(s"DiskMonotask $monotask (id: ${monotask.taskId}) operating on " +
+        s"block ${monotask.blockId} completed successfully.")
+      monotask.context.localDagScheduler.post(TaskSuccess(monotask))
+    } catch {
+      case t: Throwable => {
+        // An exception was thrown, causing the currently-executing DiskMonotask to fail. Attempt to
+        // exit cleanly by informing the LocalDagScheduler of the failure. If this was a fatal
+        // exception, we will delegate to the default uncaught exception handler, which will
+        // terminate the Executor. We don't forcibly exit unless the exception was inherently fatal
+        // in order to avoid stopping other tasks unnecessarily.
+        if (Utils.isFatalError(t)) {
+          SparkUncaughtExceptionHandler.uncaughtException(t)
+        }
+        if (t.isInstanceOf[ClosedByInterruptException]) {
+          logDebug(s"During normal shutdown, thread '${Thread.currentThread().getName()}' was " +
+            "interrupted while performing I/O.")
+        }
+
+        failDiskMonotask(monotask, t)
+      }
+    }
+  }
+
+  /**
    * Stores a single disk's task queue. When used to create a thread, a DiskAccessor object will
    * execute the DiskMonotasks in its task queue.
    */
@@ -152,27 +204,27 @@ private[spark] class DiskScheduler(blockManager: BlockManager) extends Logging {
     val taskQueue = new LinkedBlockingQueue[DiskMonotask]()
 
     /** Continuously executes DiskMonotasks from the task queue. */
-    def run() {
+    def run(): Unit = {
+      val currentThread = Thread.currentThread()
+      val threadName = currentThread.getName()
+
       try {
-        while (true) {
-          val task = taskQueue.take()
-          if (task.execute()) {
-            logDebug(s"Monotask ${task.taskId} succeeded.")
-            task.context.localDagScheduler.post(TaskSuccess(task))
-          } else {
-            logError(s"Monotask ${task.taskId} failed.")
-            // TODO: Tell the LocalDagScheduler that this DiskMonotask failed.
-            task.context.localDagScheduler.post(TaskSuccess(task))
-          }
+        while (!currentThread.isInterrupted()) {
+          executeMonotask(taskQueue.take())
         }
       } catch {
         case _: InterruptedException => {
-          logDebug(s"Thread interrupted while running: ${Thread.currentThread().getName()}")
-        }
-        case _: ClosedByInterruptException => {
-          /* Happens when this DiskAccessor is interrupted while blocked on an I/O operation upon a
-           * channel. The channel will be closed. This should happen very rarely. */
-          logDebug(s"Thread interrupted while waiting: ${Thread.currentThread().getName()}")
+          // An InterruptedException was thrown during the call to taskQueue.take(), above. Since
+          // throwing an InterruptedException clears a thread's interrupt status, it is proper form
+          // to reset the interrupt status by calling Thread.currentThread().interrupt() after
+          // catching an InterruptedException so that other code knows that this thread has been
+          // interrupted.
+          //
+          // This try/catch block is not strictly necessary, since we want the run() method to end
+          // when an InterruptedException is thrown. It is included so that the DiskAccessor stops
+          // cleanly (and does not throw a benign InterruptedException that is visible to the user).
+          logDebug(s"Thread '$threadName' interrupted while waiting for more DiskMonotasks.")
+          currentThread.interrupt()
         }
       }
     }

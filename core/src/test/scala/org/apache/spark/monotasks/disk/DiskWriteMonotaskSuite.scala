@@ -28,8 +28,8 @@ import org.scalatest.{BeforeAndAfter, FunSuite}
 import org.apache.spark.{SparkConf, TaskContextImpl}
 import org.apache.spark.executor.TaskMetrics
 import org.apache.spark.monotasks.LocalDagScheduler
-import org.apache.spark.storage.{BlockFileManager, BlockManager, BlockStatus, MonotaskResultBlockId,
-  TestBlockId}
+import org.apache.spark.storage.{BlockFileManager, BlockId, BlockManager, BlockStatus,
+  MonotaskResultBlockId, TestBlockId}
 import org.apache.spark.util.Utils
 
 class DiskWriteMonotaskSuite extends FunSuite with BeforeAndAfter {
@@ -44,6 +44,7 @@ class DiskWriteMonotaskSuite extends FunSuite with BeforeAndAfter {
 
   before {
     blockFileManager = mock(classOf[BlockFileManager])
+    when(blockFileManager.getBlockFile(any(), any())).thenReturn(Some(createTestFile()))
 
     blockManager = mock(classOf[BlockManager])
     when(blockManager.blockFileManager).thenReturn(blockFileManager)
@@ -75,59 +76,75 @@ class DiskWriteMonotaskSuite extends FunSuite with BeforeAndAfter {
     file
   }
 
-  test("execute: BlockManager.updateBlockInfoOnWrite() is called correctly") {
-    val size = dataBuffer.limit()
-    for (i <- 1 to numBlocks) {
-      // Do this here instead of in before() so that every block is given a different file.
-      when(blockFileManager.getBlockFile(any(), any())).thenReturn(Some(createTestFile()))
-
-      val blockId = new TestBlockId(i.toString)
-      val monotask = new DiskWriteMonotask(taskContext, blockId, serializedDataBlockId)
-      val diskId = "diskId"
-      monotask.diskId = Some(diskId)
-
-      assert(monotask.execute())
-      verify(blockManager).updateBlockInfoOnWrite(blockId, diskId, size)
+  private def verifyIllegalStateException(monotask: DiskWriteMonotask) {
+    try {
+      monotask.execute()
+      fail(
+        "This line should not have been reached because execute() should have thrown an exception.")
+    } catch {
+      case _: IllegalStateException => // Okay
+      case _: Throwable => fail("execute() should have thrown an IllegalStateException")
     }
   }
 
-  test("execute: empty diskId causes failure") {
-    val monotask = new DiskWriteMonotask(
-      taskContext, new TestBlockId("0"), serializedDataBlockId)
-    assert(!monotask.execute())
+  test("execute: throws an exception if diskId is empty") {
+    verifyIllegalStateException(new DiskWriteMonotask(
+      taskContext, mock(classOf[BlockId]), serializedDataBlockId))
+  }
+
+  test("execute: throws an exception if the BlockFileManager cannot provide the correct file") {
+    when(blockFileManager.getBlockFile(any(), any())).thenReturn(None)
+    val monotask = new DiskWriteMonotask(taskContext, mock(classOf[BlockId]), serializedDataBlockId)
+    monotask.diskId = Some("diskId")
+    verifyIllegalStateException(monotask)
+  }
+
+  test("execute: throws an exception if the serialized data cannot be found in the BlockManager") {
+    when(blockManager.getLocalBytes(any())).thenReturn(None)
+    val monotask = new DiskWriteMonotask(taskContext, mock(classOf[BlockId]), serializedDataBlockId)
+    monotask.diskId = Some("diskId")
+    verifyIllegalStateException(monotask)
   }
 
   test("execute: writes correct data") {
-    for (i <- 1 to numBlocks) {
-      // Do this here instead of in before() so that every block is given a different file.
-      when(blockFileManager.getBlockFile(any(), any())).thenReturn(Some(createTestFile()))
+    val blockId = new TestBlockId("0")
+    val monotask =
+      new DiskWriteMonotask(taskContext, blockId, serializedDataBlockId)
+    val diskId = "diskId"
+    monotask.diskId = Some(diskId)
 
-      val blockId = new TestBlockId(i.toString)
-      val monotask =
-        new DiskWriteMonotask(taskContext, blockId, serializedDataBlockId)
-      val diskId = "diskId"
-      monotask.diskId = Some(diskId)
+    monotask.execute()
+    val fileOption = blockFileManager.getBlockFile(blockId, diskId)
+    assert(fileOption.isDefined)
+    val file = fileOption.get
+    assert(file.exists())
 
-      assert(monotask.execute())
-      val fileOption = blockFileManager.getBlockFile(blockId, diskId)
-      assert(fileOption.isDefined)
-      val file = fileOption.get
-      assert(file.exists())
-
-      val readData = new Array[Byte](dataSizeBytes)
-      val stream = new FileInputStream(file)
-      var actualDataSizeBytes = 0
-      var numBytesRead = 0
-      while (numBytesRead != -1) {
-        actualDataSizeBytes += numBytesRead
-        numBytesRead = stream.read(readData)
-      }
-      stream.close()
-      assert(actualDataSizeBytes === dataSizeBytes)
-      for (j <- 0 to (dataSizeBytes - 1)) {
-        assert(dataBuffer.get(j) === readData(j))
-      }
+    val readData = new Array[Byte](dataSizeBytes)
+    val stream = new FileInputStream(file)
+    var actualDataSizeBytes = 0
+    var numBytesRead = 0
+    while (numBytesRead != -1) {
+      actualDataSizeBytes += numBytesRead
+      numBytesRead = stream.read(readData)
     }
+    stream.close()
+    assert(actualDataSizeBytes === dataSizeBytes)
+    for (j <- 0 to (dataSizeBytes - 1)) {
+      assert(dataBuffer.get(j) === readData(j))
+    }
+  }
+
+  test("execute: BlockManager.updateBlockInfoOnWrite() is called correctly") {
+    // Do this here instead of in before() so that every block is given a different file.
+    when(blockFileManager.getBlockFile(any(), any())).thenReturn(Some(createTestFile()))
+
+    val blockId = new TestBlockId("0")
+    val monotask = new DiskWriteMonotask(taskContext, blockId, serializedDataBlockId)
+    val diskId = "diskId"
+    monotask.diskId = Some(diskId)
+
+    monotask.execute()
+    verify(blockManager).updateBlockInfoOnWrite(blockId, diskId, dataBuffer.limit())
   }
 
   test("execute: verify that TaskMetrics.updatedBlocks is updated correctly") {
@@ -137,7 +154,7 @@ class DiskWriteMonotaskSuite extends FunSuite with BeforeAndAfter {
     val monotask = new DiskWriteMonotask(taskContext, new TestBlockId("0"), serializedDataBlockId)
     monotask.diskId = Some("diskId")
 
-    assert(monotask.execute())
+    monotask.execute()
     assert(taskContext.taskMetrics.updatedBlocks.getOrElse(Seq()).size === 1)
   }
 }

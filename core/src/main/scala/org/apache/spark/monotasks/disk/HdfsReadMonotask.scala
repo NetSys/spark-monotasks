@@ -16,14 +16,13 @@
 
 package org.apache.spark.monotasks.disk
 
-import java.io.IOException
 import java.nio.ByteBuffer
 
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.mapreduce.lib.input.FileSplit
 
-import org.apache.spark.{Logging, Partition, TaskContextImpl}
-import org.apache.spark.executor.{DataReadMethod, InputMetrics}
+import org.apache.spark.{Partition, TaskContextImpl}
+import org.apache.spark.executor.DataReadMethod
 import org.apache.spark.mapreduce.SparkHadoopMapReduceUtil
 import org.apache.spark.rdd.NewHadoopPartition
 import org.apache.spark.storage.{MonotaskResultBlockId, RDDBlockId, StorageLevel}
@@ -40,8 +39,7 @@ private[spark] class HdfsReadMonotask(
     jobTrackerId: String,
     confBroadcast: Configuration)
   extends DiskMonotask(context, new RDDBlockId(rddId, partition.index))
-  with SparkHadoopMapReduceUtil
-  with Logging {
+  with SparkHadoopMapReduceUtil {
 
   private val taskAttemptId = newTaskAttemptID(jobTrackerId, rddId, true, partition.index, 0)
   private val conf = newTaskAttemptContext(confBroadcast, taskAttemptId).getConfiguration()
@@ -57,7 +55,7 @@ private[spark] class HdfsReadMonotask(
   val path = fileSplit.getPath()
   resultBlockId = Some(new MonotaskResultBlockId(taskId))
 
-  override def execute(): Boolean = {
+  override def execute(): Unit = {
     val stream = path.getFileSystem(conf).open(path)
     // If this is not the first split, then we also need to read the last byte from the previous
     // split. This is due to the fact that RecordReaders look at the last byte of the previous split
@@ -70,12 +68,6 @@ private[spark] class HdfsReadMonotask(
       stream.readFully(start - bytesFromPreviousSplit, buffer)
       context.localDagScheduler.blockManager.cacheBytes(
         getResultBlockId(), ByteBuffer.wrap(buffer), StorageLevel.MEMORY_ONLY_SER, false)
-      true
-    } catch {
-      case e: IOException => {
-        logError(s"Reading block $blockId from HDFS failed due to an exception.", e)
-        false
-      }
     } finally {
       stream.close()
 

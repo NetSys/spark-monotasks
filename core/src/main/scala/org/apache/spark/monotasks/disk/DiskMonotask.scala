@@ -31,8 +31,8 @@ private[spark] abstract class DiskMonotask(context: TaskContextImpl, val blockId
   val blockManager = context.localDagScheduler.blockManager
 
   /**
-   *  Executes this DiskMonotask by interacting with a single physical disk. Notifies the
-   *  LocalDagScheduler of the outcome of this task.
+   * Executes this DiskMonotask by interacting with a single physical disk. Throws an exception if
+   * the disk operation cannot be completed.
    */
-  def execute(): Boolean
+  def execute(): Unit
 }
