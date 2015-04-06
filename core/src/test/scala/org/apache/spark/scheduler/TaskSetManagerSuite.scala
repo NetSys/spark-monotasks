@@ -43,7 +43,8 @@ import org.scalatest.FunSuite
 
 import org.apache.spark._
 import org.apache.spark.executor.TaskMetrics
-import org.apache.spark.monotasks.Monotask
+import org.apache.spark.monotasks.compute.ExecutionMonotask
+import org.apache.spark.rdd.RDD
 import org.apache.spark.util.ManualClock
 
 class FakeDAGScheduler(sc: SparkContext, taskScheduler: FakeTaskScheduler)
@@ -160,7 +161,9 @@ class LargeTask(stageId: Int) extends Macrotask[Array[Byte]](stageId, null, null
   val random = new Random(0)
   random.nextBytes(randomBuffer)
 
-  override def getMonotasks(context: TaskContextImpl): Seq[Monotask] = Seq.empty
+  override def getExecutionMonotask(context: TaskContextImpl): (RDD[_], ExecutionMonotask[_, _]) =
+    throw new UnsupportedOperationException("The LargeTask class does not support this method.")
+
   override def preferredLocations: Seq[TaskLocation] = Seq[TaskLocation]()
 }
 

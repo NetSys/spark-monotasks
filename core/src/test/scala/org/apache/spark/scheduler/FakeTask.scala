@@ -34,11 +34,14 @@
 package org.apache.spark.scheduler
 
 import org.apache.spark.TaskContextImpl
-import org.apache.spark.monotasks.Monotask
+import org.apache.spark.monotasks.compute.ExecutionMonotask
+import org.apache.spark.rdd.RDD
 
 class FakeTask(stageId: Int, prefLocs: Seq[TaskLocation] = Nil)
   extends Macrotask[Int](stageId, null, null) {
-  override def getMonotasks(context: TaskContextImpl): Seq[Monotask] = Seq.empty
+
+  override def getExecutionMonotask(context: TaskContextImpl): (RDD[_], ExecutionMonotask[_, _]) =
+    throw new UnsupportedOperationException("The FakeTask class does not support this method.")
 
   override def preferredLocations: Seq[TaskLocation] = prefLocs
 }

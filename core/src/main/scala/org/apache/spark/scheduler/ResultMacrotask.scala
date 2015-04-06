@@ -23,8 +23,7 @@ import scala.reflect.ClassTag
 
 import org.apache.spark.{Logging, Partition, TaskContext, TaskContextImpl}
 import org.apache.spark.broadcast.Broadcast
-import org.apache.spark.monotasks.Monotask
-import org.apache.spark.monotasks.compute.ResultMonotask
+import org.apache.spark.monotasks.compute.{ExecutionMonotask, ResultMonotask}
 import org.apache.spark.rdd.RDD
 
 /**
@@ -49,16 +48,11 @@ private[spark] class ResultMacrotask[T, U: ClassTag](
 
   override def toString = s"ResultTask($stageId, ${partition.index})"
 
-  // Deserializes the task binary and creates the rest of the monotasks needed to run the
-  // macrotask.
-  override def getMonotasks(context: TaskContextImpl): Seq[Monotask] = {
+  override def getExecutionMonotask(context: TaskContextImpl): (RDD[_], ExecutionMonotask[_, _]) = {
     // TODO: Task.run() setups up TaskContext and sets hostname in metrics; need to do that here!
     val ser = context.env.closureSerializer.newInstance()
     val (rdd, func) = ser.deserialize[(RDD[T], (TaskContext, Iterator[T]) => U)](
       ByteBuffer.wrap(taskBinary.value), context.dependencyManager.replClassLoader)
-
-    val computeMonotask = new ResultMonotask(context, rdd, partition, func)
-    val inputMonotasks = rdd.buildDag(partition, dependencyIdToPartitions, context, computeMonotask)
-    inputMonotasks ++ Seq(computeMonotask)
+    (rdd, new ResultMonotask(context, rdd, partition, func))
   }
 }

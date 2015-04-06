@@ -83,9 +83,7 @@ class UISeleniumSuite extends FunSuite with WebBrowser with Matchers with Before
     sc
   }
 
-  // TODO: Re-enable this test once https://github.com/NetSys/spark-monotasks/issues/22 has been
-  // fixed.
-  ignore("effects of unpersist() / persist() should be reflected") {
+  test("effects of unpersist() / persist() should be reflected") {
     // Regression test for SPARK-2527
     withSpark(newSparkContext()) { sc =>
       val ui = sc.ui.get

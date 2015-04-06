@@ -20,7 +20,8 @@ package org.apache.spark.scheduler
 import java.io.{ObjectInputStream, ObjectOutputStream, IOException}
 
 import org.apache.spark.TaskContextImpl
-import org.apache.spark.monotasks.Monotask
+import org.apache.spark.monotasks.compute.ExecutionMonotask
+import org.apache.spark.rdd.RDD
 
 /**
  * A Task implementation that fails to serialize.
@@ -28,7 +29,11 @@ import org.apache.spark.monotasks.Monotask
 private[spark] class NotSerializableFakeTask(myId: Int, stageId: Int)
   extends Macrotask[Array[Byte]](stageId, null, null) {
 
-  override def getMonotasks(context: TaskContextImpl): Seq[Monotask] = Seq.empty
+  override def getExecutionMonotask(context: TaskContextImpl): (RDD[_], ExecutionMonotask[_, _]) = {
+    throw new UnsupportedOperationException(
+      "The NotSerializableFakeTask class does not support this method.")
+  }
+
   override def preferredLocations: Seq[TaskLocation] = Seq[TaskLocation]()
 
   @throws(classOf[IOException])

@@ -20,9 +20,12 @@ import java.io.{ByteArrayOutputStream, DataInputStream, DataOutputStream}
 import java.nio.ByteBuffer
 
 import scala.collection.mutable.{HashMap, HashSet}
+import scala.language.existentials
 
 import org.apache.spark.{Logging, Partition, TaskContextImpl}
 import org.apache.spark.monotasks.Monotask
+import org.apache.spark.monotasks.compute.{ExecutionMonotask, ResultSerializationMonotask}
+import org.apache.spark.rdd.RDD
 import org.apache.spark.serializer.SerializerInstance
 import org.apache.spark.util.ByteBufferInputStream
 
@@ -49,10 +52,29 @@ private[spark] abstract class Macrotask[T](val stageId: Int, val partition: Part
   var epoch: Long = -1
 
   /**
-   * Returns the monotasks that need to be run in order to execute this macrotask. This is run
-   * within a compute monotask, so should not use network or disk.
+   * Deserializes the macrotask binary and returns the RDD that this macrotask will operate on, as
+   * well as the ExecutionMonotask that will perform the computation. This function is run within a
+   * compute monotask, so should not use network or disk.
    */
-  def getMonotasks(context: TaskContextImpl): Seq[Monotask]
+  def getExecutionMonotask(context: TaskContextImpl): (RDD[_], ExecutionMonotask[_, _])
+
+  /**
+   * Returns the monotasks that need to be run in order to execute this macrotask. This function is
+   * run within a compute monotask, so should not use network or disk.
+   */
+  def getMonotasks(context: TaskContextImpl): Seq[Monotask] = {
+    val (rdd, executionMonotask) = getExecutionMonotask(context)
+    val resultSerializationMonotask =
+      new ResultSerializationMonotask(context, executionMonotask.resultBlockId)
+    resultSerializationMonotask.addDependency(executionMonotask)
+
+    val inputMonotasks =
+      rdd.buildDag(partition, dependencyIdToPartitions, context, executionMonotask)
+    val leaves = inputMonotasks.filter(_.dependents.isEmpty)
+    leaves.foreach(resultSerializationMonotask.addDependency(_))
+
+    inputMonotasks ++ Seq(executionMonotask, resultSerializationMonotask)
+  }
 }
 
 /**

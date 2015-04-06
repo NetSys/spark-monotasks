@@ -85,8 +85,8 @@ private[spark] abstract class ComputeMonotask(context: TaskContextImpl)
   /**
    * Adds the time taken by this monotask to the macrotask's TaskMetrics, if it hasn't already been
    * done for this monotask. This method needs to check whether it was already called because
-   * ExecutionMonotasks need to call this method themselves, before serializing the task result
-   * (otherwise the update to the metrics won't be reflected in the serialized TaskMetrics
+   * ResultSerializationMonotasks need to call this method themselves, before serializing the task
+   * result (otherwise the update to the metrics won't be reflected in the serialized TaskMetrics
    * that are sent back to the driver).
    */
   protected def accountForComputeTime() {

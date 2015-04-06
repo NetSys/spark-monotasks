@@ -23,8 +23,7 @@ import scala.language.existentials
 
 import org.apache.spark.{Partition, ShuffleDependency, TaskContextImpl}
 import org.apache.spark.broadcast.Broadcast
-import org.apache.spark.monotasks.Monotask
-import org.apache.spark.monotasks.compute.ShuffleMapMonotask
+import org.apache.spark.monotasks.compute.{ExecutionMonotask, ShuffleMapMonotask}
 import org.apache.spark.rdd.RDD
 
 /**
@@ -47,13 +46,10 @@ private[spark] class ShuffleMapMacrotask(
 
   override def toString = "ShuffleMapTask(%d, %d)".format(stageId, partition.index)
 
-  override def getMonotasks(context: TaskContextImpl): Seq[Monotask] = {
+  override def getExecutionMonotask(context: TaskContextImpl): (RDD[_], ExecutionMonotask[_, _]) = {
     val ser = context.env.closureSerializer.newInstance()
     val (rdd, dep) = ser.deserialize[(RDD[_], ShuffleDependency[Any, Any, _])](
       ByteBuffer.wrap(taskBinary.value), context.dependencyManager.replClassLoader)
-
-    val computeMonotask = new ShuffleMapMonotask(context, rdd, partition, dep)
-    val inputMonotasks = rdd.buildDag(partition, dependencyIdToPartitions, context, computeMonotask)
-    inputMonotasks ++ Seq(computeMonotask)
+    (rdd, new ShuffleMapMonotask(context, rdd, partition, dep))
   }
 }

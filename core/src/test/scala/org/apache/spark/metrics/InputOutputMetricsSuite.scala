@@ -416,9 +416,7 @@ class InputOutputMetricsSuite extends FunSuite with SharedSparkContext
     assert(bytesRead >= tmpFile.length())
   }
 
-  // TODO: Re-enable this test once https://github.com/NetSys/spark-monotasks/issues/22 has been
-  // fixed.
-  ignore("TaskMetrics.updatedBlocks is updated correctly when persisting RDDs to disk") {
+  test("TaskMetrics.updatedBlocks is updated correctly when persisting RDDs to disk") {
     val numPartitions = 16
     val numUpdatedBlocks = runAndReturnNumUpdatedBlocks {
       val rddA = sc.parallelize(1 to numPartitions, numPartitions)

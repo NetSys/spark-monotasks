@@ -18,7 +18,7 @@ package org.apache.spark.monotasks
 
 import java.nio.ByteBuffer
 
-import scala.collection.mutable.{HashMap, HashSet}
+import scala.collection.mutable.HashSet
 
 import org.apache.spark.{Logging, TaskState}
 import org.apache.spark.executor.ExecutorBackend
@@ -53,24 +53,17 @@ private[spark] class LocalDagScheduler(
    * debugging/testing and is not needed for maintaining correctness. */
   val runningMonotasks = new HashSet[Long]()
 
-  /* Maps macrotask attempt ID to the IDs of monotasks that are part of that macrotask but have not
-   * finished executing yet. A macrotask is not finished until its set is empty and it has a result.
-   * This is also used to determine whether to notify the executor backend that a task has failed
-   * (used to avoid duplicate failure messages if multiple monotasks for the macrotask fail). */
-  val macrotaskRemainingMonotasks = new HashMap[Long, HashSet[Long]]()
-
-  /* Maps macrotask attempt ID to that macrotask's serialized task result. This gives the
-   * LocalDagScheduler a way to store macrotask result buffers in the event that the monotask that
-   * creates the result is not the last monotask to execute for that macrotask (the macrotask cannot
-   * return its result until all of its monotasks have finished). */
-  val macrotaskResults = new HashMap[Long, ByteBuffer]()
+  /* IDs for macrotasks that currently are running. Used to determine whether to notify the
+   * executor backend that a task has failed (used to avoid duplicate failure messages if multiple
+   * monotasks for the macrotask fail). */
+  val runningMacrotaskAttemptIds = new HashSet[Long]()
 
   def getNumRunningComputeMonotasks(): Int = {
     computeScheduler.numRunningTasks.get()
   }
 
   def getNumRunningMacrotasks(): Int = {
-    macrotaskRemainingMonotasks.keySet.size
+    runningMacrotaskAttemptIds.size
   }
 
   def getOutstandingNetworkBytes(): Long = networkScheduler.getOutstandingBytes
@@ -83,8 +76,7 @@ private[spark] class LocalDagScheduler(
     }
     val taskAttemptId = monotask.context.taskAttemptId
     logDebug(s"Submitting monotask $monotask (id: ${monotask.taskId}) for macrotask $taskAttemptId")
-    macrotaskRemainingMonotasks.getOrElseUpdate(taskAttemptId, new HashSet[Long]()) +=
-      monotask.taskId
+    runningMacrotaskAttemptIds += taskAttemptId
   }
 
   /** It is assumed that all monotasks for a specific macrotask are submitted at the same time. */
@@ -94,7 +86,7 @@ private[spark] class LocalDagScheduler(
 
   /**
    * Marks the monotask as successfully completed by updating the dependency tree and running any
-   * newly runnable monotasks.
+   * newly-runnable monotasks.
    *
    * @param completedMonotask The monotask that has completed.
    * @param serializedTaskResult If the monotask was the final monotask for the macrotask, a
@@ -106,9 +98,9 @@ private[spark] class LocalDagScheduler(
     val taskAttemptId = completedMonotask.context.taskAttemptId
     logDebug(s"Monotask $completedMonotask (id: ${completedMonotask.taskId}) for " +
       s"macrotask $taskAttemptId has completed.")
-    runningMonotasks.remove(completedMonotask.taskId)
 
-    if (macrotaskRemainingMonotasks.contains(taskAttemptId)) {
+    if (runningMacrotaskAttemptIds.contains(taskAttemptId)) {
+      // If the macrotask has not failed, schedule any newly-ready monotasks.
       completedMonotask.dependents.foreach { monotask =>
         monotask.dependencies -= completedMonotask.taskId
         if (monotask.dependencies.isEmpty) {
@@ -119,33 +111,22 @@ private[spark] class LocalDagScheduler(
         }
       }
 
-      if ((macrotaskRemainingMonotasks(taskAttemptId) -= completedMonotask.taskId).isEmpty) {
-        // All monotasks for this macrotask have completed, so send the result to the
-        // executorBackend.
-        serializedTaskResult.orElse(macrotaskResults.get(taskAttemptId)).map { result =>
-          completedMonotask.context.markTaskCompleted()
-          logDebug(s"Notfiying executorBackend about successful completion of task $taskAttemptId")
-          executorBackend.statusUpdate(taskAttemptId, TaskState.FINISHED, result)
-
-          macrotaskRemainingMonotasks -= taskAttemptId
-          macrotaskResults -= taskAttemptId
-        }.getOrElse{
-          logError(s"Macrotask $taskAttemptId does not have a result even though all of its " +
-            "monotasks have completed.")
-        }
-      } else {
-        // If we received a result, store it so it can be passed to the executorBackend once all of
-        // the monotasks for this macrotask have completed.
-        serializedTaskResult.foreach(macrotaskResults(taskAttemptId) = _)
+      serializedTaskResult.map { result =>
+        // Tell the executorBackend that the macrotask finished.
+        runningMacrotaskAttemptIds.remove(taskAttemptId)
+        completedMonotask.context.markTaskCompleted()
+        logDebug(s"Notfiying executorBackend about successful completion of task $taskAttemptId")
+        executorBackend.statusUpdate(taskAttemptId, TaskState.FINISHED, result)
       }
     } else {
-      // Another monotask in this macrotask must have failed while completedMonotask was running,
-      // causing the macrotask to fail and its taskAttemptId to be removed from
-      // macrotaskRemainingMonotasks. We should fail completedMonotask's dependents in case they
-      // have not been failed already, which can happen if they are not dependents of the monotask
-      // that failed.
+      // This will only happen if another monotask in this macrotask failed while completedMonotask
+      // was running, causing the macrotask to fail and its taskAttemptId to be removed from
+      // runningMacrotaskAttemptIds. We should fail completedMonotask's dependents in case they have
+      // not been failed already, which can happen if they are not dependents of the monotask that
+      // failed.
       failDependentMonotasks(completedMonotask)
     }
+    runningMonotasks.remove(completedMonotask.taskId)
   }
 
   /**
@@ -162,13 +143,12 @@ private[spark] class LocalDagScheduler(
     runningMonotasks -= failedMonotask.taskId
     failDependentMonotasks(failedMonotask, Some(failedMonotask.taskId))
     val taskAttemptId = failedMonotask.context.taskAttemptId
+
     // Notify the executor backend that the macrotask has failed, if we didn't already.
-    if (macrotaskRemainingMonotasks.remove(taskAttemptId).isDefined) {
+    if (runningMacrotaskAttemptIds.remove(taskAttemptId)) {
       failedMonotask.context.markTaskCompleted()
       executorBackend.statusUpdate(taskAttemptId, TaskState.FAILED, serializedFailureReason)
     }
-
-    macrotaskResults.remove(taskAttemptId)
   }
 
   private def failDependentMonotasks(
@@ -177,7 +157,7 @@ private[spark] class LocalDagScheduler(
     // TODO: We don't interrupt monotasks that are already running. See
     //       https://github.com/NetSys/spark-monotasks/issues/10
     val message = originalFailedTaskId.map { taskId =>
-      s"it dependend on monotask $taskId, which failed"
+      s"it depended on monotask $taskId, which failed"
     }.getOrElse(s"another monotask in macrotask ${monotask.context.taskAttemptId} failed")
 
     monotask.dependents.foreach { dependentMonotask =>
