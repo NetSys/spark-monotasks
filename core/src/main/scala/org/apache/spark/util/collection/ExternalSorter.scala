@@ -659,7 +659,6 @@ private[spark] class ExternalSorter[K, V, C](
       fileStream = null
       ds.close()
       // NOTE: We don't do file.delete() here because that is done in ExternalSorter.stop().
-      // This should also be fixed in ExternalAppendOnlyMap.
     }
   }
 

@@ -46,7 +46,7 @@ class HashShuffleManagerSuite extends FunSuite with LocalSparkContext {
     val conf = new SparkConf(false)
     // reset after EACH object write. This is to ensure that there are bytes appended after
     // an object is written. So if the codepaths assume writeObject is end of data, this should
-    // flush those bugs out. This was common bug in ExternalAppendOnlyMap, etc.
+    // flush those bugs out.
     conf.set("spark.serializer.objectStreamReset", "1")
     conf.set("spark.serializer", "org.apache.spark.serializer.JavaSerializer")
     conf.set("spark.shuffle.manager", "org.apache.spark.shuffle.hash.HashShuffleManager")

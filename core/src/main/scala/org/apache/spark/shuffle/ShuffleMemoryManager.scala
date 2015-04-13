@@ -23,7 +23,7 @@ import org.apache.spark.{Logging, SparkException, SparkConf}
 
 /**
  * Allocates a pool of memory to task threads for use in shuffle operations. Each disk-spilling
- * collection (ExternalAppendOnlyMap or ExternalSorter) used by these tasks can acquire memory
+ * collection (ExternalSorter) used by these tasks can acquire memory
  * from this pool and release it as it spills data out. When a task ends, all its memory will be
  * released by the Executor.
  *
