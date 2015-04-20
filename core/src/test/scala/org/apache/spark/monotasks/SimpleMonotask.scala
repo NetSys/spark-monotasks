@@ -20,8 +20,9 @@ import org.apache.spark.TaskContextImpl
 import org.apache.spark.monotasks.compute.ComputeMonotask
 
 /** A minimal subclass of monotask for use in testing. */
-class SimpleMonotask(taskAttemptId: Long)
-  extends ComputeMonotask(new TaskContextImpl(null, null, 0, null, taskAttemptId, 0)) {
+class SimpleMonotask(context: TaskContextImpl) extends ComputeMonotask(context) {
+
+  def this(taskAttemptId: Long) = this(new TaskContextImpl(null, null, 0, null, taskAttemptId, 0))
 
   override def execute() = None
 

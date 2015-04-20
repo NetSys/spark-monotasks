@@ -70,7 +70,7 @@ class ShuffleHelper[K, V, C](
           localBlockIds += blockId
         } else {
           val networkMonotask = new NetworkMonotask(context, address, blockId, size)
-          localBlockIds.append(networkMonotask.resultBlockId)
+          localBlockIds.append(networkMonotask.getResultBlockId())
           fetchMonotasks.append(networkMonotask)
         }
       }

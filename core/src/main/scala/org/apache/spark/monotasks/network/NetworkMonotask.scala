@@ -40,7 +40,7 @@ private[spark] class NetworkMonotask(
     private val size: Long)
   extends Monotask(context) with Logging with BlockFetchingListener {
 
-  val resultBlockId = new MonotaskResultBlockId(taskId)
+  resultBlockId = Some(new MonotaskResultBlockId(taskId))
 
   /** Scheduler to notify about bytes received over the network. Set by execute(). */
   var networkScheduler: NetworkScheduler = _
@@ -63,7 +63,7 @@ private[spark] class NetworkMonotask(
     // Increment the ref count because we need to pass this to a different thread.
     // This needs to be released after use.
     buf.retain()
-    context.env.blockManager.cacheSingle(resultBlockId, buf, StorageLevel.MEMORY_ONLY, false)
+    context.env.blockManager.cacheSingle(getResultBlockId(), buf, StorageLevel.MEMORY_ONLY, false)
     context.localDagScheduler.handleTaskCompletion(this)
   }
 

@@ -30,11 +30,12 @@ import org.apache.spark.storage.{RDDBlockId, StorageLevel}
 private[spark] class RddComputeMonotask[T](context: TaskContextImpl, rdd: RDD[T], split: Partition)
   extends ComputeMonotask(context) {
 
+  resultBlockId = Some(new RDDBlockId(rdd.id, split.index))
+
   override def execute(): Option[ByteBuffer] = {
-    val blockId = new RDDBlockId(rdd.id, split.index)
     val iterator = rdd.compute(split, context)
     context.localDagScheduler.blockManager.cacheIterator(
-      blockId, iterator, StorageLevel.MEMORY_ONLY, true)
+      getResultBlockId(), iterator, StorageLevel.MEMORY_ONLY, true)
     None
   }
 }

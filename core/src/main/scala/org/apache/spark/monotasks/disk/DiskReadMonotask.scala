@@ -32,6 +32,8 @@ private[spark] class DiskReadMonotask(
     context: TaskContextImpl, blockId: BlockId, val diskId: String)
   extends DiskMonotask(context, blockId) with Logging {
 
+  resultBlockId = Some(blockId)
+
   override def execute(): Boolean = {
     val data = blockManager.blockFileManager.getBlockFile(blockId, diskId).map { file =>
       val stream = new FileInputStream(file)
@@ -54,7 +56,7 @@ private[spark] class DiskReadMonotask(
     }.asInstanceOf[Option[ByteBuffer]]
     val success = data.isDefined
     if (success) {
-      blockManager.cacheBytes(blockId, data.get, StorageLevel.MEMORY_ONLY_SER, true)
+      blockManager.cacheBytes(getResultBlockId(), data.get, StorageLevel.MEMORY_ONLY_SER, true)
     }
     success
   }

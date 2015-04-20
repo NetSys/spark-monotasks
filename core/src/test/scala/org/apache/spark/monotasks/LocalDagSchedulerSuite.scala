@@ -18,10 +18,10 @@ package org.apache.spark.monotasks
 
 import java.nio.ByteBuffer
 
-import scala.collection.mutable.HashSet
+import scala.collection.mutable.ArrayBuffer
 
 import org.mockito.Matchers.{any, eq => meq}
-import org.mockito.Mockito.{mock, never, verify, when}
+import org.mockito.Mockito.{mock, verify, when}
 
 import org.scalatest.{BeforeAndAfterEach, FunSuite, Matchers}
 
@@ -30,6 +30,7 @@ import org.apache.spark.executor.ExecutorBackend
 import org.apache.spark.monotasks.compute.ComputeMonotask
 import org.apache.spark.monotasks.disk.DiskMonotask
 import org.apache.spark.monotasks.network.NetworkMonotask
+import org.apache.spark.storage.{StorageLevel, TestBlockId}
 import scala.Some
 
 class LocalDagSchedulerSuite extends FunSuite with BeforeAndAfterEach with LocalSparkContext
@@ -66,6 +67,54 @@ class LocalDagSchedulerSuite extends FunSuite with BeforeAndAfterEach with Local
     assert(localDagScheduler.runningMonotasks.contains(firstMonotask.taskId))
     assert(1 === localDagScheduler.waitingMonotasks.size)
     assert(localDagScheduler.waitingMonotasks.contains(secondMonotask.taskId))
+  }
+
+  /**
+   * Verifies that the LocalDagScheduler cleans up monotask temporary data, but only once all of a
+   * monotask's dependents have finished. The success parameter toggles whether this method tests
+   * handleTaskCompletion() (true) or handleTaskFailure() (false), both of which are responsible for
+   * cleaning up temporary data.
+   *
+   * Note: We cannot mock the BlockManager because we are not supposed to know how the Monotask
+   *       class interacts with it.
+   */
+  private def testCleanupTemporaryData(success: Boolean) {
+    val blockManager = SparkEnv.get.blockManager
+    val env = mock(classOf[SparkEnv])
+    when(env.blockManager).thenReturn(blockManager)
+    val context = mock(classOf[TaskContextImpl])
+    when(context.env).thenReturn(env)
+
+    val blockId = new TestBlockId("0")
+    val monotaskA = new SimpleMonotask(context) {
+      resultBlockId = Some(blockId)
+      blockManager.cacheBytes(blockId, ByteBuffer.allocate(10), StorageLevel.MEMORY_ONLY_SER, false)
+    }
+    val monotaskB = new SimpleMonotask(context)
+    val monotaskC = new SimpleMonotask(context)
+    monotaskB.addDependency(monotaskA)
+    monotaskC.addDependency(monotaskA)
+    localDagScheduler.submitMonotasks(List(monotaskA, monotaskB, monotaskC))
+
+    localDagScheduler.handleTaskCompletion(monotaskA, None)
+    if (success) {
+      localDagScheduler.handleTaskCompletion(monotaskB, None)
+    } else {
+      localDagScheduler.handleTaskFailure(monotaskB, ByteBuffer.allocate(0))
+    }
+    // At this point, blockId should still be stored in the BlockManager.
+    assert(blockManager.getLocalBytes(blockId).isDefined)
+
+    if (success) {
+      localDagScheduler.handleTaskCompletion(monotaskC, None)
+    } else {
+      localDagScheduler.handleTaskFailure(monotaskC, ByteBuffer.allocate(0))
+    }
+    assert(blockManager.getLocalBytes(blockId).isEmpty)
+  }
+
+  test("handleTaskCompletion cleans up temporary data (only when all dependents have finished)") {
+    testCleanupTemporaryData(true)
   }
 
   test("handleTaskCompletion results in appropriate new monotasks being run") {
@@ -169,6 +218,10 @@ class LocalDagSchedulerSuite extends FunSuite with BeforeAndAfterEach with Local
     localDagScheduler.handleTaskCompletion(monotaskE, Some(result))
     assertDataStructuresEmpty()
   }
+
+   test("handleTaskFailure cleans up temporary data (only when all dependents have finished)") {
+     testCleanupTemporaryData(false)
+   }
 
    /**
     * Creates a dag of monotasks:
@@ -306,22 +359,22 @@ class LocalDagSchedulerSuite extends FunSuite with BeforeAndAfterEach with Local
     // Setup the 3 monotasks for macrotask 0.
     val macrotask0Context = new TaskContextImpl(null, localDagScheduler, 0, null, 0, 0)
     val macrotask0NetworkMonotask = mock(classOf[NetworkMonotask])
-    when(macrotask0NetworkMonotask.dependencies).thenReturn(HashSet.empty[Long])
+    when(macrotask0NetworkMonotask.dependencies).thenReturn(ArrayBuffer.empty[Monotask])
     when(macrotask0NetworkMonotask.context).thenReturn(macrotask0Context)
     val macrotask0ComputeMonotask = mock(classOf[ComputeMonotask])
-    when(macrotask0ComputeMonotask.dependencies).thenReturn(HashSet.empty[Long])
+    when(macrotask0ComputeMonotask.dependencies).thenReturn(ArrayBuffer.empty[Monotask])
     when(macrotask0ComputeMonotask.context).thenReturn(macrotask0Context)
     val macrotask0DiskMonotask = mock(classOf[DiskMonotask])
-    when(macrotask0DiskMonotask.dependencies).thenReturn(HashSet.empty[Long])
+    when(macrotask0DiskMonotask.dependencies).thenReturn(ArrayBuffer.empty[Monotask])
     when(macrotask0DiskMonotask.context).thenReturn(macrotask0Context)
 
     // Setup the 2 monotasks for macrotask 1.
     val macrotask1Context = new TaskContextImpl(null, localDagScheduler, 0, null, 1, 0)
     val macrotask1DiskMonotask = mock(classOf[DiskMonotask])
-    when(macrotask1DiskMonotask.dependencies).thenReturn(HashSet.empty[Long])
+    when(macrotask1DiskMonotask.dependencies).thenReturn(ArrayBuffer.empty[Monotask])
     when(macrotask1DiskMonotask.context).thenReturn(macrotask1Context)
     val macrotask1ComputeMonotask = mock(classOf[ComputeMonotask])
-    when(macrotask1ComputeMonotask.dependencies).thenReturn(HashSet.empty[Long])
+    when(macrotask1ComputeMonotask.dependencies).thenReturn(ArrayBuffer.empty[Monotask])
     when(macrotask1ComputeMonotask.context).thenReturn(macrotask1Context)
 
     localDagScheduler.updateMetricsForStartedMonotask(macrotask0NetworkMonotask)

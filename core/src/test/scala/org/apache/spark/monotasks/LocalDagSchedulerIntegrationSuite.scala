@@ -28,7 +28,8 @@ import org.apache.spark.{LocalSparkContext, SparkConf, SparkContext, SparkEnv, T
 import org.apache.spark.executor.{ExecutorBackend, TaskMetrics}
 import org.apache.spark.monotasks.disk.{DiskMonotask, DiskReadMonotask, DiskRemoveMonotask,
   DiskWriteMonotask}
-import org.apache.spark.storage.{BlockManager, MonotaskResultBlockId, StorageLevel, TestBlockId}
+import org.apache.spark.rdd.RDD
+import org.apache.spark.storage._
 
 /**
  *  This suite contains tests that verify that the LocalDagScheduler performs correctly and is
@@ -50,6 +51,7 @@ class LocalDagSchedulerIntegrationSuite extends FunSuite with BeforeAndAfter
     localDagScheduler = new LocalDagScheduler(mock(classOf[ExecutorBackend]), blockManager)
 
     taskContext = mock(classOf[TaskContextImpl])
+    when(taskContext.env).thenReturn(SparkEnv.get)
     when(taskContext.localDagScheduler).thenReturn(localDagScheduler)
     when(taskContext.taskMetrics).thenReturn(TaskMetrics.empty)
   }
@@ -104,5 +106,32 @@ class LocalDagSchedulerIntegrationSuite extends FunSuite with BeforeAndAfter
 
     // Wait for the read and remove monotasks to finish.
     assert(localDagScheduler.waitUntilAllTasksComplete(timeoutMillis))
+  }
+
+  test("all temporary blocks are deleted from the BlockManager") {
+    val numRddItems = 100
+    val rddA = sc.parallelize(1 to numRddItems).persist(StorageLevel.MEMORY_ONLY)
+    val rddB = rddA.map(x => (x, x)).persist(StorageLevel.DISK_ONLY)
+    val rddC = rddB.map(y => (y, y)).persist(StorageLevel.MEMORY_ONLY)
+    assert(rddC.count() === numRddItems)
+
+    // Returns a sequence of the BlockIds corresponding to the provided RDD's partitions.
+    def getBlockIds(rdd: RDD[_]): Seq[BlockId] = {
+      val id = rdd.id
+      rdd.partitions.map(partition => new RDDBlockId(id, partition.index))
+    }
+
+    var rddBlockIds = getBlockIds(rddA) ++ getBlockIds(rddC)
+    val memoryStore = blockManager.memoryStore
+    var nonRddBlockIds = memoryStore.getAllBlockIds().filter(!rddBlockIds.contains(_))
+    assert(nonRddBlockIds.filter(!_.isInstanceOf[BroadcastBlockId]).size === 0)
+
+    // Construct a DAG that contains a DiskReadMonotask.
+    val rddD = rddB.map(z => (z, z))
+    assert(rddD.count() === numRddItems)
+
+    rddBlockIds = getBlockIds(rddA) ++ getBlockIds(rddC)
+    nonRddBlockIds = memoryStore.getAllBlockIds().filter(!rddBlockIds.contains(_))
+    assert(nonRddBlockIds.filter(!_.isInstanceOf[BroadcastBlockId]).size === 0)
   }
 }

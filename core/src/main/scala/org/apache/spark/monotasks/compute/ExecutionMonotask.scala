@@ -34,15 +34,14 @@ private[spark] abstract class ExecutionMonotask[T, U: ClassTag](
     val split: Partition)
   extends ComputeMonotask(context) {
 
-  // BlockId used to store this monotask's result in the BlockManager.
-  val resultBlockId = new MonotaskResultBlockId(taskId)
+  resultBlockId = Some(new MonotaskResultBlockId(taskId))
 
   /** Subclasses should define this to return a macrotask result to be sent to the driver. */
   def getResult(): U
 
   override protected def execute(): Option[ByteBuffer] = {
     context.localDagScheduler.blockManager.cacheSingle(
-      resultBlockId, getResult(), StorageLevel.MEMORY_ONLY, false)
+      getResultBlockId(), getResult(), StorageLevel.MEMORY_ONLY, false)
     None
   }
 }

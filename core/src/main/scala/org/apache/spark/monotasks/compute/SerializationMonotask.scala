@@ -29,14 +29,13 @@ import org.apache.spark.storage.{BlockId, MonotaskResultBlockId, StorageLevel}
 private[spark] class SerializationMonotask(context: TaskContextImpl, blockId: BlockId)
   extends ComputeMonotask(context) with Logging {
 
-  val resultBlockId = new MonotaskResultBlockId(taskId)
+  resultBlockId = Some(new MonotaskResultBlockId(taskId))
 
   override def execute(): Option[ByteBuffer] = {
     val blockManager = context.localDagScheduler.blockManager
     blockManager.get(blockId).map { blockResult =>
       val buffer = blockManager.dataSerialize(blockId, blockResult.data, context.env.serializer)
-      blockManager.cacheBytes(resultBlockId, buffer, StorageLevel.MEMORY_ONLY_SER, false)
-      blockManager.removeBlockFromMemory(blockId, true)
+      blockManager.cacheBytes(getResultBlockId(), buffer, StorageLevel.MEMORY_ONLY_SER, false)
     }.getOrElse {
       logError(s"Could not serialize block $blockId because it could not be found in memory.")
       throw new IllegalStateException(s"Could not serialize block $blockId because it could not " +

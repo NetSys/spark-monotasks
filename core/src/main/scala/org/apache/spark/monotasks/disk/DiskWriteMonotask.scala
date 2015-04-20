@@ -61,7 +61,6 @@ private[spark] class DiskWriteMonotask(
       val success = putBytes(rawDiskId, data)
       if (success) {
         blockManager.updateBlockInfoOnWrite(blockId, level, rawDiskId, data.limit())
-        blockManager.removeBlockFromMemory(serializedDataBlockId, false)
 
         val metrics = context.taskMetrics
         val oldUpdatedBlocks = metrics.updatedBlocks.getOrElse(Seq.empty)

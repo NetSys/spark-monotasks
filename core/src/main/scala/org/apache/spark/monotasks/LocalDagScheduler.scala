@@ -94,7 +94,7 @@ private[spark] class LocalDagScheduler(
   def getOutstandingNetworkBytes(): Long = networkScheduler.getOutstandingBytes
 
   def submitMonotask(monotask: Monotask) = synchronized {
-    if (monotask.dependencies.isEmpty) {
+    if (monotask.dependenciesSatisfied()) {
       scheduleMonotask(monotask)
     } else {
       waitingMonotasks += monotask.taskId
@@ -149,13 +149,13 @@ private[spark] class LocalDagScheduler(
     val taskAttemptId = completedMonotask.context.taskAttemptId
     logDebug(s"Monotask $completedMonotask (id: ${completedMonotask.taskId}) for " +
       s"macrotask $taskAttemptId has completed.")
+    completedMonotask.cleanup()
     updateMetricsForFinishedMonotask(completedMonotask)
 
     if (runningMacrotaskAttemptIds.contains(taskAttemptId)) {
       // If the macrotask has not failed, schedule any newly-ready monotasks.
       completedMonotask.dependents.foreach { monotask =>
-        monotask.dependencies -= completedMonotask.taskId
-        if (monotask.dependencies.isEmpty) {
+        if (monotask.dependenciesSatisfied()) {
           assert(
             waitingMonotasks.contains(monotask.taskId),
             "Monotask dependencies should only include tasks that have not yet run")
@@ -192,7 +192,9 @@ private[spark] class LocalDagScheduler(
     = synchronized {
     logInfo(s"Monotask ${failedMonotask.taskId} (for macrotask " +
       s"${failedMonotask.context.taskAttemptId}) failed")
+    failedMonotask.cleanup()
     updateMetricsForFinishedMonotask(failedMonotask)
+
     runningMonotasks -= failedMonotask.taskId
     failDependentMonotasks(failedMonotask, Some(failedMonotask.taskId))
     val taskAttemptId = failedMonotask.context.taskAttemptId
@@ -225,7 +227,7 @@ private[spark] class LocalDagScheduler(
    * after all of the monotask's dependencies have been satisfied.
    */
   private def scheduleMonotask(monotask: Monotask) {
-    assert(monotask.dependencies.isEmpty)
+    assert(monotask.dependenciesSatisfied())
     monotask match {
       case computeMonotask: ComputeMonotask => computeScheduler.submitTask(computeMonotask)
       case networkMonotask: NetworkMonotask => networkScheduler.submitTask(networkMonotask)

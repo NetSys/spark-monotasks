@@ -65,7 +65,7 @@ private[spark] abstract class Macrotask[T](val stageId: Int, val partition: Part
   def getMonotasks(context: TaskContextImpl): Seq[Monotask] = {
     val (rdd, executionMonotask) = getExecutionMonotask(context)
     val resultSerializationMonotask =
-      new ResultSerializationMonotask(context, executionMonotask.resultBlockId)
+      new ResultSerializationMonotask(context, executionMonotask.getResultBlockId())
     resultSerializationMonotask.addDependency(executionMonotask)
 
     val inputMonotasks =

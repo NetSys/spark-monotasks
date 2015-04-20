@@ -134,20 +134,6 @@ class DiskWriteMonotaskSuite extends FunSuite with BeforeAndAfter {
     }
   }
 
-  test("execute: removes the serialized block") {
-    // Do this here instead of in before() so that every block is given a different file.
-    when(blockFileManager.getBlockFile(any(), any())).thenReturn(Some(createTestFile()))
-
-    val blockId = new TestBlockId("0")
-    val monotask =
-      new DiskWriteMonotask(taskContext, blockId, serializedDataBlockId, StorageLevel.DISK_ONLY)
-    val diskId = "diskId"
-    monotask.diskId = Some(diskId)
-
-    assert(monotask.execute())
-    verify(blockManager).removeBlockFromMemory(monotask.serializedDataBlockId, false)
-  }
-
   test("execute: verify that TaskMetrics.updatedBlocks is updated correctly") {
     // Do this here instead of in before() so that every block is given a different file.
     when(blockFileManager.getBlockFile(any(), any())).thenReturn(Some(createTestFile()))

@@ -33,6 +33,8 @@
 
 package org.apache.spark.storage
 
+import scala.collection.JavaConversions._
+
 import java.nio.ByteBuffer
 import java.util.LinkedHashMap
 
@@ -59,6 +61,10 @@ private[spark] class MemoryStore(blockManager: BlockManager, maxMemory: Long)
 
   /** Free memory not occupied by existing blocks. */
   def freeMemory: Long = maxMemory - currentMemory
+
+  /** For testing only. Returns all of the BlockIds stored by this MemoryStore. */
+  def getAllBlockIds(): Seq[BlockId] =
+    entries.keys.toSeq
 
   override def getSize(blockId: BlockId): Long = {
     entries.synchronized {

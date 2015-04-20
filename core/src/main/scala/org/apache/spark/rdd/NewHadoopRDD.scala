@@ -121,7 +121,7 @@ class NewHadoopRDD[K, V](
       new HdfsReadMonotask(context, id, partition, jobTrackerId, confBroadcast.value.value)
     nextMonotask.addDependency(readMonotask)
     partition.asInstanceOf[NewHadoopPartition].serializedDataBlockId =
-      Some(readMonotask.resultBlockId)
+      Some(readMonotask.getResultBlockId())
     Seq(readMonotask)
   }
 
@@ -202,7 +202,6 @@ class NewHadoopRDD[K, V](
       override def close() {
         try {
           reader.close()
-          SparkEnv.get.blockManager.removeBlockFromMemory(serializedDataBlockId)
         } catch {
           case NonFatal(e) =>
             logWarning("Exception in RecordReader.close()", e)
@@ -222,7 +221,7 @@ class NewHadoopRDD[K, V](
   override def getPreferredLocations(hsplit: Partition): Seq[String] = {
     val split = hsplit.asInstanceOf[NewHadoopPartition].serializableHadoopSplit.value
     val locs = HadoopRDD.SPLIT_INFO_REFLECTIONS match {
-      case Some(c) => 
+      case Some(c) =>
         try {
           val infos = c.newGetLocationInfo.invoke(split).asInstanceOf[Array[AnyRef]]
           Some(HadoopRDD.convertSplitLocationInfo(infos))

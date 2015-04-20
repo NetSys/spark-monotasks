@@ -29,13 +29,13 @@ import org.apache.spark.storage.{BlockId, StorageLevel, TaskResultBlockId}
  * completed (because otherwise the metrics computed by ResultSerializationMonotask would not be
  * complete).
  */
-class ResultSerializationMonotask(context: TaskContextImpl, resultBlockId: BlockId)
+class ResultSerializationMonotask(context: TaskContextImpl, macrotaskResultBlockId: BlockId)
   extends ComputeMonotask(context) with Logging {
 
   override def execute(): Option[ByteBuffer] = {
+    val taskAttemptId = context.taskAttemptId
     val blockManager = context.localDagScheduler.blockManager
-    blockManager.getSingle(resultBlockId).map { result =>
-      blockManager.removeBlockFromMemory(resultBlockId, false)
+    blockManager.getSingle(macrotaskResultBlockId).map { result =>
       context.markTaskCompleted()
 
       // The mysterious choice of which serializer to use when is written to be consistent with
@@ -56,21 +56,23 @@ class ResultSerializationMonotask(context: TaskContextImpl, resultBlockId: Block
       val resultSize = serializedDirectResult.limit
 
       if (context.maximumResultSizeBytes > 0 && resultSize > context.maximumResultSizeBytes) {
-        val blockId = TaskResultBlockId(context.taskAttemptId)
-        context.localDagScheduler.blockManager.cacheBytes(
-          blockId, serializedDirectResult, StorageLevel.MEMORY_AND_DISK_SER)
-        logInfo(s"Finished TID ${context.taskAttemptId}. $resultSize bytes result will be sent " +
+        val serializedMacrotaskResultBlockId = new TaskResultBlockId(taskAttemptId)
+        blockManager.cacheBytes(
+          serializedMacrotaskResultBlockId,
+          serializedDirectResult,
+          StorageLevel.MEMORY_AND_DISK_SER)
+        logInfo(s"Finished TID $taskAttemptId. $resultSize bytes result will be sent " +
           "via the BlockManager.")
-        closureSerializer.serialize(new IndirectTaskResult[Any](blockId, resultSize))
+        closureSerializer.serialize(
+          new IndirectTaskResult[Any](serializedMacrotaskResultBlockId, resultSize))
       } else {
-        logInfo(s"Finished TID ${context.taskAttemptId}. $resultSize bytes result will be sent " +
+        logInfo(s"Finished TID $taskAttemptId. $resultSize bytes result will be sent " +
           "directly to driver.")
         serializedDirectResult
       }
     }.orElse {
-      throw new IllegalStateException(s"Deserialized result for macrotask " +
-        s"${context.taskAttemptId} could not be found in the BlockManager " +
-        s"using blockId $resultBlockId.")
+      throw new IllegalStateException(s"Deserialized result for macrotask $taskAttemptId could " +
+        s"not be found in the BlockManager using blockId $macrotaskResultBlockId.")
     }
   }
 }

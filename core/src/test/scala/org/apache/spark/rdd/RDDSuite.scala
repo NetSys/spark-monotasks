@@ -1024,7 +1024,7 @@ class RDDSuite extends FunSuite with BeforeAndAfter with SharedSparkContext {
     assert(monotasks.size === 1)
     assert(monotasks.head === diskReadMonotask)
     assert(nextMonotask.dependencies.size === 1)
-    assert(nextMonotask.dependencies.head === diskReadMonotask.taskId)
+    assert(nextMonotask.dependencies.head === diskReadMonotask)
     verify(blockManager).isStored(blockId)
     verify(blockManager).getBlockLoadMonotask(meq(blockId), any())
   }
@@ -1086,7 +1086,7 @@ class RDDSuite extends FunSuite with BeforeAndAfter with SharedSparkContext {
     verify(blockManager, never()).getBlockLoadMonotask(meq(blockId), any())
 
     // Verify that the RddComputeMonotask is properly formed.
-    val rddCompute_dependent = findMonotask(nextMonotask.dependencies.head, monotasks) match {
+    val rddCompute_dependent = findMonotask(nextMonotask.dependencies.head.taskId, monotasks) match {
       case rddCompute: RddComputeMonotask[_] => {
         val dependencies = rddCompute.dependencies
         val dependents = rddCompute.dependents
@@ -1162,7 +1162,7 @@ class RDDSuite extends FunSuite with BeforeAndAfter with SharedSparkContext {
     verify(blockManager).isStored(blockId)
     verify(blockManager, never()).getBlockLoadMonotask(meq(blockId), any())
 
-    val nextMonotaskDependency = findMonotask(nextMonotask.dependencies.head, monotasks)
+    val nextMonotaskDependency = findMonotask(nextMonotask.dependencies.head.taskId, monotasks)
 
     // Verify that mappedRdd2's RddComputeMonotask is properly formed.
     val (mappedRdd2RddComputeDependency, mappedRdd2RddComputeDependent) =
@@ -1174,7 +1174,7 @@ class RDDSuite extends FunSuite with BeforeAndAfter with SharedSparkContext {
         assert(dependents.size === 2)
         val filteredDependents = dependents.filter(_.taskId != nextMonotask.taskId)
         assert(filteredDependents.size === 1)
-        (findMonotask(dependencies.head, monotasks), filteredDependents.head)
+        (findMonotask(dependencies.head.taskId, monotasks), filteredDependents.head)
       case monotask: Monotask =>
         assert(false, s"Incorrect type of monotask found: $monotask")
     }

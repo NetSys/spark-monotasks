@@ -18,9 +18,10 @@ package org.apache.spark.monotasks
 
 import java.util.concurrent.atomic.AtomicLong
 
-import scala.collection.mutable.{ArrayBuffer, HashSet}
+import scala.collection.mutable.ArrayBuffer
 
 import org.apache.spark.TaskContextImpl
+import org.apache.spark.storage.{BlockId, MonotaskResultBlockId}
 
 /**
  * A Monotask object encapsulates information about an operation that uses only one type of
@@ -33,10 +34,21 @@ import org.apache.spark.TaskContextImpl
 private[spark] abstract class Monotask(val context: TaskContextImpl) {
   val taskId = Monotask.newId()
 
-  // IDs of Monotasks that must complete before this can be run.
-  val dependencies = new HashSet[Long]()
+  // Whether this monotask has finished executing.
+  private var isFinished = false
 
-  // Monotasks that require this monotask to complete before they can be run.
+  // The BlockId with which this monotask stored temporary data in the BlockManager for use by its
+  // dependencies, or None if the monotask did not store any temporary data.
+  protected var resultBlockId: Option[BlockId] = None
+
+  // Monotasks that need to have finished before this monotask can be run. This includes all
+  // dependencies (even ones that have already completed) so that we can clean up intermediate data
+  // produced by dependencies when this monotask completes. Monotasks that are added to this data
+  // structure should never be removed.
+  val dependencies = new ArrayBuffer[Monotask]()
+
+  // Monotasks that require this monotask to complete before they can be run. Monotasks that are
+  // added to this data structure should never be removed.
   val dependents = new ArrayBuffer[Monotask]()
 
   /**
@@ -44,8 +56,40 @@ private[spark] abstract class Monotask(val context: TaskContextImpl) {
    * in both this monotask and in the passed dependency).
    */
   def addDependency(dependency: Monotask) {
-    dependencies += dependency.taskId
+    dependencies += dependency
     dependency.dependents += this
+  }
+
+  def getResultBlockId(): BlockId = {
+    resultBlockId.getOrElse(throw new UnsupportedOperationException(
+      s"Monotask $this (id: ${taskId}) does not have a result BlockId."))
+  }
+
+  /**
+   * Returns true if all of the monotasks that this monotask depends on have completed (meaning
+   * that this monotask can now be scheduled), or false otherwise.
+   */
+  def dependenciesSatisfied() =
+    dependencies.filter(!_.isFinished).isEmpty
+
+  /**
+   * Marks this monotask as completed, and, if possible, cleans up its dependencies. A dependency
+   * monotask can be cleaned up (its temporary data can be deleted and it can be removed from the
+   * DAG of monotasks) if and only if all of its dependents have finished. This should be called
+   * after this monotask either completes or fails.
+   */
+  def cleanup() {
+    isFinished = true
+    dependencies.filter(_.dependents.filter(!_.isFinished).isEmpty).foreach { dependency =>
+      dependency.resultBlockId.map { blockId =>
+        val tellMaster = blockId match {
+          case monotaskResultBlockId: MonotaskResultBlockId => false
+          case _ => true
+        }
+
+        context.env.blockManager.removeBlockFromMemory(blockId, tellMaster)
+      }
+    }
   }
 }
 

@@ -55,7 +55,7 @@ private[spark] class HdfsReadMonotask(
   }
 
   val path = fileSplit.getPath()
-  val resultBlockId = new MonotaskResultBlockId(taskId)
+  resultBlockId = Some(new MonotaskResultBlockId(taskId))
 
   override def execute(): Boolean = {
     val stream = path.getFileSystem(conf).open(path)
@@ -69,7 +69,7 @@ private[spark] class HdfsReadMonotask(
     try {
       stream.readFully(start - bytesFromPreviousSplit, buffer)
       context.localDagScheduler.blockManager.cacheBytes(
-        resultBlockId, ByteBuffer.wrap(buffer), StorageLevel.MEMORY_ONLY_SER, true)
+        getResultBlockId(), ByteBuffer.wrap(buffer), StorageLevel.MEMORY_ONLY_SER, false)
       true
     } catch {
       case e: IOException => {
