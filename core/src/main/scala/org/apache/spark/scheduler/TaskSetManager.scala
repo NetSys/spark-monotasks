@@ -794,12 +794,10 @@ private[spark] class TaskSetManager(
       addPendingTask(index, readding=true)
     }
 
-    // Re-enqueue any tasks that ran on the failed executor if this is a shuffle map stage,
-    // and we are not using an external shuffle server which could serve the shuffle outputs.
+    // Re-enqueue any tasks that ran on the failed executor if this is a shuffle map stage.
     // The reason is the next stage wouldn't be able to fetch the data from this dead executor
     // so we would need to rerun these tasks on other executors.
-    if (tasks(0).isInstanceOf[ShuffleMapMacrotask] &&
-      !env.blockManager.externalShuffleServiceEnabled) {
+    if (tasks(0).isInstanceOf[ShuffleMapMacrotask]) {
       for ((tid, info) <- taskInfos if info.executorId == execId) {
         val index = taskInfos(tid).index
         if (successful(index)) {

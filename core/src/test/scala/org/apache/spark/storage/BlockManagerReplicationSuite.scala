@@ -32,7 +32,7 @@ import org.apache.spark.network.BlockTransferService
 import org.apache.spark.network.nio.NioBlockTransferService
 import org.apache.spark.scheduler.LiveListenerBus
 import org.apache.spark.serializer.KryoSerializer
-import org.apache.spark.shuffle.hash.HashShuffleManager
+import org.apache.spark.shuffle.memory.MemoryShuffleManager
 import org.apache.spark.storage.StorageLevel._
 import org.apache.spark.util.{AkkaUtils, SizeEstimator}
 
@@ -44,7 +44,7 @@ class BlockManagerReplicationSuite extends FunSuite with Matchers with BeforeAnd
   var master: BlockManagerMaster = null
   val securityMgr = new SecurityManager(conf)
   val mapOutputTracker = new MapOutputTrackerMaster(conf)
-  val shuffleManager = new HashShuffleManager(conf)
+  val shuffleManager = new MemoryShuffleManager(conf)
 
   // List of block manager created during an unit test, so that all of the them can be stopped
   // after the unit test.

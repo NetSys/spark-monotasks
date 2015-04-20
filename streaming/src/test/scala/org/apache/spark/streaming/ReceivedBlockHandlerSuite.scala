@@ -35,7 +35,7 @@ import org.apache.spark._
 import org.apache.spark.network.nio.NioBlockTransferService
 import org.apache.spark.scheduler.LiveListenerBus
 import org.apache.spark.serializer.KryoSerializer
-import org.apache.spark.shuffle.hash.HashShuffleManager
+import org.apache.spark.shuffle.memory.MemoryShuffleManager
 import org.apache.spark.storage._
 import org.apache.spark.streaming.receiver._
 import org.apache.spark.streaming.util._
@@ -51,7 +51,7 @@ class ReceivedBlockHandlerSuite extends FunSuite with BeforeAndAfter with Matche
   val streamId = 1
   val securityMgr = new SecurityManager(conf)
   val mapOutputTracker = new MapOutputTrackerMaster(conf)
-  val shuffleManager = new HashShuffleManager(conf)
+  val shuffleManager = new MemoryShuffleManager(conf)
   val serializer = new KryoSerializer(conf)
   val manualClock = new ManualClock
   val blockManagerSize = 10000000

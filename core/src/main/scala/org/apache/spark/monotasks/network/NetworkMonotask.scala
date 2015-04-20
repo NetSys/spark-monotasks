@@ -44,7 +44,7 @@ private[spark] class NetworkMonotask(
   def execute() {
     logDebug(s"Sending request for block $shuffleBlockId (size (${Utils.bytesToString(size)}}) " +
       s"to $remoteAddress")
-    context.env.blockManager.shuffleClient.fetchBlocks(
+    context.env.blockManager.blockTransferService.fetchBlocks(
       remoteAddress.host,
       remoteAddress.port,
       remoteAddress.executorId,

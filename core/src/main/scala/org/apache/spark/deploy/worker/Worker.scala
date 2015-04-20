@@ -117,9 +117,6 @@ private[spark] class Worker(
   val appDirectories = new HashMap[String, Seq[String]]
   val finishedApps = new HashSet[String]
 
-  // The shuffle service is not actually started unless configured.
-  val shuffleService = new StandaloneWorkerShuffleService(conf, securityMgr)
-
   val publicAddress = {
     val envVar = conf.getenv("SPARK_PUBLIC_DNS")
     if (envVar != null) envVar else host
@@ -164,7 +161,6 @@ private[spark] class Worker(
     logInfo("Spark home: " + sparkHome)
     createWorkDir()
     context.system.eventStream.subscribe(self, classOf[RemotingLifecycleEvent])
-    shuffleService.startIfEnabled()
     webUi = new WorkerWebUI(this, workDir, webUiPort)
     webUi.bind()
     registerWithMaster()
@@ -515,7 +511,6 @@ private[spark] class Worker(
     registrationRetryTimer.foreach(_.cancel())
     executors.values.foreach(_.kill())
     drivers.values.foreach(_.kill())
-    shuffleService.stop()
     webUi.stop()
     metricsSystem.stop()
   }

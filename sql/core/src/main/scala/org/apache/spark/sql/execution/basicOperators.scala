@@ -20,7 +20,6 @@ package org.apache.spark.sql.execution
 import org.apache.spark.{SparkEnv, HashPartitioner, SparkConf}
 import org.apache.spark.annotation.DeveloperApi
 import org.apache.spark.rdd.{RDD, ShuffledRDD}
-import org.apache.spark.shuffle.sort.SortShuffleManager
 import org.apache.spark.sql.catalyst.ScalaReflection
 import org.apache.spark.sql.catalyst.errors._
 import org.apache.spark.sql.catalyst.expressions._
@@ -95,24 +94,15 @@ case class Limit(limit: Int, child: SparkPlan)
   // TODO: Implement a partition local limit, and use a strategy to generate the proper limit plan:
   // partition local limit -> exchange into one partition -> partition local limit again
 
-  /** We must copy rows when sort based shuffle is on */
-  private def sortBasedShuffleOn = SparkEnv.get.shuffleManager.isInstanceOf[SortShuffleManager]
-
   override def output: Seq[Attribute] = child.output
   override def outputPartitioning: Partitioning = SinglePartition
 
   override def executeCollect(): Array[Row] = child.executeTake(limit)
 
   override def execute(): RDD[Row] = {
-    val rdd: RDD[_ <: Product2[Boolean, Row]] = if (sortBasedShuffleOn) {
-      child.execute().mapPartitions { iter =>
-        iter.take(limit).map(row => (false, row.copy()))
-      }
-    } else {
-      child.execute().mapPartitions { iter =>
-        val mutablePair = new MutablePair[Boolean, Row]()
-        iter.take(limit).map(row => mutablePair.update(false, row))
-      }
+    val rdd: RDD[_ <: Product2[Boolean, Row]] = child.execute().mapPartitions { iter =>
+      val mutablePair = new MutablePair[Boolean, Row]()
+      iter.take(limit).map(row => mutablePair.update(false, row))
     }
     val part = new HashPartitioner(1)
     val shuffled = new ShuffledRDD[Boolean, Row, Row](rdd, part)

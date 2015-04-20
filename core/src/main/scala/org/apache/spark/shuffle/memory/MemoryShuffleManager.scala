@@ -19,7 +19,6 @@ package org.apache.spark.shuffle.memory
 import org.apache.spark.{ShuffleDependency, SparkConf, TaskContext}
 import org.apache.spark.shuffle.{BaseShuffleHandle, ShuffleHandle, ShuffleManager, ShuffleReader,
   ShuffleWriter}
-import org.apache.spark.shuffle.hash.HashShuffleReader
 
 /**
  * A ShuffleManager that stores shuffle data in-memory.
@@ -42,8 +41,7 @@ private[spark] class MemoryShuffleManager(conf: SparkConf) extends ShuffleManage
       startPartition: Int,
       endPartition: Int,
       context: TaskContext): ShuffleReader[K, C] = {
-    new HashShuffleReader(
-      handle.asInstanceOf[BaseShuffleHandle[K, _, C]], startPartition, endPartition, context)
+    throw new UnsupportedOperationException("Shuffle reader should not be used with monotasks")
   }
 
   override def getWriter[K, V](

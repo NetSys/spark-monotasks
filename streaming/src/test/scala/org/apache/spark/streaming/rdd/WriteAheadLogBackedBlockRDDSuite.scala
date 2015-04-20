@@ -93,7 +93,7 @@ class WriteAheadLogBackedBlockRDDSuite extends FunSuite with BeforeAndAfterAll w
     // Put the necessary blocks in the block manager
     val blockIds = Array.fill(numBlocks)(StreamBlockId(Random.nextInt(), Random.nextInt()))
     data.zip(blockIds).take(numPartitionsInBM).foreach { case(block, blockId) =>
-      blockManager.putIterator(blockId, block.iterator, StorageLevel.MEMORY_ONLY_SER)
+      blockManager.cacheIterator(blockId, block.iterator, StorageLevel.MEMORY_ONLY_SER)
     }
 
     // Generate write ahead log segments

@@ -30,9 +30,6 @@ import org.apache.spark.util.{MetadataCleaner, MetadataCleanerType, TimeStampedH
 /**
  * Tracks metadata about the shuffle blocks stored on a particular executor, and periodically
  * deletes old shuffle files.
- *
- * TODO: There is significant code duplication between this class and FileShuffleBlockManager;
- *       consider making both classes inherit from a common parent class.
  */
 private[spark] class MemoryShuffleBlockManager(conf: SparkConf)
   extends ShuffleBlockManager with Logging {

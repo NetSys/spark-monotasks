@@ -173,16 +173,13 @@ private[spark] class DiskBlockManager(blockManager: BlockManager, conf: SparkCon
   }
 
   private def doStop(): Unit = {
-    // Only perform cleanup if an external service is not serving our shuffle files.
-    if (!blockManager.externalShuffleServiceEnabled || blockManager.blockManagerId.isDriver) {
-      localDirs.foreach { localDir =>
-        if (localDir.isDirectory() && localDir.exists()) {
-          try {
-            if (!Utils.hasRootAsShutdownDeleteDir(localDir)) Utils.deleteRecursively(localDir)
-          } catch {
-            case e: Exception =>
-              logError(s"Exception while deleting local spark dir: $localDir", e)
-          }
+    localDirs.foreach { localDir =>
+      if (localDir.isDirectory() && localDir.exists()) {
+        try {
+          if (!Utils.hasRootAsShutdownDeleteDir(localDir)) Utils.deleteRecursively(localDir)
+        } catch {
+          case e: Exception =>
+            logError(s"Exception while deleting local spark dir: $localDir", e)
         }
       }
     }
