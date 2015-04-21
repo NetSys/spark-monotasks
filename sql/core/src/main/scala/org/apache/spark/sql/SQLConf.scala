@@ -42,10 +42,6 @@ private[spark] object SQLConf {
   val COLUMN_NAME_OF_CORRUPT_RECORD = "spark.sql.columnNameOfCorruptRecord"
   val BROADCAST_TIMEOUT = "spark.sql.broadcastTimeout"
 
-  // Options that control which operators can be chosen by the query planner.  These should be
-  // considered hints and may be ignored by future versions of Spark SQL.
-  val EXTERNAL_SORT = "spark.sql.planner.externalSort"
-
   // This is only used for the thriftserver
   val THRIFTSERVER_POOL = "spark.sql.thriftserver.scheduler.pool"
 
@@ -118,9 +114,6 @@ private[sql] class SQLConf extends Serializable {
   /** When true uses Parquet implementation based on data source API */
   private[spark] def parquetUseDataSourceApi =
     getConf(PARQUET_USE_DATA_SOURCE_API, "true").toBoolean
-
-  /** When true the planner will use the external sort, which may spill to disk. */
-  private[spark] def externalSortEnabled: Boolean = getConf(EXTERNAL_SORT, "false").toBoolean
 
   /**
    * When set to true, Spark SQL will use the Scala compiler at runtime to generate custom bytecode

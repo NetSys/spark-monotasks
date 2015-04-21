@@ -248,7 +248,7 @@ class SQLQuerySuite extends QueryTest with BeforeAndAfterAll {
       Row("1"))
   }
 
-  def sortTest() = {
+  test("sorting") {
     checkAnswer(
       sql("SELECT * FROM testData2 ORDER BY a ASC, b ASC"),
       Seq(Row(1,1), Row(1,2), Row(2,1), Row(2,2), Row(3,1), Row(3,2)))
@@ -288,20 +288,6 @@ class SQLQuerySuite extends QueryTest with BeforeAndAfterAll {
     checkAnswer(
       sql("SELECT * FROM mapData ORDER BY data[1] DESC"),
       mapData.collect().sortBy(_.data(1)).reverse.map(Row.fromTuple).toSeq)
-  }
-
-  test("sorting") {
-    val before = conf.externalSortEnabled
-    setConf(SQLConf.EXTERNAL_SORT, "false")
-    sortTest()
-    setConf(SQLConf.EXTERNAL_SORT, before.toString)
-  }
-
-  test("external sorting") {
-    val before = conf.externalSortEnabled
-    setConf(SQLConf.EXTERNAL_SORT, "true")
-    sortTest()
-    setConf(SQLConf.EXTERNAL_SORT, before.toString)
   }
 
   test("limit") {

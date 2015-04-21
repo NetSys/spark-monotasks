@@ -26,7 +26,6 @@ import org.apache.spark.sql.catalyst.errors._
 import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.plans.physical._
 import org.apache.spark.util.{CompletionIterator, MutablePair}
-import org.apache.spark.util.collection.ExternalSorter
 
 /**
  * :: DeveloperApi ::
@@ -150,9 +149,6 @@ case class TakeOrdered(limit: Int, sortOrder: Seq[SortOrder], child: SparkPlan) 
 
 /**
  * :: DeveloperApi ::
- * Performs a sort on-heap.
- * @param global when true performs a global sort of all partitions by shuffling the data first
- *               if necessary.
  */
 @DeveloperApi
 case class Sort(
@@ -167,36 +163,6 @@ case class Sort(
     child.execute().mapPartitions( { iterator =>
       val ordering = newOrdering(sortOrder, child.output)
       iterator.map(_.copy()).toArray.sorted(ordering).iterator
-    }, preservesPartitioning = true)
-  }
-
-  override def output: Seq[Attribute] = child.output
-}
-
-/**
- * :: DeveloperApi ::
- * Performs a sort, spilling to disk as needed.
- * @param global when true performs a global sort of all partitions by shuffling the data first
- *               if necessary.
- */
-@DeveloperApi
-case class ExternalSort(
-    sortOrder: Seq[SortOrder],
-    global: Boolean,
-    child: SparkPlan)
-  extends UnaryNode {
-
-  override def requiredChildDistribution: Seq[Distribution] =
-    if (global) OrderedDistribution(sortOrder) :: Nil else UnspecifiedDistribution :: Nil
-
-  override def execute(): RDD[Row] = attachTree(this, "sort") {
-    child.execute().mapPartitions( { iterator =>
-      val ordering = newOrdering(sortOrder, child.output)
-      val sorter = new ExternalSorter[Row, Null, Row](ordering = Some(ordering))
-      sorter.insertAll(iterator.map(r => (r, null)))
-      val baseIterator = sorter.iterator.map(_._1)
-      // TODO(marmbrus): The complex type signature below thwarts inference for no reason.
-      CompletionIterator[Row, Iterator[Row]](baseIterator, sorter.stop())
     }, preservesPartitioning = true)
   }
 
