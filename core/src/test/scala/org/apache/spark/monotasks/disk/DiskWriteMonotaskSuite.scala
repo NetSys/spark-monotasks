@@ -26,8 +26,9 @@ import org.mockito.Mockito.{mock, verify, when}
 import org.scalatest.{BeforeAndAfter, FunSuite}
 
 import org.apache.spark.{SparkConf, TaskContextImpl}
+import org.apache.spark.executor.TaskMetrics
 import org.apache.spark.monotasks.LocalDagScheduler
-import org.apache.spark.storage.{BlockFileManager, BlockManager, MonotaskResultBlockId,
+import org.apache.spark.storage.{BlockFileManager, BlockManager, BlockStatus, MonotaskResultBlockId,
   StorageLevel, TestBlockId}
 import org.apache.spark.util.Utils
 
@@ -46,6 +47,7 @@ class DiskWriteMonotaskSuite extends FunSuite with BeforeAndAfter {
 
     blockManager = mock(classOf[BlockManager])
     when(blockManager.blockFileManager).thenReturn(blockFileManager)
+    when(blockManager.getCurrentBlockStatus(any())).thenReturn(Some(mock(classOf[BlockStatus])))
     when(blockManager.getLocalBytes(serializedDataBlockId)).thenReturn(Some(dataBuffer))
 
     val localDagScheduler = mock(classOf[LocalDagScheduler])
@@ -53,6 +55,7 @@ class DiskWriteMonotaskSuite extends FunSuite with BeforeAndAfter {
 
     taskContext = mock(classOf[TaskContextImpl])
     when(taskContext.localDagScheduler).thenReturn(localDagScheduler)
+    when(taskContext.taskMetrics).thenReturn(TaskMetrics.empty)
   }
 
   private def makeDataBuffer(): ByteBuffer = {
@@ -143,5 +146,17 @@ class DiskWriteMonotaskSuite extends FunSuite with BeforeAndAfter {
 
     assert(monotask.execute())
     verify(blockManager).removeBlockFromMemory(monotask.serializedDataBlockId, false)
+  }
+
+  test("execute: verify that TaskMetrics.updatedBlocks is updated correctly") {
+    // Do this here instead of in before() so that every block is given a different file.
+    when(blockFileManager.getBlockFile(any(), any())).thenReturn(Some(createTestFile()))
+
+    val monotask = new DiskWriteMonotask(
+      taskContext, new TestBlockId("0"), serializedDataBlockId, StorageLevel.DISK_ONLY)
+    monotask.diskId = Some("diskId")
+
+    assert(monotask.execute())
+    assert(taskContext.taskMetrics.updatedBlocks.getOrElse(Seq()).size === 1)
   }
 }

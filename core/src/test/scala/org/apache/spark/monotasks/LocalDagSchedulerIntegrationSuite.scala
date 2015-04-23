@@ -25,7 +25,7 @@ import org.mockito.Mockito.{mock, when}
 import org.scalatest.{BeforeAndAfter, FunSuite}
 
 import org.apache.spark.{LocalSparkContext, SparkConf, SparkContext, SparkEnv, TaskContextImpl}
-import org.apache.spark.executor.ExecutorBackend
+import org.apache.spark.executor.{ExecutorBackend, TaskMetrics}
 import org.apache.spark.monotasks.disk.{DiskMonotask, DiskReadMonotask, DiskRemoveMonotask,
   DiskWriteMonotask}
 import org.apache.spark.storage.{BlockManager, MonotaskResultBlockId, StorageLevel, TestBlockId}
@@ -51,6 +51,7 @@ class LocalDagSchedulerIntegrationSuite extends FunSuite with BeforeAndAfter
 
     taskContext = mock(classOf[TaskContextImpl])
     when(taskContext.localDagScheduler).thenReturn(localDagScheduler)
+    when(taskContext.taskMetrics).thenReturn(TaskMetrics.empty)
   }
 
   test("no crashes in end-to-end operation (write, read, remove) using the DiskScheduler") {

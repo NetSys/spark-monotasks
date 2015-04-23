@@ -41,6 +41,7 @@ import org.scalatest.{BeforeAndAfter, FunSuite}
 import org.apache.spark.SharedSparkContext
 import org.apache.spark.deploy.SparkHadoopUtil
 import org.apache.spark.scheduler.{SparkListener, SparkListenerTaskEnd}
+import org.apache.spark.storage.{BlockId, BlockStatus, StorageLevel}
 import org.apache.spark.util.Utils
 
 class InputOutputMetricsSuite extends FunSuite with SharedSparkContext
@@ -309,6 +310,10 @@ class InputOutputMetricsSuite extends FunSuite with SharedSparkContext
     runAndReturnMetrics(job, _.taskMetrics.shuffleWriteMetrics.map(_.shuffleRecordsWritten))
   }
 
+  private def runAndReturnNumUpdatedBlocks(job: => Unit): Long = {
+    runAndReturnMetrics(job, _.taskMetrics.updatedBlocks.map(_.size.toLong))
+  }
+
   private def runAndReturnMetrics(job: => Unit,
       collector: (SparkListenerTaskEnd) => Option[Long]): Long = {
     val taskMetrics = new ArrayBuffer[Long]()
@@ -393,6 +398,17 @@ class InputOutputMetricsSuite extends FunSuite with SharedSparkContext
         classOf[Text], new Configuration()).count()
     }
     assert(bytesRead >= tmpFile.length())
+  }
+
+  test("TaskMetrics.updatedBlocks is updated correctly when persisting RDDs to disk") {
+    val numPartitions = 16
+    val numUpdatedBlocks = runAndReturnNumUpdatedBlocks {
+      val rddA = sc.parallelize(1 to numPartitions, numPartitions)
+      val rddB = rddA.map(i => i * i).persist(StorageLevel.DISK_ONLY)
+      val rddC = rddB.map(i => i * i).persist(StorageLevel.DISK_ONLY)
+      rddC.count()
+    }
+    assert(numUpdatedBlocks === numPartitions * 2)
   }
 }
 

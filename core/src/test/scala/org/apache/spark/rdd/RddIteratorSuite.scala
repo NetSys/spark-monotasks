@@ -120,13 +120,6 @@ class RddIteratorSuite extends FunSuite with BeforeAndAfter with LocalSparkConte
   }
 
   test("iterator: verify task metrics updated correctly for in-memory blocks") {
-    rddB.persist(StorageLevel.MEMORY_ONLY)
-    rddB.iterator(split, context)
-    assert(context.taskMetrics.updatedBlocks.getOrElse(Seq()).size === 2)
-  }
-
-  test("iterator: verify task metrics updated correctly for on-disk blocks") {
-    rddB.persist(StorageLevel.DISK_ONLY)
     rddB.iterator(split, context)
     assert(context.taskMetrics.updatedBlocks.getOrElse(Seq()).size === 2)
   }

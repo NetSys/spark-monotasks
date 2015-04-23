@@ -26,8 +26,9 @@ import org.mockito.Mockito.{mock, when}
 import org.scalatest.{BeforeAndAfter, FunSuite}
 
 import org.apache.spark.{SparkConf, TaskContextImpl}
+import org.apache.spark.executor.TaskMetrics
 import org.apache.spark.monotasks.LocalDagScheduler
-import org.apache.spark.storage.{BlockFileManager, BlockManager, MonotaskResultBlockId,
+import org.apache.spark.storage.{BlockFileManager, BlockManager, BlockStatus, MonotaskResultBlockId,
   StorageLevel, TestBlockId}
 import org.apache.spark.util.Utils
 
@@ -49,6 +50,7 @@ class DiskRemoveMonotaskSuite extends FunSuite with BeforeAndAfter {
 
     val blockManager = mock(classOf[BlockManager])
     when(blockManager.blockFileManager).thenReturn(blockFileManager)
+    when(blockManager.getCurrentBlockStatus(any())).thenReturn(Some(mock(classOf[BlockStatus])))
     when(blockManager.getLocalBytes(serializedDataBlockId)).thenReturn(Some(makeDataBuffer()))
 
     val localDagScheduler = mock(classOf[LocalDagScheduler])
@@ -56,6 +58,7 @@ class DiskRemoveMonotaskSuite extends FunSuite with BeforeAndAfter {
 
     taskContext = mock(classOf[TaskContextImpl])
     when(taskContext.localDagScheduler).thenReturn(localDagScheduler)
+    when(taskContext.taskMetrics).thenReturn(TaskMetrics.empty)
   }
 
   private def makeDataBuffer(): ByteBuffer = {
