@@ -16,7 +16,7 @@
 
 package org.apache.spark.monotasks
 
-import java.nio.{ByteBuffer, ByteOrder}
+import java.nio.ByteBuffer
 
 import scala.collection.mutable.ArrayBuffer
 
@@ -61,10 +61,7 @@ class LocalDagSchedulerIntegrationSuite extends FunSuite with BeforeAndAfter
     val numBlocks = 10
     val dataSizeBytes = 1000
 
-    val dataBuffer = ByteBuffer.allocateDirect(dataSizeBytes)
-    /* Sets dataBuffer's internal byte order (endianness) to the byte order used by the underlying
-     * platform. */
-    dataBuffer.order(ByteOrder.nativeOrder())
+    val dataBuffer = ByteBuffer.allocate(dataSizeBytes)
     for (i <- 1 to dataSizeBytes) {
       dataBuffer.put(i.toByte)
     }

@@ -17,7 +17,7 @@
 package org.apache.spark.monotasks.disk
 
 import java.io.FileInputStream
-import java.nio.{ByteBuffer, ByteOrder}
+import java.nio.ByteBuffer
 
 import scala.util.control.NonFatal
 
@@ -39,10 +39,7 @@ private[spark] class DiskReadMonotask(
       val stream = new FileInputStream(file)
       val channel = stream.getChannel
       try {
-        val buf = ByteBuffer.allocateDirect(file.length().toInt)
-        // Sets dataBuffer's internal byte order (endianness) to the byte order used by the
-        // underlying platform.
-        buf.order(ByteOrder.nativeOrder())
+        val buf = ByteBuffer.allocate(file.length().toInt)
         channel.read(buf)
         buf.flip()
       } catch {

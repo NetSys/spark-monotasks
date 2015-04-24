@@ -17,7 +17,7 @@
 package org.apache.spark.monotasks.disk
 
 import java.io.File
-import java.nio.{ByteBuffer, ByteOrder}
+import java.nio.ByteBuffer
 import java.util.Random
 
 import org.mockito.Matchers.any
@@ -68,10 +68,7 @@ class DiskReadMonotaskSuite extends FunSuite with BeforeAndAfter {
 
   private def makeDataBuffer(): ByteBuffer = {
     val dataSizeBytes = 1000
-    val dataBuffer = ByteBuffer.allocateDirect(dataSizeBytes)
-    // Sets dataBuffer's internal byte order (endianness) to the byte order used by the underlying
-    // platform.
-    dataBuffer.order(ByteOrder.nativeOrder())
+    val dataBuffer = ByteBuffer.allocate(dataSizeBytes)
     for (i <- 1 to dataSizeBytes) {
       dataBuffer.put(i.toByte)
     }
