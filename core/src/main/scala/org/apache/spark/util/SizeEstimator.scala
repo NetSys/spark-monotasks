@@ -28,6 +28,7 @@ import java.util.concurrent.ConcurrentHashMap
 import scala.collection.mutable.ArrayBuffer
 
 import org.apache.spark.Logging
+import org.apache.spark.network.buffer.ManagedBuffer
 import org.apache.spark.util.collection.OpenHashSet
 
 /**
@@ -171,6 +172,9 @@ private[spark] object SizeEstimator extends Logging {
       // Hadoop JobConfs created in the interpreter have a ClassLoader, which greatly confuses
       // the size estimator since it references the whole REPL. Do nothing in this case. In
       // general all ClassLoaders and Classes will be shared between objects anyway.
+    } else if (obj.isInstanceOf[ManagedBuffer]) {
+      // ManagedBuffers also greatly confuse the size estimator, so just rely on the buffer's size.
+      state.size += obj.asInstanceOf[ManagedBuffer].size()
     } else {
       val classInfo = getClassInfo(cls)
       state.size += classInfo.shellSize
