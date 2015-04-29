@@ -81,6 +81,7 @@ private[spark] class ContinuousMonitor(
       //       To the EBS volume? Experiments so far suggest no (because the volume of data is
       //       small), but worth keeping an eye on.
       printWriter.write(JsonMethods.compact(JsonMethods.render(getUtilizationJson())))
+      printWriter.write("\n")
     }
   }
 
