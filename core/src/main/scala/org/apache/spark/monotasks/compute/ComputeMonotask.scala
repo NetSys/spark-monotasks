@@ -38,6 +38,13 @@ private[spark] abstract class ComputeMonotask(context: TaskContextImpl)
 
   /** Runs the execute method and handles common exceptions thrown by ComputeMonotasks. */
   def executeAndHandleExceptions() {
+    // Set the class loader for the thread, which will be used by any broadcast variables that
+    // are deserialized as part of the compute monotask.
+    // TODO: Consider instead changing the thread factory to just
+    //       automatically set the class loader each time a new thread is created (this is fine
+    //       because the dependency manager is the same for all tasks in an executor).
+    Thread.currentThread.setContextClassLoader(context.dependencyManager.replClassLoader)
+
     startTimeNanos = System.nanoTime()
     try {
       Accumulators.registeredAccumulables.set(context.accumulators)

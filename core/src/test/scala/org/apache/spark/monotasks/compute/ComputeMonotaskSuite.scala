@@ -24,7 +24,7 @@ import org.mockito.Mockito.{mock, verify}
 import org.scalatest.{BeforeAndAfterEach, FunSuite}
 
 import org.apache.spark.{LocalSparkContext, SparkConf, SparkContext, SparkEnv, TaskContextImpl}
-import org.apache.spark.executor.TaskMetrics
+import org.apache.spark.executor.{DependencyManager, TaskMetrics}
 import org.apache.spark.monotasks.LocalDagScheduler
 
 class ComputeMonotaskSuite extends FunSuite with BeforeAndAfterEach with LocalSparkContext {
@@ -35,10 +35,13 @@ class ComputeMonotaskSuite extends FunSuite with BeforeAndAfterEach with LocalSp
 
   override def beforeEach() {
     // Create a new SparkContext so that SparkEnv gets properly initialized.
-    sc = new SparkContext("local", "test", new SparkConf(false))
+    val conf = new SparkConf(false)
+    sc = new SparkContext("local", "test", conf)
 
     localDagScheduler = mock(classOf[LocalDagScheduler])
-    taskContext = new TaskContextImpl(SparkEnv.get, localDagScheduler, 500, null, 12, 0)
+    val dependencyManager = new DependencyManager(SparkEnv.get, conf, Nil, true)
+    taskContext = new TaskContextImpl(
+      SparkEnv.get, localDagScheduler, 500, dependencyManager, 12, 0)
     taskContext.initialize(0, 0)
   }
 
