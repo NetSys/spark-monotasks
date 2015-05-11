@@ -73,6 +73,8 @@ private[spark] class LocalDagScheduler(
     macrotaskRemainingMonotasks.keySet.size
   }
 
+  def getOutstandingNetworkBytes(): Long = networkScheduler.getOutstandingBytes
+
   def submitMonotask(monotask: Monotask) = synchronized {
     if (monotask.dependencies.isEmpty) {
       scheduleMonotask(monotask)

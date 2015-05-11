@@ -33,6 +33,7 @@ import org.apache.spark.util.JsonProtocol
  */
 private[spark] class ContinuousMonitor(
     sparkConf: SparkConf,
+    getOutstandingNetworkBytes: () => Long,
     getNumRunningComputeMonotasks: () => Int,
     getNumRunningMacrotasks: () => Int) {
   private val logIntervalMillis = sparkConf.getInt("spark.continuousMonitor.logIntervalMillis", 10)
@@ -67,6 +68,7 @@ private[spark] class ContinuousMonitor(
     ("Cpu Utilization" -> JsonProtocol.cpuUtilizationToJson(cpuUtilization)) ~
     ("Disk Utilization" -> JsonProtocol.diskUtilizationToJson(diskUtilization)) ~
     ("Network Utilization" -> JsonProtocol.networkUtilizationToJson(networkUtilization)) ~
+    ("Outstanding Network Bytes" -> getOutstandingNetworkBytes()) ~
     ("Running Compute Monotasks" -> getNumRunningComputeMonotasks()) ~
     ("Running Macrotasks" -> getNumRunningMacrotasks())
   }
