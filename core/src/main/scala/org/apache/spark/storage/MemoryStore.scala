@@ -144,7 +144,8 @@ private[spark] class MemoryStore(blockManager: BlockManager, maxMemory: Long)
       val entry = entries.remove(blockId)
       if (entry != null) {
         currentMemory -= entry.size
-        logInfo(s"Block $blockId of size ${entry.size} removed from memory (free: $freeMemory).")
+        logInfo(s"Block $blockId of size ${Utils.bytesToString(entry.size)} removed from memory " +
+          s"(free: ${Utils.bytesToString(freeMemory)}).")
         true
       } else {
         false
@@ -202,7 +203,8 @@ private[spark] class MemoryStore(blockManager: BlockManager, maxMemory: Long)
   private def ensureFreeSpace(
       blockIdToAdd: BlockId,
       space: Long): Boolean = {
-    logInfo(s"ensureFreeSpace($space) called with curMem=$currentMemory, maxMem=$maxMemory")
+    logInfo(s"ensureFreeSpace(${Utils.bytesToString(space)}) called with " +
+      s"curMem=${Utils.bytesToString(currentMemory)}, maxMem=${Utils.bytesToString(maxMemory)}")
 
     if (space > maxMemory) {
       logInfo(s"Will not store $blockIdToAdd because it is larger than our memory limit.")

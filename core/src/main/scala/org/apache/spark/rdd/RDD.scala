@@ -366,12 +366,13 @@ abstract class RDD[T: ClassTag](
     val blockManager = context.localDagScheduler.blockManager
 
     if (blockManager.isStored(blockId)) {
-      // This RDD is cached and needs to be loaded into the MemoryStore. Note that it is possible
-      // that the RDD is already cached in the MemoryStore, in which case no new Monotasks are
+      // This RDD is stored locally and might need to be loaded into the MemoryStore (if it is
+      // stored on disk). If the RDD is already cached in the MemoryStore, then no new Monotasks are
       // created.
       //
       // The DAG will look like this:
-      //   DiskReadMonotask/NetworkMonotask/None -> nextMonotask
+      //   DiskReadMonotask/None -> nextMonotask
+      logDebug(s"buildDag: Block $blockId is already stored locally, either in memory or on disk.")
       blockManager.getBlockLoadMonotask(blockId, context).map { monotask =>
         nextMonotask.addDependency(monotask)
         monotask
@@ -388,6 +389,7 @@ abstract class RDD[T: ClassTag](
       // TODO: Handle the case where the storage level is MEMORY_AND_DISK (we currently always write
       //       RDDs with this storage level to disk, and don't even attempt to store them in
       //       memory).
+      logDebug(s"buildDag: Block $blockId needs to be computed and written to disk.")
       val rddComputeMonotask = new RddComputeMonotask(context, this, partition)
       nextMonotask.addDependency(rddComputeMonotask)
       val inputMonotasks =
@@ -404,14 +406,15 @@ abstract class RDD[T: ClassTag](
       inputMonotasks ++ Seq(rddComputeMonotask, serializationMonotask, diskWriteMonotask)
     } else {
       // This RDD needs to be computed but does not need to be cached on disk. If the RDD needs to
-      // be cached in memory/off-heap storage, that will be taken care of when nextMonotask computes
-      // the RDD.
+      // be cached in memory/off-heap storage, that will be taken care of automatically when
+      // nextMonotask computes the RDD.
       //
       // The DAG looks like this:
       //   input monotask ----> nextMonotask
       //   input monotask --'
       //   input monotask --'
       //         ...
+      logDebug(s"buildDag: Block $blockId needs to be computed but not written to disk.")
       getInputMonotasks(partition, dependencyIdToPartitions, context, nextMonotask)
     }
   }

@@ -19,16 +19,17 @@ package org.apache.spark.monotasks.disk
 import java.io.FileInputStream
 import java.nio.ByteBuffer
 
-import org.apache.spark.TaskContextImpl
+import org.apache.spark.{Logging, TaskContextImpl}
 import org.apache.spark.storage.{BlockId, StorageLevel}
+import org.apache.spark.util.Utils
 
 /**
  * Contains the parameters and logic necessary to read a block from disk. The execute() method reads
- * a block from disk and stores the resulting data in the MemoryStore.
+ * a block from disk and stores the resulting serialized data in the MemoryStore.
  */
 private[spark] class DiskReadMonotask(
     context: TaskContextImpl, blockId: BlockId, val diskId: String)
-  extends DiskMonotask(context, blockId) {
+  extends DiskMonotask(context, blockId) with Logging {
 
   resultBlockId = Some(blockId)
 
@@ -39,8 +40,14 @@ private[spark] class DiskReadMonotask(
     val stream = new FileInputStream(file)
     val channel = stream.getChannel
     try {
-      val buf = ByteBuffer.allocate(file.length().toInt)
+      val size = file.length().toInt
+      val buf = ByteBuffer.allocate(size)
+
+      val startTimeMillis = System.currentTimeMillis()
       channel.read(buf)
+      logDebug(s"Block $blockId (size: ${Utils.bytesToString(size)}) read from " +
+        s"disk $diskId in ${System.currentTimeMillis - startTimeMillis} ms.")
+
       buf.flip()
       blockManager.cacheBytes(getResultBlockId(), buf, StorageLevel.MEMORY_ONLY_SER, true)
     } finally {

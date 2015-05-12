@@ -21,9 +21,7 @@ import java.nio.ByteBuffer
 import org.apache.spark.TaskContextImpl
 import org.apache.spark.storage.BlockManager
 
-/**
- * A minimal subclass of monotask for use in testing that generates a dummy macrotask result.
- */
+/** A minimal subclass of Monotask for use in testing that generates a dummy macrotask result. */
 class SimpleMonotaskWithMacrotaskResult(
     val blockManager: BlockManager, context: TaskContextImpl) extends SimpleMonotask(context) {
   override def executeAndHandleExceptions(): Unit = {

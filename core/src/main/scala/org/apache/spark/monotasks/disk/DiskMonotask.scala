@@ -22,8 +22,8 @@ import org.apache.spark.storage.BlockId
 
 /**
  * A DiskMonotask encapsulates the parameters and logic of a single disk operation. Each type of
- * disk operation (read, write, or remove) is represented by a different subclass of DiskMonotask.
- * Subclasses contain logic for interacting with physical disks.
+ * disk operation is represented by a different subclass of DiskMonotask. Subclasses contain logic
+ * for interacting with physical disks.
  */
 private[spark] abstract class DiskMonotask(context: TaskContextImpl, val blockId: BlockId)
   extends Monotask(context) {
