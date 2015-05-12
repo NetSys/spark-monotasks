@@ -46,7 +46,7 @@ private[spark] class NetworkMonotask(
   var networkScheduler: NetworkScheduler = _
 
   def execute(scheduler: NetworkScheduler) {
-    logDebug(s"Sending request for block $shuffleBlockId (size (${Utils.bytesToString(size)}}) " +
+    logInfo(s"Sending request for block $shuffleBlockId (size (${Utils.bytesToString(size)}}) " +
       s"to $remoteAddress")
     networkScheduler = scheduler
     networkScheduler.addOutstandingBytes(size)
