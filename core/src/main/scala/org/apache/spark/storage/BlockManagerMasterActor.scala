@@ -331,16 +331,16 @@ class BlockManagerMasterActor(val isLocal: Boolean, conf: SparkConf, listenerBus
       blockManagerIdByExecutor.get(id.executorId) match {
         case Some(oldId) =>
           // A block manager of the same executor already exists, so remove it (assumed dead)
-          logError("Got two different block manager registrations on same executor - " 
+          logError("Got two different block manager registrations on same executor - "
               + s" will replace old one $oldId with new one $id")
-          removeExecutor(id.executorId)  
+          removeExecutor(id.executorId)
         case None =>
       }
       logInfo("Registering block manager %s with %s RAM, %s".format(
         id.hostPort, Utils.bytesToString(maxMemSize), id))
-      
+
       blockManagerIdByExecutor(id.executorId) = id
-      
+
       blockManagerInfo(id) = new BlockManagerInfo(
         id, System.currentTimeMillis(), maxMemSize, slaveActor)
     }
@@ -452,7 +452,6 @@ private[spark] class BlockManagerInfo(
   extends Logging {
 
   private var _lastSeenMs: Long = timeMs
-  private var _remainingMem: Long = maxMem
 
   // Mapping from block id to its status.
   private val _blocks = new JHashMap[BlockId, BlockStatus]
@@ -472,76 +471,61 @@ private[spark] class BlockManagerInfo(
       diskId: Option[String]) {
 
     updateLastSeenMs()
+    val oldStatus = if (_blocks.contains(blockId)) _blocks.get(blockId) else BlockStatus.empty
 
-    if (_blocks.containsKey(blockId)) {
-      // The block exists on the slave already.
-      val blockStatus: BlockStatus = _blocks.get(blockId)
-      val originalLevel: StorageLevel = blockStatus.storageLevel
-      val originalMemSize: Long = blockStatus.memSize
-
-      if (originalLevel.useMemory) {
-        _remainingMem += originalMemSize
+    val newStatus = if (storageLevel.isValid) {
+      // If the new StorageLevel is valid, (meaning that the block is stored either in memory, on
+      // disk, or in tachyon), then we record the block's updated info.
+      val newStatus = BlockStatus(storageLevel, memSize, diskSize, tachyonSize, diskId)
+      _blocks.put(blockId, newStatus)
+      newStatus
+    } else {
+      // If the StorageLevel is not valid (meaning that the block is no longer stored by this
+      // BlockManager), then we remove the block's info.
+      if (_blocks.contains(blockId)){
+        _blocks.remove(blockId)
       }
+
+      BlockStatus.empty
     }
 
-    if (storageLevel.isValid) {
-      /* isValid means it is either stored in-memory, on-disk or on-Tachyon.
-       * The memSize here indicates the data size in or dropped from memory,
-       * tachyonSize here indicates the data size in or dropped from Tachyon,
-       * and the diskSize here indicates the data size in or dropped to disk.
-       * They can be both larger than 0, when a block is dropped from memory to disk.
-       * Therefore, a safe way to set BlockStatus is to set its info in accurate modes. */
-      if (storageLevel.useMemory) {
-        _blocks.put(blockId, BlockStatus(storageLevel, memSize, 0, 0, None))
-        _remainingMem -= memSize
-        logInfo("Added %s in memory on %s (size: %s, free: %s)".format(
-          blockId, blockManagerId.hostPort, Utils.bytesToString(memSize),
-          Utils.bytesToString(_remainingMem)))
+    // Log changes in the block's storage status.
+    for (device <- Seq("memory", "disk", "tachyon")) {
+      val (oldSize, newSize) = device match {
+        case "memory" => (oldStatus.memSize, newStatus.memSize)
+        case "disk" => (oldStatus.diskSize, newStatus.diskSize)
+        case "tachyon" => (oldStatus.tachyonSize, newStatus.tachyonSize)
+        case _ =>
+          throw new IllegalArgumentException(
+            s"Invalid device: $device. Use only 'memory', 'disk', or 'tachyon'.")
       }
-      if (storageLevel.useDisk) {
-        _blocks.put(blockId, BlockStatus(storageLevel, 0, diskSize, 0, diskId))
-        logInfo("Added %s on disk on %s (size: %s)".format(
-          blockId, blockManagerId.hostPort, Utils.bytesToString(diskSize)))
-      }
-      if (storageLevel.useOffHeap) {
-        _blocks.put(blockId, BlockStatus(storageLevel, 0, 0, tachyonSize, None))
-        logInfo("Added %s on tachyon on %s (size: %s)".format(
-          blockId, blockManagerId.hostPort, Utils.bytesToString(tachyonSize)))
-      }
-    } else if (_blocks.containsKey(blockId)) {
-      // If isValid is not true, drop the block.
-      val blockStatus: BlockStatus = _blocks.get(blockId)
-      _blocks.remove(blockId)
-      if (blockStatus.storageLevel.useMemory) {
-        logInfo("Removed %s on %s in memory (size: %s, free: %s)".format(
-          blockId, blockManagerId.hostPort, Utils.bytesToString(blockStatus.memSize),
-          Utils.bytesToString(_remainingMem)))
-      }
-      if (blockStatus.storageLevel.useDisk) {
-        logInfo("Removed %s on %s on disk (size: %s)".format(
-          blockId, blockManagerId.hostPort, Utils.bytesToString(blockStatus.diskSize)))
-      }
-      if (blockStatus.storageLevel.useOffHeap) {
-        logInfo("Removed %s on %s on tachyon (size: %s)".format(
-          blockId, blockManagerId.hostPort, Utils.bytesToString(blockStatus.tachyonSize)))
+
+      if (oldSize != newSize) {
+        val added = (oldSize < newSize)
+        val preposition = if (device == "disk") "on" else "in"
+        val action = if (added) s"Added $blockId $preposition" else s"Removed $blockId from"
+        val location = s"$device on ${blockManagerId.hostPort}"
+        val size = Math.max(oldSize, newSize)
+        val logMemory = (device == "memory")
+        val memInfo = if (logMemory) s", free: ${Utils.bytesToString(remainingMem)}" else ""
+        logInfo(s"$action $location (size: ${Utils.bytesToString(size)}$memInfo)")
       }
     }
   }
 
   def removeBlock(blockId: BlockId) {
     if (_blocks.containsKey(blockId)) {
-      _remainingMem += _blocks.get(blockId).memSize
       _blocks.remove(blockId)
     }
   }
 
-  def remainingMem: Long = _remainingMem
+  def remainingMem: Long = maxMem - _blocks.values.map(_.memSize).sum
 
   def lastSeenMs: Long = _lastSeenMs
 
   def blocks: JHashMap[BlockId, BlockStatus] = _blocks
 
-  override def toString: String = "BlockManagerInfo " + timeMs + " " + _remainingMem
+  override def toString: String = "BlockManagerInfo " + timeMs + " " + remainingMem
 
   def clear() {
     _blocks.clear()

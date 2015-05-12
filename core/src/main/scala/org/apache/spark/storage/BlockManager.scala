@@ -282,17 +282,9 @@ private[spark] class BlockManager(
    * Tell the master about the current storage status of a block. This will send a block update
    * message reflecting the current status, *not* the desired storage level in its block info.
    * For example, a block with MEMORY_AND_DISK set might have fallen out to be only on disk.
-   *
-   * droppedMemorySize exists to account for when the block is dropped from memory to disk (so
-   * it is still valid). This ensures that update in master will compensate for the increase in
-   * memory on slave.
    */
-  private def reportBlockStatus(
-      blockId: BlockId,
-      info: BlockInfo,
-      status: BlockStatus,
-      droppedMemorySize: Long = 0L): Unit = {
-    val needReregister = !tryToReportBlockStatus(blockId, info, status, droppedMemorySize)
+  private def reportBlockStatus(blockId: BlockId, info: BlockInfo, status: BlockStatus): Unit = {
+    val needReregister = !tryToReportBlockStatus(blockId, info, status)
     if (needReregister) {
       logInfo(s"Got told to re-register updating block $blockId")
       // Re-registering will report our new block for free.
@@ -335,11 +327,10 @@ private[spark] class BlockManager(
   private def tryToReportBlockStatus(
       blockId: BlockId,
       info: BlockInfo,
-      status: BlockStatus,
-      droppedMemorySize: Long = 0L): Boolean = {
+      status: BlockStatus): Boolean = {
     if (info.tellMaster) {
       val storageLevel = status.storageLevel
-      val inMemSize = Math.max(status.memSize, droppedMemorySize)
+      val inMemSize = status.memSize
       val inTachyonSize = status.tachyonSize
       val onDiskSize = status.diskSize
       master.updateBlockInfo(
