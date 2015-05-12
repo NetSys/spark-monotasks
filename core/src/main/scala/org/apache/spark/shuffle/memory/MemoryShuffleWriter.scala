@@ -131,7 +131,7 @@ private[spark] class SerializedObjectWriter(
           byteOutputStream.getByteBuffer(),
           StorageLevel.MEMORY_ONLY_SER,
           tellMaster = false)
-        return result.size
+        return result.map(_._2.memSize).sum
       }
     }
     return 0
