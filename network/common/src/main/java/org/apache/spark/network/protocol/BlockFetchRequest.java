@@ -31,26 +31,54 @@
  * limitations under the License.
  */
 
-package org.apache.spark.network.shuffle;
+package org.apache.spark.network.protocol;
 
-import org.junit.Test;
+import com.google.common.base.Objects;
+import io.netty.buffer.ByteBuf;
 
-import static org.junit.Assert.*;
+/**
+ * Request to fetch a remote block. This will correspond to a single
+ * {@link org.apache.spark.network.protocol.ResponseMessage} (either success or failure).
+ */
+public final class BlockFetchRequest implements RequestMessage {
+  public final String blockId;
 
-import org.apache.spark.network.shuffle.protocol.*;
-
-/** Verifies that all BlockTransferMessages can be serialized correctly. */
-public class BlockTransferMessagesSuite {
-  @Test
-  public void serializeOpenShuffleBlocks() {
-    checkSerializeDeserialize(new OpenBlocks("app-1", "exec-2", new String[] { "b1", "b2" }));
-    checkSerializeDeserialize(new StreamHandle(12345, 16));
+  public BlockFetchRequest(String blockId) {
+    this.blockId = blockId;
   }
 
-  private void checkSerializeDeserialize(BlockTransferMessage msg) {
-    BlockTransferMessage msg2 = BlockTransferMessage.Decoder.fromByteArray(msg.toByteArray());
-    assertEquals(msg, msg2);
-    assertEquals(msg.hashCode(), msg2.hashCode());
-    assertEquals(msg.toString(), msg2.toString());
+  @Override
+  public Type type() {
+    return Type.BlockFetchRequest;
+  }
+
+  @Override
+  public int encodedLength() {
+    return Encoders.Strings.encodedLength(blockId);
+  }
+
+  @Override
+  public void encode(ByteBuf buf) {
+    Encoders.Strings.encode(buf, blockId);
+  }
+
+  public static BlockFetchRequest decode(ByteBuf buf) {
+    return new BlockFetchRequest(Encoders.Strings.decode(buf));
+  }
+
+  @Override
+  public boolean equals(Object other) {
+    if (other instanceof BlockFetchRequest) {
+      BlockFetchRequest o = (BlockFetchRequest) other;
+      return blockId.equals(o.blockId);
+    }
+    return false;
+  }
+
+  @Override
+  public String toString() {
+    return Objects.toStringHelper(this)
+      .add("blockId", blockId)
+      .toString();
   }
 }

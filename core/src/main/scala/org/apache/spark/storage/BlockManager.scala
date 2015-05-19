@@ -52,7 +52,7 @@ import org.apache.spark.monotasks.Monotask
 import org.apache.spark.monotasks.disk.DiskReadMonotask
 import org.apache.spark.network._
 import org.apache.spark.network.buffer.{ManagedBuffer, NioManagedBuffer}
-import org.apache.spark.network.netty.SparkTransportConf
+import org.apache.spark.network.server.BlockFetcher
 import org.apache.spark.serializer.Serializer
 import org.apache.spark.shuffle.ShuffleManager
 import org.apache.spark.util._
@@ -89,7 +89,7 @@ private[spark] class BlockManager(
     private[spark] val blockTransferService: BlockTransferService,
     securityManager: SecurityManager,
     numUsableCores: Int)
-  extends BlockDataManager with Logging {
+  extends BlockFetcher with Logging {
 
   val blockFileManager = new BlockFileManager(conf)
 
@@ -236,11 +236,15 @@ private[spark] class BlockManager(
     }
   }
 
+  override def getBlockData(blockId: String): ManagedBuffer = {
+    getBlockData(BlockId(blockId))
+  }
+
   /**
    * Interface to get local block data. Throws an exception if the block cannot be found or
    * cannot be read successfully.
    */
-  override def getBlockData(blockId: BlockId): ManagedBuffer = {
+  def getBlockData(blockId: BlockId): ManagedBuffer = {
     if (blockId.isShuffle) {
       shuffleManager.shuffleBlockManager.getBlockData(blockId.asInstanceOf[ShuffleBlockId])
     } else {
@@ -253,13 +257,6 @@ private[spark] class BlockManager(
         throw new BlockNotFoundException(blockId.toString)
       }
     }
-  }
-
-  /**
-   * Put the block locally, using the given storage level.
-   */
-  override def cacheBlockData(blockId: BlockId, data: ManagedBuffer, level: StorageLevel): Unit = {
-    cacheBytes(blockId, data.nioByteBuffer(), level)
   }
 
   /**
@@ -522,7 +519,7 @@ private[spark] class BlockManager(
     for (loc <- locations) {
       logDebug(s"Getting remote block $blockId from $loc")
       val data = blockTransferService.fetchBlockSync(
-        loc.host, loc.port, loc.executorId, blockId.toString).nioByteBuffer()
+        loc.host, loc.port, blockId.toString).nioByteBuffer()
 
       if (data != null) {
         if (asBlockResult) {

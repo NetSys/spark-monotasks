@@ -15,6 +15,22 @@
  * limitations under the License.
  */
 
+/*
+ * Copyright 2014 The Regents of The University California
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package org.apache.spark.network;
 
 import java.util.List;
@@ -31,11 +47,10 @@ import org.apache.spark.network.client.TransportClientFactory;
 import org.apache.spark.network.client.TransportResponseHandler;
 import org.apache.spark.network.protocol.MessageDecoder;
 import org.apache.spark.network.protocol.MessageEncoder;
-import org.apache.spark.network.server.RpcHandler;
+import org.apache.spark.network.server.BlockFetcher;
 import org.apache.spark.network.server.TransportChannelHandler;
 import org.apache.spark.network.server.TransportRequestHandler;
 import org.apache.spark.network.server.TransportServer;
-import org.apache.spark.network.server.StreamManager;
 import org.apache.spark.network.util.NettyUtils;
 import org.apache.spark.network.util.TransportConf;
 
@@ -43,10 +58,8 @@ import org.apache.spark.network.util.TransportConf;
  * Contains the context to create a {@link TransportServer}, {@link TransportClientFactory}, and to
  * setup Netty Channel pipelines with a {@link org.apache.spark.network.server.TransportChannelHandler}.
  *
- * There are two communication protocols that the TransportClient provides, control-plane RPCs and
- * data-plane "chunk fetching". The handling of the RPCs is performed outside of the scope of the
- * TransportContext (i.e., by a user-provided handler), and it is responsible for setting up streams
- * which can be streamed through the data plane in chunks using zero-copy IO.
+ * The TransportClient supports a single protocol that allows a server to fetch blocks, one at a
+ * time, from a remote server.
  *
  * The TransportServer and TransportClientFactory both create a TransportChannelHandler for each
  * channel. As each TransportChannelHandler contains a TransportClient, this enables server
@@ -56,14 +69,14 @@ public class TransportContext {
   private final Logger logger = LoggerFactory.getLogger(TransportContext.class);
 
   private final TransportConf conf;
-  private final RpcHandler rpcHandler;
+  private final BlockFetcher blockFetcher;
 
   private final MessageEncoder encoder;
   private final MessageDecoder decoder;
 
-  public TransportContext(TransportConf conf, RpcHandler rpcHandler) {
+  public TransportContext(TransportConf conf, BlockFetcher blockFetcher) {
     this.conf = conf;
-    this.rpcHandler = rpcHandler;
+    this.blockFetcher = blockFetcher;
     this.encoder = new MessageEncoder();
     this.decoder = new MessageDecoder();
   }
@@ -126,7 +139,7 @@ public class TransportContext {
     TransportResponseHandler responseHandler = new TransportResponseHandler(channel);
     TransportClient client = new TransportClient(channel, responseHandler);
     TransportRequestHandler requestHandler = new TransportRequestHandler(channel, client,
-      rpcHandler);
+      blockFetcher);
     return new TransportChannelHandler(client, responseHandler, requestHandler);
   }
 

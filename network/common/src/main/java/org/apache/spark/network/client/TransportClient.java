@@ -15,45 +15,42 @@
  * limitations under the License.
  */
 
+/*
+ * Copyright 2014 The Regents of The University California
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package org.apache.spark.network.client;
 
 import java.io.Closeable;
 import java.io.IOException;
-import java.util.UUID;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 
 import com.google.common.base.Objects;
 import com.google.common.base.Preconditions;
-import com.google.common.base.Throwables;
-import com.google.common.util.concurrent.SettableFuture;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.spark.network.protocol.ChunkFetchRequest;
-import org.apache.spark.network.protocol.RpcRequest;
-import org.apache.spark.network.protocol.StreamChunkId;
+import org.apache.spark.network.protocol.BlockFetchRequest;
 import org.apache.spark.network.util.NettyUtils;
 
 /**
- * Client for fetching consecutive chunks of a pre-negotiated stream. This API is intended to allow
- * efficient transfer of a large amount of data, broken up into chunks with size ranging from
- * hundreds of KB to a few MB.
- *
- * Note that while this client deals with the fetching of chunks from a stream (i.e., data plane),
- * the actual setup of the streams is done outside the scope of the transport layer. The convenience
- * method "sendRPC" is provided to enable control plane communication between the client and server
- * to perform this setup.
- *
- * For example, a typical workflow might be:
- * client.sendRPC(new OpenFile("/foo")) --&gt; returns StreamId = 100
- * client.fetchChunk(streamId = 100, chunkIndex = 0, callback)
- * client.fetchChunk(streamId = 100, chunkIndex = 1, callback)
- * ...
- * client.sendRPC(new CloseStream(100))
+ * Client for fetching one block at a time from a remote host. This API is intended to allow
+ * efficient transfer of large blocks of data (block size ranges from hundreds of KB to a few MB).
  *
  * Construct an instance of TransportClient using {@link TransportClientFactory}. A single
  * TransportClient may be used for multiple streams, but any given stream must be restricted to a
@@ -80,116 +77,44 @@ public class TransportClient implements Closeable {
   }
 
   /**
-   * Requests a single chunk from the remote side, from the pre-negotiated streamId.
+   * Requests a single block from the remote side.
    *
-   * Chunk indices go from 0 onwards. It is valid to request the same chunk multiple times, though
-   * some streams may not support this.
-   *
-   * Multiple fetchChunk requests may be outstanding simultaneously, and the chunks are guaranteed
+   * Multiple fetchBlock requests may be outstanding simultaneously, and the blocks are guaranteed
    * to be returned in the same order that they were requested, assuming only a single
-   * TransportClient is used to fetch the chunks.
+   * TransportClient is used to fetch the blocks.
    *
-   * @param streamId Identifier that refers to a stream in the remote StreamManager. This should
-   *                 be agreed upon by client and server beforehand.
-   * @param chunkIndex 0-based index of the chunk to fetch
-   * @param callback Callback invoked upon successful receipt of chunk, or upon any failure.
+   * @param blockId Identifier for the block.
+   * @param callback Callback invoked upon successful receipt of block, or upon any failure.
    */
-  public void fetchChunk(
-      long streamId,
-      final int chunkIndex,
-      final ChunkReceivedCallback callback) {
+  public void fetchBlock(final String blockId, final BlockReceivedCallback callback) {
     final String serverAddr = NettyUtils.getRemoteAddress(channel);
     final long startTime = System.currentTimeMillis();
-    logger.debug("Sending fetch chunk request {} to {}", chunkIndex, serverAddr);
+    logger.debug("Sending request for block {} to {}", blockId, serverAddr);
 
-    final StreamChunkId streamChunkId = new StreamChunkId(streamId, chunkIndex);
-    handler.addFetchRequest(streamChunkId, callback);
+    handler.addFetchRequest(blockId, callback);
 
-    channel.writeAndFlush(new ChunkFetchRequest(streamChunkId)).addListener(
+    channel.writeAndFlush(new BlockFetchRequest(blockId)).addListener(
       new ChannelFutureListener() {
         @Override
         public void operationComplete(ChannelFuture future) throws Exception {
           if (future.isSuccess()) {
             long timeTaken = System.currentTimeMillis() - startTime;
-            logger.trace("Sending request {} to {} took {} ms", streamChunkId, serverAddr,
+            logger.trace("Sending request {} to {} took {} ms", blockId, serverAddr,
               timeTaken);
           } else {
-            String errorMsg = String.format("Failed to send request %s to %s: %s", streamChunkId,
+            String errorMsg = String.format("Failed to send request %s to %s: %s", blockId,
               serverAddr, future.cause());
             logger.error(errorMsg, future.cause());
-            handler.removeFetchRequest(streamChunkId);
+            handler.removeFetchRequest(blockId);
             channel.close();
             try {
-              callback.onFailure(chunkIndex, new IOException(errorMsg, future.cause()));
+              callback.onFailure(blockId, new IOException(errorMsg, future.cause()));
             } catch (Exception e) {
               logger.error("Uncaught exception in RPC response callback handler!", e);
             }
           }
         }
       });
-  }
-
-  /**
-   * Sends an opaque message to the RpcHandler on the server-side. The callback will be invoked
-   * with the server's response or upon any failure.
-   */
-  public void sendRpc(byte[] message, final RpcResponseCallback callback) {
-    final String serverAddr = NettyUtils.getRemoteAddress(channel);
-    final long startTime = System.currentTimeMillis();
-    logger.trace("Sending RPC to {}", serverAddr);
-
-    final long requestId = Math.abs(UUID.randomUUID().getLeastSignificantBits());
-    handler.addRpcRequest(requestId, callback);
-
-    channel.writeAndFlush(new RpcRequest(requestId, message)).addListener(
-      new ChannelFutureListener() {
-        @Override
-        public void operationComplete(ChannelFuture future) throws Exception {
-          if (future.isSuccess()) {
-            long timeTaken = System.currentTimeMillis() - startTime;
-            logger.trace("Sending request {} to {} took {} ms", requestId, serverAddr, timeTaken);
-          } else {
-            String errorMsg = String.format("Failed to send RPC %s to %s: %s", requestId,
-              serverAddr, future.cause());
-            logger.error(errorMsg, future.cause());
-            handler.removeRpcRequest(requestId);
-            channel.close();
-            try {
-              callback.onFailure(new IOException(errorMsg, future.cause()));
-            } catch (Exception e) {
-              logger.error("Uncaught exception in RPC response callback handler!", e);
-            }
-          }
-        }
-      });
-  }
-
-  /**
-   * Synchronously sends an opaque message to the RpcHandler on the server-side, waiting for up to
-   * a specified timeout for a response.
-   */
-  public byte[] sendRpcSync(byte[] message, long timeoutMs) {
-    final SettableFuture<byte[]> result = SettableFuture.create();
-
-    sendRpc(message, new RpcResponseCallback() {
-      @Override
-      public void onSuccess(byte[] response) {
-        result.set(response);
-      }
-
-      @Override
-      public void onFailure(Throwable e) {
-        result.setException(e);
-      }
-    });
-
-    try {
-      return result.get(timeoutMs, TimeUnit.MILLISECONDS);
-    } catch (ExecutionException e) {
-      throw Throwables.propagate(e.getCause());
-    } catch (Exception e) {
-      throw Throwables.propagate(e);
-    }
   }
 
   @Override

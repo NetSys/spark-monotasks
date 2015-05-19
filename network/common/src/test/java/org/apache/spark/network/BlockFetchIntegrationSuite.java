@@ -15,6 +15,22 @@
  * limitations under the License.
  */
 
+/*
+ * Copyright 2014 The Regents of The University California
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package org.apache.spark.network;
 
 import java.io.File;
@@ -40,30 +56,24 @@ import static org.junit.Assert.*;
 import org.apache.spark.network.buffer.FileSegmentManagedBuffer;
 import org.apache.spark.network.buffer.ManagedBuffer;
 import org.apache.spark.network.buffer.NioManagedBuffer;
-import org.apache.spark.network.client.ChunkReceivedCallback;
-import org.apache.spark.network.client.RpcResponseCallback;
+import org.apache.spark.network.client.BlockReceivedCallback;
 import org.apache.spark.network.client.TransportClient;
 import org.apache.spark.network.client.TransportClientFactory;
-import org.apache.spark.network.server.RpcHandler;
+import org.apache.spark.network.server.BlockFetcher;
 import org.apache.spark.network.server.TransportServer;
-import org.apache.spark.network.server.StreamManager;
 import org.apache.spark.network.util.SystemPropertyConfigProvider;
 import org.apache.spark.network.util.TransportConf;
 
-public class ChunkFetchIntegrationSuite {
-  static final long STREAM_ID = 1;
-  static final int BUFFER_CHUNK_INDEX = 0;
-  static final int FILE_CHUNK_INDEX = 1;
+public class BlockFetchIntegrationSuite {
+  static final String BUFFER_BLOCK_ID = "buffer";
+  static final String FILE_BLOCK_ID = "file";
 
   static TransportServer server;
   static TransportClientFactory clientFactory;
-  static StreamManager streamManager;
   static File testFile;
 
   static ManagedBuffer bufferChunk;
   static ManagedBuffer fileChunk;
-
-  private TransportConf transportConf;
 
   @BeforeClass
   public static void setUp() throws Exception {
@@ -86,31 +96,20 @@ public class ChunkFetchIntegrationSuite {
     final TransportConf conf = new TransportConf(new SystemPropertyConfigProvider());
     fileChunk = new FileSegmentManagedBuffer(conf, testFile, 10, testFile.length() - 25);
 
-    streamManager = new StreamManager() {
+    BlockFetcher blockFetcher = new BlockFetcher() {
       @Override
-      public ManagedBuffer getChunk(long streamId, int chunkIndex) {
-        assertEquals(STREAM_ID, streamId);
-        if (chunkIndex == BUFFER_CHUNK_INDEX) {
+      public ManagedBuffer getBlockData(String blockId) {
+        if (blockId.equals(BUFFER_BLOCK_ID)) {
           return new NioManagedBuffer(buf);
-        } else if (chunkIndex == FILE_CHUNK_INDEX) {
+        } else if (blockId.equals(FILE_BLOCK_ID)) {
           return new FileSegmentManagedBuffer(conf, testFile, 10, testFile.length() - 25);
         } else {
-          throw new IllegalArgumentException("Invalid chunk index: " + chunkIndex);
+          throw new IllegalArgumentException("Invalid chunk index: " + blockId);
         }
       }
     };
-    RpcHandler handler = new RpcHandler() {
-      @Override
-      public void receive(TransportClient client, byte[] message, RpcResponseCallback callback) {
-        throw new UnsupportedOperationException();
-      }
 
-      @Override
-      public StreamManager getStreamManager() {
-        return streamManager;
-      }
-    };
-    TransportContext context = new TransportContext(conf, handler);
+    TransportContext context = new TransportContext(conf, blockFetcher);
     server = context.createServer();
     clientFactory = context.createClientFactory();
   }
@@ -123,8 +122,8 @@ public class ChunkFetchIntegrationSuite {
   }
 
   class FetchResult {
-    public Set<Integer> successChunks;
-    public Set<Integer> failedChunks;
+    public Set<String> successBlocks;
+    public Set<String> failedBlocks;
     public List<ManagedBuffer> buffers;
 
     public void releaseBuffers() {
@@ -134,35 +133,33 @@ public class ChunkFetchIntegrationSuite {
     }
   }
 
-  private FetchResult fetchChunks(List<Integer> chunkIndices) throws Exception {
+  private FetchResult fetchBlock(String blockId) throws Exception {
     TransportClient client = clientFactory.createClient(TestUtils.getLocalHost(), server.getPort());
     final Semaphore sem = new Semaphore(0);
 
     final FetchResult res = new FetchResult();
-    res.successChunks = Collections.synchronizedSet(new HashSet<Integer>());
-    res.failedChunks = Collections.synchronizedSet(new HashSet<Integer>());
+    res.successBlocks = Collections.synchronizedSet(new HashSet<String>());
+    res.failedBlocks = Collections.synchronizedSet(new HashSet<String>());
     res.buffers = Collections.synchronizedList(new LinkedList<ManagedBuffer>());
 
-    ChunkReceivedCallback callback = new ChunkReceivedCallback() {
+    BlockReceivedCallback callback = new BlockReceivedCallback() {
       @Override
-      public void onSuccess(int chunkIndex, ManagedBuffer buffer) {
+      public void onSuccess(String blockId, ManagedBuffer buffer) {
         buffer.retain();
-        res.successChunks.add(chunkIndex);
+        res.successBlocks.add(blockId);
         res.buffers.add(buffer);
         sem.release();
       }
 
       @Override
-      public void onFailure(int chunkIndex, Throwable e) {
-        res.failedChunks.add(chunkIndex);
+      public void onFailure(String blockId, Throwable e) {
+        res.failedBlocks.add(blockId);
         sem.release();
       }
     };
 
-    for (int chunkIndex : chunkIndices) {
-      client.fetchChunk(STREAM_ID, chunkIndex, callback);
-    }
-    if (!sem.tryAcquire(chunkIndices.size(), 5, TimeUnit.SECONDS)) {
+    client.fetchBlock(blockId, callback);
+    if (!sem.tryAcquire(1, 5, TimeUnit.SECONDS)) {
       fail("Timeout getting response from the server");
     }
     client.close();
@@ -171,46 +168,28 @@ public class ChunkFetchIntegrationSuite {
 
   @Test
   public void fetchBufferChunk() throws Exception {
-    FetchResult res = fetchChunks(Lists.newArrayList(BUFFER_CHUNK_INDEX));
-    assertEquals(res.successChunks, Sets.newHashSet(BUFFER_CHUNK_INDEX));
-    assertTrue(res.failedChunks.isEmpty());
+    FetchResult res = fetchBlock(BUFFER_BLOCK_ID);
+    assertEquals(res.successBlocks, Sets.newHashSet(BUFFER_BLOCK_ID));
+    assertTrue(res.failedBlocks.isEmpty());
     assertBufferListsEqual(res.buffers, Lists.newArrayList(bufferChunk));
     res.releaseBuffers();
   }
 
   @Test
   public void fetchFileChunk() throws Exception {
-    FetchResult res = fetchChunks(Lists.newArrayList(FILE_CHUNK_INDEX));
-    assertEquals(res.successChunks, Sets.newHashSet(FILE_CHUNK_INDEX));
-    assertTrue(res.failedChunks.isEmpty());
+    FetchResult res = fetchBlock(FILE_BLOCK_ID);
+    assertEquals(res.successBlocks, Sets.newHashSet(FILE_BLOCK_ID));
+    assertTrue(res.failedBlocks.isEmpty());
     assertBufferListsEqual(res.buffers, Lists.newArrayList(fileChunk));
     res.releaseBuffers();
   }
 
   @Test
   public void fetchNonExistentChunk() throws Exception {
-    FetchResult res = fetchChunks(Lists.newArrayList(12345));
-    assertTrue(res.successChunks.isEmpty());
-    assertEquals(res.failedChunks, Sets.newHashSet(12345));
+    FetchResult res = fetchBlock("12345");
+    assertTrue(res.successBlocks.isEmpty());
+    assertEquals(res.failedBlocks, Sets.newHashSet("12345"));
     assertTrue(res.buffers.isEmpty());
-  }
-
-  @Test
-  public void fetchBothChunks() throws Exception {
-    FetchResult res = fetchChunks(Lists.newArrayList(BUFFER_CHUNK_INDEX, FILE_CHUNK_INDEX));
-    assertEquals(res.successChunks, Sets.newHashSet(BUFFER_CHUNK_INDEX, FILE_CHUNK_INDEX));
-    assertTrue(res.failedChunks.isEmpty());
-    assertBufferListsEqual(res.buffers, Lists.newArrayList(bufferChunk, fileChunk));
-    res.releaseBuffers();
-  }
-
-  @Test
-  public void fetchChunkAndNonExistent() throws Exception {
-    FetchResult res = fetchChunks(Lists.newArrayList(BUFFER_CHUNK_INDEX, 12345));
-    assertEquals(res.successChunks, Sets.newHashSet(BUFFER_CHUNK_INDEX));
-    assertEquals(res.failedChunks, Sets.newHashSet(12345));
-    assertBufferListsEqual(res.buffers, Lists.newArrayList(bufferChunk));
-    res.releaseBuffers();
   }
 
   private void assertBufferListsEqual(List<ManagedBuffer> list0, List<ManagedBuffer> list1)

@@ -228,13 +228,13 @@ private[spark] class LocalDagScheduler(
    */
   private def scheduleMonotask(monotask: Monotask) {
     assert(monotask.dependenciesSatisfied())
+    updateMetricsForStartedMonotask(monotask)
     monotask match {
       case computeMonotask: ComputeMonotask => computeScheduler.submitTask(computeMonotask)
       case networkMonotask: NetworkMonotask => networkScheduler.submitTask(networkMonotask)
       case diskMonotask: DiskMonotask => diskScheduler.submitTask(diskMonotask)
       case _ => logError(s"Received unexpected type of monotask: $monotask")
     }
-    updateMetricsForStartedMonotask(monotask)
     /* Add the monotask to runningMonotasks before removing it from waitingMonotasks to avoid
      * a race condition in waitUntilAllTasksComplete where both sets are empty. */
     runningMonotasks += monotask.taskId

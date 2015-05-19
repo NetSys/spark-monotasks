@@ -15,6 +15,22 @@
  * limitations under the License.
  */
 
+/*
+ * Copyright 2014 The Regents of The University California
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package org.apache.spark.network;
 
 import io.netty.channel.embedded.EmbeddedChannel;
@@ -22,14 +38,10 @@ import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
 
+import org.apache.spark.network.protocol.BlockFetchFailure;
+import org.apache.spark.network.protocol.BlockFetchRequest;
+import org.apache.spark.network.protocol.BlockFetchSuccess;
 import org.apache.spark.network.protocol.Message;
-import org.apache.spark.network.protocol.StreamChunkId;
-import org.apache.spark.network.protocol.ChunkFetchRequest;
-import org.apache.spark.network.protocol.ChunkFetchFailure;
-import org.apache.spark.network.protocol.ChunkFetchSuccess;
-import org.apache.spark.network.protocol.RpcRequest;
-import org.apache.spark.network.protocol.RpcFailure;
-import org.apache.spark.network.protocol.RpcResponse;
 import org.apache.spark.network.protocol.MessageDecoder;
 import org.apache.spark.network.protocol.MessageEncoder;
 import org.apache.spark.network.util.NettyUtils;
@@ -67,20 +79,14 @@ public class ProtocolSuite {
 
   @Test
   public void requests() {
-    testClientToServer(new ChunkFetchRequest(new StreamChunkId(1, 2)));
-    testClientToServer(new RpcRequest(12345, new byte[0]));
-    testClientToServer(new RpcRequest(12345, new byte[100]));
+    testClientToServer(new BlockFetchRequest("rdd_1_2"));
   }
 
   @Test
   public void responses() {
-    testServerToClient(new ChunkFetchSuccess(new StreamChunkId(1, 2), new TestManagedBuffer(10)));
-    testServerToClient(new ChunkFetchSuccess(new StreamChunkId(1, 2), new TestManagedBuffer(0)));
-    testServerToClient(new ChunkFetchFailure(new StreamChunkId(1, 2), "this is an error"));
-    testServerToClient(new ChunkFetchFailure(new StreamChunkId(1, 2), ""));
-    testServerToClient(new RpcResponse(12345, new byte[0]));
-    testServerToClient(new RpcResponse(12345, new byte[1000]));
-    testServerToClient(new RpcFailure(0, "this is an error"));
-    testServerToClient(new RpcFailure(0, ""));
+    testServerToClient(new BlockFetchSuccess("rdd_1_2", new TestManagedBuffer(10)));
+    testServerToClient(new BlockFetchSuccess("rdd_1_2", new TestManagedBuffer(0)));
+    testServerToClient(new BlockFetchFailure("rdd_1_2", "this is an error"));
+    testServerToClient(new BlockFetchFailure("rdd_1_2", ""));
   }
 }

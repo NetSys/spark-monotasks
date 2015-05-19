@@ -41,16 +41,17 @@ import scala.concurrent.duration.Duration
 
 import org.apache.spark.Logging
 import org.apache.spark.network.buffer.{NioManagedBuffer, ManagedBuffer}
-import org.apache.spark.network.shuffle.BlockFetchingListener
+import org.apache.spark.network.client.BlockReceivedCallback
+import org.apache.spark.storage.BlockManager
 
 private[spark]
 abstract class BlockTransferService extends Closeable with Logging {
 
   /**
-   * Initialize the transfer service by giving it the BlockDataManager that can be used to fetch
+   * Initialize the transfer service by giving it the BlockManager that can be used to fetch
    * local blocks or put local blocks.
    */
-  def init(blockDataManager: BlockDataManager)
+  def init(blockManager: BlockManager)
 
   /**
    * Tear down the transfer service.
@@ -68,34 +69,28 @@ abstract class BlockTransferService extends Closeable with Logging {
   def hostName: String
 
   /**
-   * Fetch a sequence of blocks from a remote node asynchronously,
-   * available only after [[init]] is invoked.
-   *
-   * Note that this API takes a sequence so the implementation can batch requests, and does not
-   * return a future so the underlying implementation can invoke onBlockFetchSuccess as soon as
-   * the data of a block is fetched, rather than waiting for all blocks to be fetched.
+   * Fetch a block from a remote node asynchronously, available only after [[init]] is invoked.
    */
-  def fetchBlocks(
+  def fetchBlock(
       host: String,
       port: Int,
-      execId: String,
-      blockIds: Array[String],
-      listener: BlockFetchingListener): Unit
+      blockId: String,
+      blockReceivedCallback: BlockReceivedCallback): Unit
 
   /**
-   * A special case of [[fetchBlocks]], as it fetches only one block and is blocking.
+   * A special case of [[fetchBlock]] that is blocking.
    *
    * It is also only available after [[init]] is invoked.
    */
-  def fetchBlockSync(host: String, port: Int, execId: String, blockId: String): ManagedBuffer = {
+  def fetchBlockSync(host: String, port: Int, blockId: String): ManagedBuffer = {
     // A monitor for the thread to wait on.
     val result = Promise[ManagedBuffer]()
-    fetchBlocks(host, port, execId, Array(blockId),
-      new BlockFetchingListener {
-        override def onBlockFetchFailure(blockId: String, exception: Throwable): Unit = {
+    fetchBlock(host, port, blockId,
+      new BlockReceivedCallback {
+        override def onFailure(blockId: String, exception: Throwable): Unit = {
           result.failure(exception)
         }
-        override def onBlockFetchSuccess(blockId: String, data: ManagedBuffer): Unit = {
+        override def onSuccess(blockId: String, data: ManagedBuffer): Unit = {
           val ret = ByteBuffer.allocate(data.size.toInt)
           ret.put(data.nioByteBuffer())
           ret.flip()

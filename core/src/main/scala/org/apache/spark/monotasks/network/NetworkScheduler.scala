@@ -28,17 +28,11 @@ private[spark] class NetworkScheduler() extends Logging {
   private val threads = Runtime.getRuntime.availableProcessors()
   logInfo(s"Started NetworkScheduler with $threads parallel threads")
 
-  // TODO: This threadpool currently uses a single FIFO queue when the number of tasks exceeds the
-  //       number of threads; eventually, we'll want a smarter queueing strategy.
-  private val networkThreadpool = Utils.newDaemonFixedThreadPool(threads, "network-monotask-thread")
-
   /** Number of bytes that this executor is currently waiting to receive over the network. */
   private var currentOutstandingBytes = new AtomicLong(0)
 
   def submitTask(monotask: NetworkMonotask) {
-    networkThreadpool.execute(new Runnable {
-      override def run(): Unit = monotask.execute(NetworkScheduler.this)
-    })
+    monotask.execute(NetworkScheduler.this)
   }
 
   /**

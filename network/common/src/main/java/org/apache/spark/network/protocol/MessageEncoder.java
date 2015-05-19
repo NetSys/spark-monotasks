@@ -15,6 +15,22 @@
  * limitations under the License.
  */
 
+/*
+ * Copyright 2014 The Regents of The University California
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package org.apache.spark.network.protocol;
 
 import java.util.List;
@@ -38,7 +54,7 @@ public final class MessageEncoder extends MessageToMessageEncoder<Message> {
   /***
    * Encodes a Message by invoking its encode() method. For non-data messages, we will add one
    * ByteBuf to 'out' containing the total frame length, the message type, and the message itself.
-   * In the case of a ChunkFetchSuccess, we will also add the ManagedBuffer corresponding to the
+   * In the case of a BlockFetchSuccess, we will also add the ManagedBuffer corresponding to the
    * data to 'out', in order to enable zero-copy transfer.
    */
   @Override
@@ -46,18 +62,18 @@ public final class MessageEncoder extends MessageToMessageEncoder<Message> {
     Object body = null;
     long bodyLength = 0;
 
-    // Only ChunkFetchSuccesses have data besides the header.
+    // Only BlockFetchSuccesses have data besides the header.
     // The body is used in order to enable zero-copy transfer for the payload.
-    if (in instanceof ChunkFetchSuccess) {
-      ChunkFetchSuccess resp = (ChunkFetchSuccess) in;
+    if (in instanceof BlockFetchSuccess) {
+      BlockFetchSuccess resp = (BlockFetchSuccess) in;
       try {
         bodyLength = resp.buffer.size();
         body = resp.buffer.convertToNetty();
       } catch (Exception e) {
         // Re-encode this message as BlockFetchFailure.
         logger.error(String.format("Error opening block %s for client %s",
-          resp.streamChunkId, ctx.channel().remoteAddress()), e);
-        encode(ctx, new ChunkFetchFailure(resp.streamChunkId, e.getMessage()), out);
+          resp.blockId, ctx.channel().remoteAddress()), e);
+        encode(ctx, new BlockFetchFailure(resp.blockId, e.getMessage()), out);
         return;
       }
     }

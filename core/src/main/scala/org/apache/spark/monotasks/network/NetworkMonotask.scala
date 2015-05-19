@@ -19,7 +19,7 @@ package org.apache.spark.monotasks.network
 import org.apache.spark.{ExceptionFailure, FetchFailed, Logging, SparkException, TaskContextImpl}
 import org.apache.spark.monotasks.Monotask
 import org.apache.spark.network.buffer.ManagedBuffer
-import org.apache.spark.network.shuffle.BlockFetchingListener
+import org.apache.spark.network.client.BlockReceivedCallback
 import org.apache.spark.storage.{BlockId, BlockManagerId, MonotaskResultBlockId, ShuffleBlockId,
   StorageLevel}
 import org.apache.spark.util.Utils
@@ -35,10 +35,10 @@ import org.apache.spark.util.Utils
  */
 private[spark] class NetworkMonotask(
     context: TaskContextImpl,
-    val remoteAddress: BlockManagerId,
-    shuffleBlockId: ShuffleBlockId,
+    private val remoteAddress: BlockManagerId,
+    private val shuffleBlockId: ShuffleBlockId,
     private val size: Long)
-  extends Monotask(context) with Logging with BlockFetchingListener {
+  extends Monotask(context) with Logging with BlockReceivedCallback {
 
   resultBlockId = Some(new MonotaskResultBlockId(taskId))
 
@@ -50,15 +50,31 @@ private[spark] class NetworkMonotask(
       s"to $remoteAddress")
     networkScheduler = scheduler
     networkScheduler.addOutstandingBytes(size)
-    context.env.blockManager.blockTransferService.fetchBlocks(
-      remoteAddress.host,
-      remoteAddress.port,
-      remoteAddress.executorId,
-      Array(shuffleBlockId.toString),
-      this)
+
+    try {
+      context.env.blockTransferService.fetchBlock(
+        remoteAddress.host,
+        remoteAddress.port,
+        shuffleBlockId.toString,
+        this)
+    } catch {
+      case t: Throwable => {
+        logError(s"Failed to initiate fetchBlock for shuffle block $shuffleBlockId", t)
+        val failureReason = FetchFailed(
+          remoteAddress,
+          shuffleBlockId.shuffleId,
+          shuffleBlockId.mapId,
+          context.partitionId,
+          Utils.exceptionString(t))
+        val serializedFailureReason =
+          context.env.closureSerializer.newInstance().serialize(failureReason)
+        context.localDagScheduler.handleTaskFailure(this, serializedFailureReason)
+      }
+
+    }
   }
 
-  override def onBlockFetchSuccess(blockId: String, buf: ManagedBuffer): Unit = {
+  override def onSuccess(blockId: String, buf: ManagedBuffer): Unit = {
     networkScheduler.addOutstandingBytes(-size)
     // Increment the ref count because we need to pass this to a different thread.
     // This needs to be released after use.
@@ -67,7 +83,7 @@ private[spark] class NetworkMonotask(
     context.localDagScheduler.handleTaskCompletion(this)
   }
 
-  override def onBlockFetchFailure(failedBlockId: String, e: Throwable): Unit = {
+  override def onFailure(failedBlockId: String, e: Throwable): Unit = {
     networkScheduler.addOutstandingBytes(-size)
     logError(s"Failed to get block(s) from ${remoteAddress.host}:${remoteAddress.port}", e)
     val serializedFailureReason = BlockId(failedBlockId) match {

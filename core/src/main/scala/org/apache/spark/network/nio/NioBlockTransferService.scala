@@ -37,8 +37,8 @@ import java.nio.ByteBuffer
 
 import org.apache.spark.network._
 import org.apache.spark.network.buffer.NioManagedBuffer
-import org.apache.spark.network.shuffle.BlockFetchingListener
-import org.apache.spark.storage.{BlockId, StorageLevel}
+import org.apache.spark.network.client.BlockReceivedCallback
+import org.apache.spark.storage.{BlockId, BlockManager, StorageLevel}
 import org.apache.spark.util.Utils
 import org.apache.spark.{Logging, SecurityManager, SparkConf, SparkException}
 
@@ -52,7 +52,7 @@ final class NioBlockTransferService(conf: SparkConf, securityManager: SecurityMa
 
   private var cm: ConnectionManager = _
 
-  private var blockDataManager: BlockDataManager = _
+  private var blockManager: BlockManager = _
 
   /**
    * Port number the service is listening on, available only after [[init]] is invoked.
@@ -71,11 +71,11 @@ final class NioBlockTransferService(conf: SparkConf, securityManager: SecurityMa
   }
 
   /**
-   * Initialize the transfer service by giving it the BlockDataManager that can be used to fetch
+   * Initialize the transfer service by giving it the BlockManager that can be used to fetch
    * local blocks or put local blocks.
    */
-  override def init(blockDataManager: BlockDataManager): Unit = {
-    this.blockDataManager = blockDataManager
+  override def init(blockManager: BlockManager): Unit = {
+    this.blockManager = blockManager
     cm = new ConnectionManager(
       conf.getInt("spark.blockManager.port", 0),
       conf,
@@ -93,18 +93,16 @@ final class NioBlockTransferService(conf: SparkConf, securityManager: SecurityMa
     }
   }
 
-  override def fetchBlocks(
+  override def fetchBlock(
       host: String,
       port: Int,
-      execId: String,
-      blockIds: Array[String],
-      listener: BlockFetchingListener): Unit = {
+      blockId: String,
+      listener: BlockReceivedCallback): Unit = {
     checkInit()
 
     val cmId = new ConnectionManagerId(host, port)
-    val blockMessageArray = new BlockMessageArray(blockIds.map { blockId =>
-      BlockMessage.fromGetBlock(GetBlock(BlockId(blockId)))
-    })
+    val blockMessageArray =
+      new BlockMessageArray(Array(BlockMessage.fromGetBlock(GetBlock(BlockId(blockId)))))
 
     val future = cm.sendMessageReliably(cmId, blockMessageArray.toBufferMessage)
 
@@ -115,21 +113,19 @@ final class NioBlockTransferService(conf: SparkConf, securityManager: SecurityMa
 
       // SPARK-4064: In some cases(eg. Remote block was removed) blockMessageArray may be empty.
       if (blockMessageArray.isEmpty) {
-        blockIds.foreach { id =>
-          listener.onBlockFetchFailure(id, new SparkException(s"Received empty message from $cmId"))
-        }
+        listener.onFailure(
+          blockId, new SparkException(s"Received empty message from $cmId"))
       } else {
         for (blockMessage: BlockMessage <- blockMessageArray) {
           val msgType = blockMessage.getType
           if (msgType != BlockMessage.TYPE_GOT_BLOCK) {
             if (blockMessage.getId != null) {
-              listener.onBlockFetchFailure(blockMessage.getId.toString,
+              listener.onFailure(blockMessage.getId.toString,
                 new SparkException(s"Unexpected message $msgType received from $cmId"))
             }
           } else {
             val blockId = blockMessage.getId
-            val networkSize = blockMessage.getData.limit()
-            listener.onBlockFetchSuccess(
+            listener.onSuccess(
               blockId.toString, new NioManagedBuffer(blockMessage.getData))
           }
         }
@@ -137,9 +133,7 @@ final class NioBlockTransferService(conf: SparkConf, securityManager: SecurityMa
     }(cm.futureExecContext)
 
     future.onFailure { case exception =>
-      blockIds.foreach { blockId =>
-        listener.onBlockFetchFailure(blockId, exception)
-      }
+      listener.onFailure(blockId, exception)
     }(cm.futureExecContext)
   }
 
@@ -194,7 +188,7 @@ final class NioBlockTransferService(conf: SparkConf, securityManager: SecurityMa
   private def putBlock(blockId: BlockId, bytes: ByteBuffer, level: StorageLevel) {
     val startTimeMs = System.currentTimeMillis()
     logDebug("PutBlock " + blockId + " started from " + startTimeMs + " with data: " + bytes)
-    blockDataManager.cacheBlockData(blockId, new NioManagedBuffer(bytes), level)
+    blockManager.cacheBytes(blockId, bytes, level)
     logDebug("PutBlock " + blockId + " used " + Utils.getUsedTimeMs(startTimeMs)
       + " with data size: " + bytes.limit)
   }
@@ -202,7 +196,7 @@ final class NioBlockTransferService(conf: SparkConf, securityManager: SecurityMa
   private def getBlock(blockId: BlockId): ByteBuffer = {
     val startTimeMs = System.currentTimeMillis()
     logDebug("GetBlock " + blockId + " started from " + startTimeMs)
-    val buffer = blockDataManager.getBlockData(blockId)
+    val buffer = blockManager.getBlockData(blockId)
     logDebug("GetBlock " + blockId + " used " + Utils.getUsedTimeMs(startTimeMs)
       + " and got buffer " + buffer)
     buffer.nioByteBuffer()

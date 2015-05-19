@@ -33,45 +33,55 @@
 
 package org.apache.spark.network.protocol;
 
-import java.util.List;
-
+import com.google.common.base.Objects;
 import io.netty.buffer.ByteBuf;
-import io.netty.channel.ChannelHandler;
-import io.netty.channel.ChannelHandlerContext;
-import io.netty.handler.codec.MessageToMessageDecoder;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
- * Decoder used by the client side to encode server-to-client responses.
- * This encoder is stateless so it is safe to be shared by multiple threads.
+ * Response to {@link BlockFetchRequest} when there is an error fetching the chunk.
  */
-@ChannelHandler.Sharable
-public final class MessageDecoder extends MessageToMessageDecoder<ByteBuf> {
+public final class BlockFetchFailure implements ResponseMessage {
+  public final String blockId;
+  public final String errorString;
 
-  private final Logger logger = LoggerFactory.getLogger(MessageDecoder.class);
-  @Override
-  public void decode(ChannelHandlerContext ctx, ByteBuf in, List<Object> out) {
-    Message.Type msgType = Message.Type.decode(in);
-    Message decoded = decode(msgType, in);
-    assert decoded.type() == msgType;
-    logger.trace("Received message " + msgType + ": " + decoded);
-    out.add(decoded);
+  public BlockFetchFailure(String blockId, String errorString) {
+    this.blockId = blockId;
+    this.errorString = errorString;
   }
 
-  private Message decode(Message.Type msgType, ByteBuf in) {
-    switch (msgType) {
-      case BlockFetchRequest:
-        return BlockFetchRequest.decode(in);
+  @Override
+  public Type type() { return Type.BlockFetchFailure; }
 
-      case BlockFetchSuccess:
-        return BlockFetchSuccess.decode(in);
+  @Override
+  public int encodedLength() {
+    return Encoders.Strings.encodedLength(blockId) + Encoders.Strings.encodedLength(errorString);
+  }
 
-      case BlockFetchFailure:
-        return BlockFetchFailure.decode(in);
+  @Override
+  public void encode(ByteBuf buf) {
+    Encoders.Strings.encode(buf, blockId);
+    Encoders.Strings.encode(buf, errorString);
+  }
 
-      default:
-        throw new IllegalArgumentException("Unexpected message type: " + msgType);
+  public static BlockFetchFailure decode(ByteBuf buf) {
+    String blockId = Encoders.Strings.decode(buf);
+    String errorString = Encoders.Strings.decode(buf);
+    return new BlockFetchFailure(blockId, errorString);
+  }
+
+  @Override
+  public boolean equals(Object other) {
+    if (other instanceof BlockFetchFailure) {
+      BlockFetchFailure o = (BlockFetchFailure) other;
+      return blockId.equals(o.blockId) && errorString.equals(o.errorString);
     }
+    return false;
+  }
+
+  @Override
+  public String toString() {
+    return Objects.toStringHelper(this)
+      .add("blockId", blockId)
+      .add("errorString", errorString)
+      .toString();
   }
 }
