@@ -44,8 +44,6 @@ public class BlockTransferMessagesSuite {
   @Test
   public void serializeOpenShuffleBlocks() {
     checkSerializeDeserialize(new OpenBlocks("app-1", "exec-2", new String[] { "b1", "b2" }));
-    checkSerializeDeserialize(new RegisterExecutor("app-1", "exec-2", new ExecutorShuffleInfo(
-      new String[] { "/local1", "/local2" }, 32, "MyShuffleManager")));
     checkSerializeDeserialize(new StreamHandle(12345, 16));
   }
 

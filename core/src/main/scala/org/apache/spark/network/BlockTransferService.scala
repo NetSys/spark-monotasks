@@ -36,15 +36,15 @@ package org.apache.spark.network
 import java.io.Closeable
 import java.nio.ByteBuffer
 
-import scala.concurrent.{Promise, Await}
+import scala.concurrent.{Await, Promise}
 import scala.concurrent.duration.Duration
 
 import org.apache.spark.Logging
 import org.apache.spark.network.buffer.{NioManagedBuffer, ManagedBuffer}
-import org.apache.spark.network.shuffle.{ShuffleClient, BlockFetchingListener}
+import org.apache.spark.network.shuffle.BlockFetchingListener
 
 private[spark]
-abstract class BlockTransferService extends ShuffleClient with Closeable with Logging {
+abstract class BlockTransferService extends Closeable with Logging {
 
   /**
    * Initialize the transfer service by giving it the BlockDataManager that can be used to fetch
@@ -75,7 +75,7 @@ abstract class BlockTransferService extends ShuffleClient with Closeable with Lo
    * return a future so the underlying implementation can invoke onBlockFetchSuccess as soon as
    * the data of a block is fetched, rather than waiting for all blocks to be fetched.
    */
-  override def fetchBlocks(
+  def fetchBlocks(
       host: String,
       port: Int,
       execId: String,

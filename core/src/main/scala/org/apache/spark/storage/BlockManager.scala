@@ -164,12 +164,11 @@ private[spark] class BlockManager(
    * the appId may not be known at BlockManager instantiation time (in particular for the driver,
    * where it is only learned after registration with the TaskScheduler).
    *
-   * This method initializes the BlockTransferService and ShuffleClient, registers with the
-   * BlockManagerMaster and starts the BlockManagerWorker actor.
+   * This method initializes the BlockTransferService, registers with the BlockManagerMaster and
+   * starts the BlockManagerWorker actor.
    */
   def initialize(appId: String): Unit = {
     blockTransferService.init(this)
-    blockTransferService.init(appId)
 
     blockManagerId = BlockManagerId(
       executorId, blockTransferService.hostName, blockTransferService.port)
