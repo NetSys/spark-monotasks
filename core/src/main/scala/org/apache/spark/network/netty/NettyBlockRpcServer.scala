@@ -33,18 +33,16 @@
 
 package org.apache.spark.network.netty
 
-import java.nio.ByteBuffer
-
 import scala.collection.JavaConversions._
 
 import org.apache.spark.Logging
 import org.apache.spark.network.BlockDataManager
-import org.apache.spark.network.buffer.{ManagedBuffer, NioManagedBuffer}
+import org.apache.spark.network.buffer.ManagedBuffer
 import org.apache.spark.network.client.{RpcResponseCallback, TransportClient}
 import org.apache.spark.network.server.{OneForOneStreamManager, RpcHandler, StreamManager}
-import org.apache.spark.network.shuffle.protocol.{BlockTransferMessage, OpenBlocks, StreamHandle, UploadBlock}
+import org.apache.spark.network.shuffle.protocol.{BlockTransferMessage, OpenBlocks, StreamHandle}
 import org.apache.spark.serializer.Serializer
-import org.apache.spark.storage.{BlockId, StorageLevel}
+import org.apache.spark.storage.BlockId
 
 /**
  * Serves requests to open blocks by simply registering one chunk per block requested.
@@ -74,14 +72,6 @@ class NettyBlockRpcServer(
         val streamId = streamManager.registerStream(blocks.iterator)
         logTrace(s"Registered streamId $streamId with ${blocks.size} buffers")
         responseContext.onSuccess(new StreamHandle(streamId, blocks.size).toByteArray)
-
-      case uploadBlock: UploadBlock =>
-        // StorageLevel is serialized as bytes using our JavaSerializer.
-        val level: StorageLevel =
-          serializer.newInstance().deserialize(ByteBuffer.wrap(uploadBlock.metadata))
-        val data = new NioManagedBuffer(ByteBuffer.wrap(uploadBlock.blockData))
-        blockManager.cacheBlockData(BlockId(uploadBlock.blockId), data, level)
-        responseContext.onSuccess(new Array[Byte](0))
     }
   }
 

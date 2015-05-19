@@ -15,18 +15,33 @@
  * limitations under the License.
  */
 
+/*
+ * Copyright 2014 The Regents of The University California
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package org.apache.spark.network
 
 import java.io.Closeable
 import java.nio.ByteBuffer
 
-import scala.concurrent.{Promise, Await, Future}
+import scala.concurrent.{Promise, Await}
 import scala.concurrent.duration.Duration
 
 import org.apache.spark.Logging
 import org.apache.spark.network.buffer.{NioManagedBuffer, ManagedBuffer}
 import org.apache.spark.network.shuffle.{ShuffleClient, BlockFetchingListener}
-import org.apache.spark.storage.{BlockManagerId, BlockId, StorageLevel}
 
 private[spark]
 abstract class BlockTransferService extends ShuffleClient with Closeable with Logging {
@@ -68,17 +83,6 @@ abstract class BlockTransferService extends ShuffleClient with Closeable with Lo
       listener: BlockFetchingListener): Unit
 
   /**
-   * Upload a single block to a remote node, available only after [[init]] is invoked.
-   */
-  def uploadBlock(
-      hostname: String,
-      port: Int,
-      execId: String,
-      blockId: BlockId,
-      blockData: ManagedBuffer,
-      level: StorageLevel): Future[Unit]
-
-  /**
    * A special case of [[fetchBlocks]], as it fetches only one block and is blocking.
    *
    * It is also only available after [[init]] is invoked.
@@ -100,21 +104,5 @@ abstract class BlockTransferService extends ShuffleClient with Closeable with Lo
       })
 
     Await.result(result.future, Duration.Inf)
-  }
-
-  /**
-   * Upload a single block to a remote node, available only after [[init]] is invoked.
-   *
-   * This method is similar to [[uploadBlock]], except this one blocks the thread
-   * until the upload finishes.
-   */
-  def uploadBlockSync(
-      hostname: String,
-      port: Int,
-      execId: String,
-      blockId: BlockId,
-      blockData: ManagedBuffer,
-      level: StorageLevel): Unit = {
-    Await.result(uploadBlock(hostname, port, execId, blockId, blockData, level), Duration.Inf)
   }
 }

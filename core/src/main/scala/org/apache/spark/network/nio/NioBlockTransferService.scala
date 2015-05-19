@@ -36,13 +36,11 @@ package org.apache.spark.network.nio
 import java.nio.ByteBuffer
 
 import org.apache.spark.network._
-import org.apache.spark.network.buffer.{ManagedBuffer, NioManagedBuffer}
+import org.apache.spark.network.buffer.NioManagedBuffer
 import org.apache.spark.network.shuffle.BlockFetchingListener
 import org.apache.spark.storage.{BlockId, StorageLevel}
 import org.apache.spark.util.Utils
 import org.apache.spark.{Logging, SecurityManager, SparkConf, SparkException}
-
-import scala.concurrent.Future
 
 
 /**
@@ -143,27 +141,6 @@ final class NioBlockTransferService(conf: SparkConf, securityManager: SecurityMa
         listener.onBlockFetchFailure(blockId, exception)
       }
     }(cm.futureExecContext)
-  }
-
-  /**
-   * Upload a single block to a remote node, available only after [[init]] is invoked.
-   *
-   * This call blocks until the upload completes, or throws an exception upon failures.
-   */
-  override def uploadBlock(
-      hostname: String,
-      port: Int,
-      execId: String,
-      blockId: BlockId,
-      blockData: ManagedBuffer,
-      level: StorageLevel)
-    : Future[Unit] = {
-    checkInit()
-    val msg = PutBlock(blockId, blockData.nioByteBuffer(), level)
-    val blockMessageArray = new BlockMessageArray(BlockMessage.fromPutBlock(msg))
-    val remoteCmId = new ConnectionManagerId(hostName, port)
-    val reply = cm.sendMessageReliably(remoteCmId, blockMessageArray.toBufferMessage)
-    reply.map(x => ())(cm.futureExecContext)
   }
 
   private def checkInit(): Unit = if (cm == null) {

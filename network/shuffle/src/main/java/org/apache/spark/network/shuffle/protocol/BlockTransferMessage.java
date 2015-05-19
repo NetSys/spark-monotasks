@@ -15,6 +15,22 @@
  * limitations under the License.
  */
 
+/*
+ * Copyright 2014 The Regents of The University California
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package org.apache.spark.network.shuffle.protocol;
 
 import io.netty.buffer.ByteBuf;
@@ -29,7 +45,6 @@ import org.apache.spark.network.protocol.Encodable;
  * At a high level:
  *   - OpenBlock is handled by both services, but only services shuffle files for the external
  *     shuffle service. It returns a StreamHandle.
- *   - UploadBlock is only handled by the NettyBlockTransferService.
  *   - RegisterExecutor is only handled by the external shuffle service.
  */
 public abstract class BlockTransferMessage implements Encodable {
@@ -37,7 +52,7 @@ public abstract class BlockTransferMessage implements Encodable {
 
   /** Preceding every serialized message is its type, which allows us to deserialize it. */
   public static enum Type {
-    OPEN_BLOCKS(0), UPLOAD_BLOCK(1), REGISTER_EXECUTOR(2), STREAM_HANDLE(3);
+    OPEN_BLOCKS(0), REGISTER_EXECUTOR(1), STREAM_HANDLE(2);
 
     private final byte id;
 
@@ -57,9 +72,8 @@ public abstract class BlockTransferMessage implements Encodable {
       byte type = buf.readByte();
       switch (type) {
         case 0: return OpenBlocks.decode(buf);
-        case 1: return UploadBlock.decode(buf);
-        case 2: return RegisterExecutor.decode(buf);
-        case 3: return StreamHandle.decode(buf);
+        case 1: return RegisterExecutor.decode(buf);
+        case 2: return StreamHandle.decode(buf);
         default: throw new IllegalArgumentException("Unknown message type: " + type);
       }
     }

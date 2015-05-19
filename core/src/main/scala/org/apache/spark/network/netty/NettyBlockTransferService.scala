@@ -15,21 +15,34 @@
  * limitations under the License.
  */
 
+/*
+ * Copyright 2014 The Regents of The University California
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package org.apache.spark.network.netty
 
 import scala.collection.JavaConversions._
-import scala.concurrent.{Future, Promise}
 
 import org.apache.spark.{SecurityManager, SparkConf}
 import org.apache.spark.network._
-import org.apache.spark.network.buffer.ManagedBuffer
-import org.apache.spark.network.client.{TransportClientBootstrap, RpcResponseCallback, TransportClientFactory}
+import org.apache.spark.network.client.{TransportClientBootstrap, TransportClientFactory}
 import org.apache.spark.network.sasl.{SaslRpcHandler, SaslClientBootstrap}
 import org.apache.spark.network.server._
-import org.apache.spark.network.shuffle.{RetryingBlockFetcher, BlockFetchingListener, OneForOneBlockFetcher}
-import org.apache.spark.network.shuffle.protocol.UploadBlock
+import org.apache.spark.network.shuffle.{BlockFetchingListener, OneForOneBlockFetcher,
+  RetryingBlockFetcher}
 import org.apache.spark.serializer.JavaSerializer
-import org.apache.spark.storage.{BlockId, StorageLevel}
 import org.apache.spark.util.Utils
 
 /**
@@ -98,45 +111,6 @@ class NettyBlockTransferService(conf: SparkConf, securityManager: SecurityManage
   override def hostName: String = Utils.localHostName()
 
   override def port: Int = server.getPort
-
-  override def uploadBlock(
-      hostname: String,
-      port: Int,
-      execId: String,
-      blockId: BlockId,
-      blockData: ManagedBuffer,
-      level: StorageLevel): Future[Unit] = {
-    val result = Promise[Unit]()
-    val client = clientFactory.createClient(hostname, port)
-
-    // StorageLevel is serialized as bytes using our JavaSerializer. Everything else is encoded
-    // using our binary protocol.
-    val levelBytes = serializer.newInstance().serialize(level).array()
-
-    // Convert or copy nio buffer into array in order to serialize it.
-    val nioBuffer = blockData.nioByteBuffer()
-    val array = if (nioBuffer.hasArray) {
-      nioBuffer.array()
-    } else {
-      val data = new Array[Byte](nioBuffer.remaining())
-      nioBuffer.get(data)
-      data
-    }
-
-    client.sendRpc(new UploadBlock(appId, execId, blockId.toString, levelBytes, array).toByteArray,
-      new RpcResponseCallback {
-        override def onSuccess(response: Array[Byte]): Unit = {
-          logTrace(s"Successfully uploaded block $blockId")
-          result.success()
-        }
-        override def onFailure(e: Throwable): Unit = {
-          logError(s"Error while uploading block $blockId", e)
-          result.failure(e)
-        }
-      })
-
-    result.future
-  }
 
   override def close(): Unit = {
     server.close()
