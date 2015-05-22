@@ -690,7 +690,6 @@ class JsonProtocolSuite extends FunSuite {
     t.setHostname("localhost")
     t.setExecutorDeserializeTime(a)
     t.setExecutorRunTime(b)
-    t.setComputationNanos(b + 50)
     t.setResultSize(c)
     t.setJvmGCTime(d)
     t.setResultSerializationTime(a + b)
