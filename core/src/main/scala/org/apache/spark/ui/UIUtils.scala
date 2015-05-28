@@ -197,7 +197,9 @@ private[spark] object UIUtils extends Logging {
             <div class="brand">
               <a href={prependBaseUri("/")} class="brand">
                 <img src={prependBaseUri("/static/spark-logo-77x50px-hd.png")} />
-                <span class="version">{org.apache.spark.SPARK_VERSION}</span>
+                <span class="version">
+                  {org.apache.spark.SPARK_VERSION} (for Monotasks comparison)
+                </span>
               </a>
             </div>
             <ul class="nav">{header}</ul>
