@@ -41,22 +41,22 @@ private[spark] class LocalDagScheduler(
     val blockManager: BlockManager)
   extends Logging {
 
-  val computeScheduler = new ComputeScheduler(executorBackend)
-  val networkScheduler = new NetworkScheduler
-  val diskScheduler = new DiskScheduler(blockManager)
+  private val computeScheduler = new ComputeScheduler(executorBackend)
+  private val networkScheduler = new NetworkScheduler
+  private val diskScheduler = new DiskScheduler(blockManager)
 
   /* IDs of monotasks that are waiting for dependencies to be satisfied. This exists solely for
    * debugging/testing and is not needed for maintaining correctness. */
-  val waitingMonotasks = new HashSet[Long]()
+  private[monotasks] val waitingMonotasks = new HashSet[Long]()
 
   /* IDs of monotasks that have been submitted to a scheduler to be run. This exists solely for
    * debugging/testing and is not needed for maintaining correctness. */
-  val runningMonotasks = new HashSet[Long]()
+  private[monotasks] val runningMonotasks = new HashSet[Long]()
 
   /* IDs for macrotasks that currently are running. Used to determine whether to notify the
    * executor backend that a task has failed (used to avoid duplicate failure messages if multiple
    * monotasks for the macrotask fail). */
-  val runningMacrotaskAttemptIds = new HashSet[Long]()
+  private[monotasks] val runningMacrotaskAttemptIds = new HashSet[Long]()
 
   def getNumRunningComputeMonotasks(): Int = {
     computeScheduler.numRunningTasks.get()
