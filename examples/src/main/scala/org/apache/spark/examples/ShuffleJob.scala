@@ -35,13 +35,11 @@ object ShuffleJob {
     val numShuffles = if (args.length > 4) args(4).toInt else 10
     // Whether to use sortByKey to shuffle the data. If false, will use ReduceByKey.
     val sortByKey = if (args.length > 5) args(5).toBoolean else true
+    val cacheRdd = if (args.length > 6) args(6).toBoolean else true
     val rdd = spark.parallelize(1 to numMapTasks, numMapTasks).flatMap { i =>
       val random = new Random(i)
       Array.fill(itemsPerPartition)((random.nextLong, Array.fill(longsPerValue)(random.nextLong)))
     }
-
-    println("Generating and caching original RDD")
-    rdd.cache.count
 
     var shuffledRdd: RDD[(Long, Array[Long])] = null
     if (sortByKey) {
@@ -56,9 +54,13 @@ object ShuffleJob {
       shuffledRdd = rdd.reduceByKey((a, b) => b, numReduceTasks)
     }
 
-    // Count the shuffled RDD to trigger the map stage (which can then be re-used by future
-    // shuffles).
-    shuffledRdd.count
+    if (cacheRdd) {
+      println("Generating and caching original RDD")
+      rdd.cache.count
+      // Count the shuffled RDD to trigger the map stage (which can then be re-used by future
+      // shuffles).
+      shuffledRdd.count
+    }
 
     (1 to numShuffles).foreach { _ =>
       shuffledRdd.count
