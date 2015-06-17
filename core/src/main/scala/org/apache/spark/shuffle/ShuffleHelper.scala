@@ -159,11 +159,6 @@ class ShuffleHelper[K, V, C](
         .asInstanceOf[ManagedBuffer]
       readMetrics.incRemoteBytesRead(bufferMessage.size)
       readMetrics.incRemoteBlocksFetched(1)
-      // Remove the data from the memory store.
-      // TODO: This should be handled by the LocalDagScheduler, so that it can ensure results
-      //       get deleted in all possible failure scenarios.
-      //       https://github.com/NetSys/spark-monotasks/issues/8
-      blockManager.removeBlock(monotaskResultBlockId, tellMaster = false)
       bufferMessage
 
     case _ =>
