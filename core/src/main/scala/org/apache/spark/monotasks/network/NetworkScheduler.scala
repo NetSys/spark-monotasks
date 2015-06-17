@@ -22,12 +22,6 @@ import org.apache.spark.Logging
 import org.apache.spark.util.Utils
 
 private[spark] class NetworkScheduler() extends Logging {
-  // TODO: Change this to instead launch a new network task iff there is spare network capacity.
-  // TODO: this doesn't really do anything now, because the network call is launched asynchronously
-  //       in NetworkMonotask.
-  private val threads = Runtime.getRuntime.availableProcessors()
-  logInfo(s"Started NetworkScheduler with $threads parallel threads")
-
   /** Number of bytes that this executor is currently waiting to receive over the network. */
   private var currentOutstandingBytes = new AtomicLong(0)
 
