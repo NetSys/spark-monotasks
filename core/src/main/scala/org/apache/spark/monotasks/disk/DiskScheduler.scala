@@ -141,10 +141,6 @@ private[spark] class DiskScheduler(blockManager: BlockManager) extends Logging {
     }
   }
 
-  private def getTotalQueueLength(): Int = {
-    diskAccessors.values.map(diskAccessor => diskAccessor.taskQueue.size).sum
-  }
-
   /**
    * Stores a single disk's task queue. When used to create a thread, a DiskAccessor object will
    * execute the DiskMonotasks in its task queue.
