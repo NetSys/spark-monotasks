@@ -41,7 +41,7 @@ import scala.util.control.NonFatal
 import akka.actor.Props
 
 import org.apache.spark._
-import org.apache.spark.monotasks.LocalDagScheduler
+import org.apache.spark.monotasks.{LocalDagScheduler, SubmitMonotask}
 import org.apache.spark.monotasks.compute.PrepareMonotask
 import org.apache.spark.util.{SparkUncaughtExceptionHandler, AkkaUtils, Utils}
 import org.apache.spark.performance_logging.ContinuousMonitor
@@ -128,7 +128,7 @@ private[spark] class Executor(
       taskAttemptId,
       attemptNumber)
     val prepareMonotask = new PrepareMonotask(context, serializedTask)
-    localDagScheduler.submitMonotask(prepareMonotask)
+    localDagScheduler.post(SubmitMonotask(prepareMonotask))
   }
 
   def killTask(taskId: Long, interruptThread: Boolean) {

@@ -26,20 +26,22 @@ import org.apache.spark.monotasks.compute.{ComputeMonotask, ComputeScheduler}
 import org.apache.spark.monotasks.disk.{DiskMonotask, DiskScheduler}
 import org.apache.spark.monotasks.network.{NetworkMonotask, NetworkScheduler}
 import org.apache.spark.storage.BlockManager
+import org.apache.spark.util.{EventLoop, SparkUncaughtExceptionHandler}
 
 /**
  * LocalDagScheduler tracks running and waiting monotasks. When all of a monotask's
  * dependencies have finished executing, the LocalDagScheduler will submit the monotask
  * to the appropriate scheduler to be executed once sufficient resources are available.
  *
- * TODO: The LocalDagScheduler should implement thread safety using an actor or event loop, rather
- *       than having all methods be synchronized (which can lead to monotasks that block waiting
- *       for the LocalDagScheduler).
+ * In general, external classes should interact with LocalDagScheduler by calling post() with
+ * a LocalDagSchedulerEvent.  All events are processed asynchronously via a single-threaded event
+ * loop.  The only exception to this is monitoring functions (to get the number of running tasks,
+ * for example), which are not processed by the event loop.
  */
 private[spark] class LocalDagScheduler(
     executorBackend: ExecutorBackend,
     val blockManager: BlockManager)
-  extends Logging {
+  extends EventLoop[LocalDagSchedulerEvent]("local-dag-scheduler-event-loop") with Logging {
 
   private val computeScheduler = new ComputeScheduler(executorBackend)
   private val networkScheduler = new NetworkScheduler
@@ -64,6 +66,9 @@ private[spark] class LocalDagScheduler(
   private val macrotaskIdToNumRunningComputeMonotasks = new HashMap[Long, Int]()
   private val macrotaskIdToNumRunningDiskMonotasks = new HashMap[Long, Int]()
   private val macrotaskIdToNumRunningNetworkMonotasks = new HashMap[Long, Int]()
+
+  // Start the event thread.
+  start()
 
   def getNumRunningComputeMonotasks(): Int = {
     computeScheduler.numRunningTasks.get()
@@ -93,7 +98,31 @@ private[spark] class LocalDagScheduler(
 
   def getOutstandingNetworkBytes(): Long = networkScheduler.getOutstandingBytes
 
-  def submitMonotask(monotask: Monotask) = synchronized {
+  /**
+   * This method processes events submitted to the LocalDagScheduler from external classes. It is
+   * not thread safe, and will be called from a single-threaded event loop.
+   */
+  override protected def onReceive(event: LocalDagSchedulerEvent): Unit = event match {
+    case SubmitMonotask(monotask) =>
+      submitMonotask(monotask)
+
+    case SubmitMonotasks(monotasks) =>
+      monotasks.foreach(submitMonotask(_))
+
+    case TaskSuccess(completedMonotask, serializedTaskResult) =>
+      handleTaskSuccess(completedMonotask, serializedTaskResult)
+
+    case TaskFailure(failedMonotask, serializedFailureReason) =>
+      handleTaskFailure(failedMonotask, serializedFailureReason)
+  }
+
+  /** Called when an exception is thrown in the event loop. */
+  override def onError(e: Throwable): Unit = {
+    logError("LocalDagScheduler event loop failed", e)
+    SparkUncaughtExceptionHandler.uncaughtException(e)
+  }
+
+ private def submitMonotask(monotask: Monotask): Unit = {
     if (monotask.dependenciesSatisfied()) {
       scheduleMonotask(monotask)
     } else {
@@ -102,11 +131,6 @@ private[spark] class LocalDagScheduler(
     val taskAttemptId = monotask.context.taskAttemptId
     logDebug(s"Submitting monotask $monotask (id: ${monotask.taskId}) for macrotask $taskAttemptId")
     runningMacrotaskAttemptIds += taskAttemptId
-  }
-
-  /** It is assumed that all monotasks for a specific macrotask are submitted at the same time. */
-  def submitMonotasks(monotasks: Seq[Monotask]) = synchronized {
-    monotasks.foreach(submitMonotask(_))
   }
 
   private def getMapToUpdateNumRunningMonotasks(monotask: Monotask): HashMap[Long, Int] = {
@@ -143,9 +167,9 @@ private[spark] class LocalDagScheduler(
    * @param serializedTaskResult If the monotask was the final monotask for the macrotask, a
    *                             serialized TaskResult to be sent to the driver (None otherwise).
    */
-  def handleTaskCompletion(
+  private def handleTaskSuccess(
       completedMonotask: Monotask,
-      serializedTaskResult: Option[ByteBuffer] = None) = synchronized {
+      serializedTaskResult: Option[ByteBuffer] = None): Unit = {
     val taskAttemptId = completedMonotask.context.taskAttemptId
     logDebug(s"Monotask $completedMonotask (id: ${completedMonotask.taskId}) for " +
       s"macrotask $taskAttemptId has completed.")
@@ -167,7 +191,7 @@ private[spark] class LocalDagScheduler(
         // Tell the executorBackend that the macrotask finished.
         runningMacrotaskAttemptIds.remove(taskAttemptId)
         completedMonotask.context.markTaskCompleted()
-        logDebug(s"Notfiying executorBackend about successful completion of task $taskAttemptId")
+        logDebug(s"Notifying executorBackend about successful completion of task $taskAttemptId")
         executorBackend.statusUpdate(taskAttemptId, TaskState.FINISHED, result)
       }
     } else {
@@ -188,8 +212,8 @@ private[spark] class LocalDagScheduler(
    * @param failedMonotask The monotask that failed.
    * @param serializedFailureReason A serialized TaskFailedReason describing why the task failed.
    */
-  def handleTaskFailure(failedMonotask: Monotask, serializedFailureReason: ByteBuffer)
-    = synchronized {
+  private def handleTaskFailure(
+      failedMonotask: Monotask, serializedFailureReason: ByteBuffer): Unit = {
     logInfo(s"Monotask ${failedMonotask.taskId} (for macrotask " +
       s"${failedMonotask.context.taskAttemptId}) failed")
     failedMonotask.cleanup()
@@ -242,13 +266,17 @@ private[spark] class LocalDagScheduler(
   }
 
   /**
-   * For testing only. Waits until all monotasks have completed, or until the specified time has
-   * elapsed. Returns true if all monotasks have completed and false if the specified amount of time
-   * elapsed before all monotasks completed.
+   * For testing only. Waits until all macrotasks have completed, or until the specified time has
+   * elapsed. Returns true if all macrotasks have completed and false if the specified amount of
+   * time elapsed before all monotasks completed.
+   *
+   * Assumes no new macrotasks are submitted after this function is called (because otherwise
+   * certain race conditions could lead to this returning true before the newly submitted macro-
+   * tasks complete).
    */
-  def waitUntilAllTasksComplete(timeoutMillis: Int): Boolean = {
+  def waitUntilAllMacrotasksComplete(timeoutMillis: Int): Boolean = {
     val finishTime = System.currentTimeMillis + timeoutMillis
-    while (!this.synchronized(waitingMonotasks.isEmpty && runningMonotasks.isEmpty)) {
+    while (!runningMacrotaskAttemptIds.isEmpty) {
       if (System.currentTimeMillis > finishTime) {
         return false
       }

@@ -16,10 +16,7 @@
 
 package org.apache.spark.monotasks.disk
 
-import java.io.File
 import java.util.Map.Entry
-
-import scala.collection.mutable.ArrayBuffer
 
 import org.mockito.Mockito.{mock, when}
 
@@ -33,7 +30,7 @@ import org.apache.spark.util.Utils
 class DiskSchedulerSuite extends FunSuite with BeforeAndAfter {
 
   private var blockManager: BlockManager = _
-  private var localDagScheduler: LocalDagScheduler = _
+  private var diskScheduler: DiskScheduler = _
   private var taskContext: TaskContextImpl = _
   val timeoutMillis = 10000
   val numBlocks = 10
@@ -42,10 +39,13 @@ class DiskSchedulerSuite extends FunSuite with BeforeAndAfter {
     blockManager = mock(classOf[BlockManager])
     DummyDiskMonotask.clearTimes()
 
+    val localDagScheduler = mock(classOf[LocalDagScheduler])
     taskContext = mock(classOf[TaskContextImpl])
+    when(taskContext.localDagScheduler).thenReturn(localDagScheduler)
+    when(localDagScheduler.blockManager).thenReturn(blockManager)
   }
 
-  private def initializeLocalDagScheduler(numDisks: Int) {
+  private def initializeDiskScheduler(numDisks: Int) {
     /* Pass in false to the SparkConf constructor so that the same configuration is loaded
      * regardless of the system properties. */
     val conf = new SparkConf(false)
@@ -57,51 +57,56 @@ class DiskSchedulerSuite extends FunSuite with BeforeAndAfter {
       conf.set("spark.local.dir", newLocalDirs)
     }
     when(blockManager.blockFileManager).thenReturn(new BlockFileManager(conf))
-    localDagScheduler = new LocalDagScheduler(null, blockManager)
-    when(taskContext.localDagScheduler).thenReturn(localDagScheduler)
+    diskScheduler = new DiskScheduler(blockManager)
   }
 
   test("when using one disk, at most one DiskMonotask is executed at a time") {
-    initializeLocalDagScheduler(1)
+    initializeDiskScheduler(1)
 
-    val monotasks = new ArrayBuffer[DummyDiskMonotask]()
-    for (i <- 1 to numBlocks) {
+    val monotasks = (1 to numBlocks).map { i =>
       val blockId = new TestBlockId(i.toString)
-      monotasks += new DummyDiskMonotask(taskContext, blockId, 100)
+      new DummyDiskMonotask(taskContext, blockId, 100)
     }
-    localDagScheduler.submitMonotasks(monotasks)
-
-    assert(localDagScheduler.waitUntilAllTasksComplete(timeoutMillis))
+    assert(submitTasksAndWaitForCompletion(monotasks, timeoutMillis))
   }
 
   test("when using multiple disks, at most one DiskMonotask is executed at a time per disk") {
-    initializeLocalDagScheduler(2)
+    initializeDiskScheduler(2)
 
-    val monotasks = new ArrayBuffer[DummyDiskMonotask]()
-    for (i <- 1 to numBlocks) {
+    val monotasks = (1 to numBlocks).map { i =>
       val blockId = new TestBlockId(i.toString)
-      monotasks += new DummyDiskMonotask(taskContext, blockId, 100)
+      new DummyDiskMonotask(taskContext, blockId, 100)
     }
-    localDagScheduler.submitMonotasks(monotasks)
-
-    assert(localDagScheduler.waitUntilAllTasksComplete(timeoutMillis))
+    assert(submitTasksAndWaitForCompletion(monotasks, timeoutMillis))
   }
 
   test("DiskMonotasks pertaining to the same disk are executed in FIFO order") {
-    initializeLocalDagScheduler(1)
+    initializeDiskScheduler(1)
 
-    val monotasks = new ArrayBuffer[DummyDiskMonotask]()
-    for (i <- 1 to numBlocks) {
+    val monotasks = (1 to numBlocks).map { i =>
       val blockId = new TestBlockId(i.toString)
-      monotasks += new DummyDiskMonotask(taskContext, blockId, 100)
+      new DummyDiskMonotask(taskContext, blockId, 100)
     }
-    localDagScheduler.submitMonotasks(monotasks)
+    assert(submitTasksAndWaitForCompletion(monotasks, timeoutMillis))
 
-    assert(localDagScheduler.waitUntilAllTasksComplete(timeoutMillis))
     val ids = monotasks.map(monotask => monotask.taskId)
     // Sort the tasks by start time, and extract the taskIds.
     val timesArray = DummyDiskMonotask.taskTimes.entrySet.toArray(Array[Entry[Long, Long]]())
     val sortedIds = timesArray.sortWith((a, b) => b.getValue() >= a.getValue()).map(a => a.getKey())
     assert(ids.sameElements(sortedIds))
+  }
+
+  private def submitTasksAndWaitForCompletion(
+      monotasks: Seq[DummyDiskMonotask], timeoutMillis: Long): Boolean = {
+    monotasks.foreach { diskScheduler.submitTask(_) }
+    val finishTime = System.currentTimeMillis + timeoutMillis
+    while (monotasks.count(!_.isFinished) > 0) {
+      if (System.currentTimeMillis > finishTime) {
+        return false
+      }
+
+      Thread.sleep(10)
+    }
+    true
   }
 }

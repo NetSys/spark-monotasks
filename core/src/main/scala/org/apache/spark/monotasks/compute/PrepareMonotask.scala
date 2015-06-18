@@ -19,6 +19,7 @@ package org.apache.spark.monotasks.compute
 import java.nio.ByteBuffer
 
 import org.apache.spark.{SparkEnv, TaskContextImpl}
+import org.apache.spark.monotasks.SubmitMonotasks
 import org.apache.spark.scheduler.Macrotask
 
 /**
@@ -46,7 +47,7 @@ private[spark] class PrepareMonotask(context: TaskContextImpl, val serializedTas
 
     SparkEnv.get.mapOutputTracker.updateEpoch(macrotask.epoch)
 
-    context.localDagScheduler.submitMonotasks(macrotask.getMonotasks(context))
+    context.localDagScheduler.post(SubmitMonotasks(macrotask.getMonotasks(context)))
     None
   }
 }

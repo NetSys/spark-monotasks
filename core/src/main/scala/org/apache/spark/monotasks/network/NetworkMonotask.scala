@@ -17,7 +17,7 @@
 package org.apache.spark.monotasks.network
 
 import org.apache.spark.{ExceptionFailure, FetchFailed, Logging, SparkException, TaskContextImpl}
-import org.apache.spark.monotasks.Monotask
+import org.apache.spark.monotasks.{Monotask, TaskFailure, TaskSuccess}
 import org.apache.spark.network.buffer.ManagedBuffer
 import org.apache.spark.network.client.BlockReceivedCallback
 import org.apache.spark.storage.{BlockId, BlockManagerId, MonotaskResultBlockId, ShuffleBlockId,
@@ -68,7 +68,7 @@ private[spark] class NetworkMonotask(
           Utils.exceptionString(t))
         val serializedFailureReason =
           context.env.closureSerializer.newInstance().serialize(failureReason)
-        context.localDagScheduler.handleTaskFailure(this, serializedFailureReason)
+        context.localDagScheduler.post(TaskFailure(this, serializedFailureReason))
       }
 
     }
@@ -80,7 +80,7 @@ private[spark] class NetworkMonotask(
     // This needs to be released after use.
     buf.retain()
     context.env.blockManager.cacheSingle(getResultBlockId(), buf, StorageLevel.MEMORY_ONLY, false)
-    context.localDagScheduler.handleTaskCompletion(this)
+    context.localDagScheduler.post(TaskSuccess(this))
   }
 
   override def onFailure(failedBlockId: String, e: Throwable): Unit = {
@@ -102,6 +102,6 @@ private[spark] class NetworkMonotask(
         val reason = new ExceptionFailure(exception, Some(context.taskMetrics))
         context.env.closureSerializer.newInstance().serialize(reason)
     }
-    context.localDagScheduler.handleTaskFailure(this, serializedFailureReason)
+    context.localDagScheduler.post(TaskFailure(this, serializedFailureReason))
   }
 }

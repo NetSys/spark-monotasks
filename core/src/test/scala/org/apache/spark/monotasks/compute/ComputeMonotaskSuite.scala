@@ -18,14 +18,15 @@ package org.apache.spark.monotasks.compute
 
 import java.nio.ByteBuffer
 
-import org.mockito.Matchers.{any, eq => meq}
+import org.mockito.ArgumentMatcher
+import org.mockito.Matchers.argThat
 import org.mockito.Mockito.{mock, verify}
 
 import org.scalatest.{BeforeAndAfterEach, FunSuite}
 
 import org.apache.spark.{LocalSparkContext, SparkConf, SparkContext, SparkEnv, TaskContextImpl}
 import org.apache.spark.executor.{DependencyManager, TaskMetrics}
-import org.apache.spark.monotasks.LocalDagScheduler
+import org.apache.spark.monotasks.{LocalDagScheduler, TaskFailure, TaskSuccess}
 
 class ComputeMonotaskSuite extends FunSuite with BeforeAndAfterEach with LocalSparkContext {
 
@@ -51,9 +52,21 @@ class ComputeMonotaskSuite extends FunSuite with BeforeAndAfterEach with LocalSp
     }
 
     monotask.executeAndHandleExceptions()
+
     // When an exception is thrown, the execute() method should still notify the LocalDagScheduler
     // that the task has failed.
-    verify(localDagScheduler).handleTaskFailure(meq(monotask), any())
+
+    // Create a custom matcher that ensures that the task failure included the monotask created
+    // above and that the failure reason is non-null.
+    class TaskFailureContainsMonotask extends ArgumentMatcher[TaskFailure] {
+      override def matches(o: Object): Boolean = o match {
+        case failure: TaskFailure =>
+          (failure.failedMonotask == monotask) && (failure.serializedFailureReason != null)
+        case _ =>
+          false
+      }
+    }
+    verify(localDagScheduler).post(argThat(new TaskFailureContainsMonotask))
   }
 
   test("executeAndHandleExceptions notifies LocalDagScheduler of success") {
@@ -63,6 +76,6 @@ class ComputeMonotaskSuite extends FunSuite with BeforeAndAfterEach with LocalSp
     }
 
     monotask.executeAndHandleExceptions()
-    verify(localDagScheduler).handleTaskCompletion(monotask, result)
+    verify(localDagScheduler).post(TaskSuccess(monotask, result))
   }
 }

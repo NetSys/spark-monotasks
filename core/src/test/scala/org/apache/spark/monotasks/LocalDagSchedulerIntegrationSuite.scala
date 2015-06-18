@@ -18,15 +18,13 @@ package org.apache.spark.monotasks
 
 import java.nio.ByteBuffer
 
-import scala.collection.mutable.ArrayBuffer
-
 import org.mockito.Mockito.{mock, when}
 
 import org.scalatest.{BeforeAndAfter, FunSuite}
 
 import org.apache.spark.{LocalSparkContext, SparkConf, SparkContext, SparkEnv, TaskContextImpl}
 import org.apache.spark.executor.{ExecutorBackend, TaskMetrics}
-import org.apache.spark.monotasks.disk.{DiskMonotask, DiskReadMonotask, DiskRemoveMonotask,
+import org.apache.spark.monotasks.disk.{DiskReadMonotask, DiskRemoveMonotask,
   DiskWriteMonotask}
 import org.apache.spark.rdd.RDD
 import org.apache.spark.storage._
@@ -40,7 +38,9 @@ class LocalDagSchedulerIntegrationSuite extends FunSuite with BeforeAndAfter
 
   private var taskContext: TaskContextImpl = _
   private var blockManager: BlockManager = _
-  private var localDagScheduler: LocalDagScheduler = _
+
+  // Use a wrapped version of LocalDagScheduler so we can run events sychronously.
+  private var localDagScheduler: LocalDagSchedulerWithSynchrony = _
 
   before {
     // This is required because the LocalDagScheduler takes as input a BlockManager, which is
@@ -48,7 +48,8 @@ class LocalDagSchedulerIntegrationSuite extends FunSuite with BeforeAndAfter
     // configuration is loaded regardless of the system properties.
     sc = new SparkContext("local", "test", new SparkConf(false))
     blockManager = SparkEnv.get.blockManager
-    localDagScheduler = new LocalDagScheduler(mock(classOf[ExecutorBackend]), blockManager)
+    localDagScheduler = new LocalDagSchedulerWithSynchrony(
+      mock(classOf[ExecutorBackend]), blockManager)
 
     taskContext = mock(classOf[TaskContextImpl])
     when(taskContext.env).thenReturn(SparkEnv.get)
@@ -67,25 +68,33 @@ class LocalDagSchedulerIntegrationSuite extends FunSuite with BeforeAndAfter
     }
     dataBuffer.flip()
 
-    // Submit the write monotasks.
-    val monotasks = new ArrayBuffer[DiskMonotask]()
-    for (i <- 1 to numBlocks) {
+    // Submit the write monotasks. Create a result monotask that creates a dummy task result and
+    // saves that as the macrotask result, so that the LocalDagScheduler will identify the macrotask
+    // associated with these monotasks as finished.
+    val writeResultMonotask = new SimpleMonotaskWithMacrotaskResult(blockManager, taskContext)
+    val writeMonotasks = (1 to numBlocks).map { i =>
       val serializedDataBlockId = new MonotaskResultBlockId(i)
-      blockManager.cacheBytes(serializedDataBlockId, dataBuffer, StorageLevel.MEMORY_ONLY_SER, false)
+      blockManager.cacheBytes(
+        serializedDataBlockId, dataBuffer, StorageLevel.MEMORY_ONLY_SER, false)
       val blockId = new TestBlockId(i.toString)
-      monotasks +=
+      val diskWriteMonotask =
         new DiskWriteMonotask(taskContext, blockId, serializedDataBlockId, StorageLevel.DISK_ONLY)
+      writeResultMonotask.addDependency(diskWriteMonotask)
+      diskWriteMonotask
     }
-    localDagScheduler.submitMonotasks(monotasks)
-    monotasks.clear()
+
+    localDagScheduler.runEvent(SubmitMonotasks(writeMonotasks))
+    localDagScheduler.runEvent(SubmitMonotask(writeResultMonotask))
 
     // Wait for the write monotasks to finish so that we can determine the blocks' diskIds.
-    assert(localDagScheduler.waitUntilAllTasksComplete(timeoutMillis))
+    assert(localDagScheduler.waitUntilAllMacrotasksComplete(timeoutMillis))
 
     /* Submit the read and remove monotasks. The remove tasks depend on the read tasks because we
      * want the blocks to be both read and removed, but we need the read to happen before the
      * remove. */
-    for (i <- 1 to numBlocks) {
+     val readAndRemoveResultMonotask =
+      new SimpleMonotaskWithMacrotaskResult(blockManager, taskContext)
+     val readAndRemoveMonotasks = (1 to numBlocks).flatMap { i =>
       val blockId = new TestBlockId(i.toString)
       val status = SparkEnv.get.blockManager.getStatus(blockId)
       assert(status.isDefined,
@@ -96,13 +105,15 @@ class LocalDagSchedulerIntegrationSuite extends FunSuite with BeforeAndAfter
       val readMonotask = new DiskReadMonotask(taskContext, blockId, diskId)
       val removeMonotask = new DiskRemoveMonotask(taskContext, blockId, diskId)
       removeMonotask.addDependency(readMonotask)
-      monotasks += readMonotask
-      monotasks += removeMonotask
+      readAndRemoveResultMonotask.addDependency(removeMonotask)
+      List(readMonotask, removeMonotask)
     }
-    localDagScheduler.submitMonotasks(monotasks)
+    
+    localDagScheduler.runEvent(SubmitMonotasks(readAndRemoveMonotasks))
+    localDagScheduler.runEvent(SubmitMonotask(readAndRemoveResultMonotask))
 
     // Wait for the read and remove monotasks to finish.
-    assert(localDagScheduler.waitUntilAllTasksComplete(timeoutMillis))
+    assert(localDagScheduler.waitUntilAllMacrotasksComplete(timeoutMillis))
   }
 
   test("all temporary blocks are deleted from the BlockManager") {

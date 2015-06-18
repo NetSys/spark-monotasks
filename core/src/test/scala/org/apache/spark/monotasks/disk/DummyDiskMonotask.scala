@@ -35,6 +35,8 @@ private[spark] class DummyDiskMonotask(
     val taskTime: Long)
   extends DiskWriteMonotask(taskContext, blockId, null, null) {
 
+  @volatile var isFinished = false
+
   override def execute(): Boolean = {
     val taskTimes = DummyDiskMonotask.taskTimes
     taskTimes.put(taskId, System.currentTimeMillis())
@@ -48,6 +50,7 @@ private[spark] class DummyDiskMonotask(
 
     Thread.sleep(taskTime)
     numRunningTasks.synchronized(numRunningTasks.remove(disk))
+    isFinished = true
     true
   }
 }

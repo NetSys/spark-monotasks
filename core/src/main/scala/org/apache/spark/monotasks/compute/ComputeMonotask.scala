@@ -19,10 +19,10 @@ package org.apache.spark.monotasks.compute
 import java.nio.ByteBuffer
 
 import org.apache.spark.{Accumulators, ExceptionFailure, Logging, TaskContext, TaskContextImpl}
-import org.apache.spark.monotasks.Monotask
+import org.apache.spark.executor.CommitDeniedException
+import org.apache.spark.monotasks.{Monotask, TaskFailure, TaskSuccess}
 import org.apache.spark.shuffle.FetchFailedException
 import org.apache.spark.util.{SparkUncaughtExceptionHandler, Utils}
-import org.apache.spark.executor.CommitDeniedException
 
 private[spark] abstract class ComputeMonotask(context: TaskContextImpl)
   extends Monotask(context) with Logging {
@@ -51,20 +51,20 @@ private[spark] abstract class ComputeMonotask(context: TaskContextImpl)
       TaskContext.setTaskContext(context)
       val result = execute()
       TaskContext.unset()
-      context.localDagScheduler.handleTaskCompletion(this, result)
+      context.localDagScheduler.post(TaskSuccess(this, result))
     } catch {
       case ffe: FetchFailedException => {
         // A FetchFailedException can be thrown by compute monotasks when local shuffle data
         // is missing from the block manager.
         val closureSerializer = context.env.closureSerializer.newInstance()
-        context.localDagScheduler.handleTaskFailure(
-          this, closureSerializer.serialize(ffe.toTaskEndReason))
+        context.localDagScheduler.post(TaskFailure(
+          this, closureSerializer.serialize(ffe.toTaskEndReason)))
       }
 
       case cDE: CommitDeniedException => {
         val closureSerializer = context.env.closureSerializer.newInstance()
-        context.localDagScheduler.handleTaskFailure(
-          this, closureSerializer.serialize(cDE.toTaskEndReason))
+        context.localDagScheduler.post(TaskFailure(
+          this, closureSerializer.serialize(cDE.toTaskEndReason)))
       }
 
       case t: Throwable => {
@@ -82,7 +82,7 @@ private[spark] abstract class ComputeMonotask(context: TaskContextImpl)
         context.taskMetrics.setMetricsOnTaskCompletion()
         val reason = new ExceptionFailure(t, Some(context.taskMetrics))
         val closureSerializer = context.env.closureSerializer.newInstance()
-        context.localDagScheduler.handleTaskFailure(this, closureSerializer.serialize(reason))
+        context.localDagScheduler.post(TaskFailure(this, closureSerializer.serialize(reason)))
       }
     } finally {
       accountForComputeTime()

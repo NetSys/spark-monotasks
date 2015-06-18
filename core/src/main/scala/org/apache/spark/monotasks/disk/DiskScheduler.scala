@@ -23,6 +23,7 @@ import scala.collection.mutable.HashMap
 import scala.util.Random
 
 import org.apache.spark.Logging
+import org.apache.spark.monotasks.TaskSuccess
 import org.apache.spark.storage.BlockManager
 import org.apache.spark.util.Utils
 
@@ -99,7 +100,7 @@ private[spark] class DiskScheduler(blockManager: BlockManager) extends Logging {
     if (diskId.isEmpty) {
       logError(s"DiskMonotask ${task.taskId} rejected because its subtype is not supported.")
       // TODO: Tell the LocalDagScheduler that this DiskMonotask failed.
-      task.context.localDagScheduler.handleTaskCompletion(task)
+      task.context.localDagScheduler.post(TaskSuccess(task))
     } else {
       diskAccessors(diskId.get).taskQueue.add(task)
     }
@@ -157,11 +158,11 @@ private[spark] class DiskScheduler(blockManager: BlockManager) extends Logging {
           val task = taskQueue.take()
           if (task.execute()) {
             logDebug(s"Monotask ${task.taskId} succeeded.")
-            task.context.localDagScheduler.handleTaskCompletion(task)
+            task.context.localDagScheduler.post(TaskSuccess(task))
           } else {
             logError(s"Monotask ${task.taskId} failed.")
             // TODO: Tell the LocalDagScheduler that this DiskMonotask failed.
-            task.context.localDagScheduler.handleTaskCompletion(task)
+            task.context.localDagScheduler.post(TaskSuccess(task))
           }
         }
       } catch {
