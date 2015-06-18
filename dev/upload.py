@@ -1605,6 +1605,9 @@ class GitVCS(VersionControlSystem):
         extra_args = self.options.revision.split(":", 1) + extra_args
       else:
         extra_args = [self.options.revision] + extra_args
+    else:
+      # Use the most recent commit.
+      extra_args = ["HEAD~1..HEAD"] + extra_args
 
     # --no-ext-diff is broken in some versions of Git, so try to work around
     # this by overriding the environment (but there is still a problem if the
@@ -1638,6 +1641,12 @@ class GitVCS(VersionControlSystem):
     # commands then check for an empty diff manually.
     if not diff:
       ErrorExit("No output from %s" % (cmd + extra_args))
+
+    # Before returning, set the description based on the GIT commit message associated
+    # with the diff.
+    get_commit_message_cmd = ["git", "log", "--pretty=%B"]
+    self.options.message = RunShell(get_commit_message_cmd + extra_args, env=env, silent_ok=True)
+
     return diff
 
   def GetUnknownFiles(self):
@@ -2618,8 +2627,17 @@ def RealMain(argv, data=None):
     prompt = "Title describing this patch set: "
   else:
     prompt = "New issue subject: "
-  title = (
-      title or message.split('\n', 1)[0].strip() or raw_input(prompt).strip())
+  if not title:
+    # Propose the first line in message as the title.
+    proposed_title = message.split('\n', 1)[0].strip()
+    if proposed_title:
+      prompt = prompt + " [%s]" % proposed_title
+    input_title = raw_input(prompt).strip()
+    if input_title:
+      # If the user input something, use that instead of the first line in the message.
+      title = input_title
+    else:
+      title = proposed_title
   if not title and not options.issue:
     ErrorExit("A non-empty title is required for a new issue")
   # For existing issues, it's fine to give a patchset an empty name. Rietveld
