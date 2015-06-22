@@ -144,7 +144,7 @@ class ShuffleHelper[K, V, C](
       } catch {
         case e: Exception =>
           val failureMessage = s"Unable to fetch local shuffle block with id $blockId"
-          logError(failureMessage)
+          logError(failureMessage, e)
           throw new FetchFailedException(
             blockManager.blockManagerId,
             shuffleBlockId.shuffleId,

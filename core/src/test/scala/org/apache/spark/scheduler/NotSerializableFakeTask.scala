@@ -15,13 +15,28 @@
  * limitations under the License.
  */
 
+/*
+ * Copyright 2014 The Regents of The University California
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package org.apache.spark.scheduler
 
 import java.io.{ObjectInputStream, ObjectOutputStream, IOException}
 
 import org.apache.spark.TaskContextImpl
-import org.apache.spark.monotasks.compute.ExecutionMonotask
-import org.apache.spark.rdd.RDD
+import org.apache.spark.monotasks.Monotask
 
 /**
  * A Task implementation that fails to serialize.
@@ -29,7 +44,7 @@ import org.apache.spark.rdd.RDD
 private[spark] class NotSerializableFakeTask(myId: Int, stageId: Int)
   extends Macrotask[Array[Byte]](stageId, null, null) {
 
-  override def getExecutionMonotask(context: TaskContextImpl): (RDD[_], ExecutionMonotask[_, _]) = {
+  override def getMonotasks(context: TaskContextImpl): Seq[Monotask] = {
     throw new UnsupportedOperationException(
       "The NotSerializableFakeTask class does not support this method.")
   }

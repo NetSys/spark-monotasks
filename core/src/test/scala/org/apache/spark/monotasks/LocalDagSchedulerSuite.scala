@@ -18,7 +18,7 @@ package org.apache.spark.monotasks
 
 import java.nio.ByteBuffer
 
-import scala.collection.mutable.ArrayBuffer
+import scala.collection.mutable.HashSet
 
 import org.mockito.Matchers.{any, eq => meq}
 import org.mockito.Mockito.{mock, verify, when}
@@ -364,22 +364,22 @@ class LocalDagSchedulerSuite extends FunSuite with BeforeAndAfterEach with Local
     // Setup the 3 monotasks for macrotask 0.
     val macrotask0Context = new TaskContextImpl(0, 0, 0)
     val macrotask0NetworkMonotask = mock(classOf[NetworkMonotask])
-    when(macrotask0NetworkMonotask.dependencies).thenReturn(ArrayBuffer.empty[Monotask])
+    when(macrotask0NetworkMonotask.dependencies).thenReturn(HashSet.empty[Monotask])
     when(macrotask0NetworkMonotask.context).thenReturn(macrotask0Context)
     val macrotask0ComputeMonotask = mock(classOf[ComputeMonotask])
-    when(macrotask0ComputeMonotask.dependencies).thenReturn(ArrayBuffer.empty[Monotask])
+    when(macrotask0ComputeMonotask.dependencies).thenReturn(HashSet.empty[Monotask])
     when(macrotask0ComputeMonotask.context).thenReturn(macrotask0Context)
     val macrotask0DiskMonotask = mock(classOf[DiskMonotask])
-    when(macrotask0DiskMonotask.dependencies).thenReturn(ArrayBuffer.empty[Monotask])
+    when(macrotask0DiskMonotask.dependencies).thenReturn(HashSet.empty[Monotask])
     when(macrotask0DiskMonotask.context).thenReturn(macrotask0Context)
 
     // Setup the 2 monotasks for macrotask 1.
     val macrotask1Context = new TaskContextImpl(0, 1, 0)
     val macrotask1DiskMonotask = mock(classOf[DiskMonotask])
-    when(macrotask1DiskMonotask.dependencies).thenReturn(ArrayBuffer.empty[Monotask])
+    when(macrotask1DiskMonotask.dependencies).thenReturn(HashSet.empty[Monotask])
     when(macrotask1DiskMonotask.context).thenReturn(macrotask1Context)
     val macrotask1ComputeMonotask = mock(classOf[ComputeMonotask])
-    when(macrotask1ComputeMonotask.dependencies).thenReturn(ArrayBuffer.empty[Monotask])
+    when(macrotask1ComputeMonotask.dependencies).thenReturn(HashSet.empty[Monotask])
     when(macrotask1ComputeMonotask.context).thenReturn(macrotask1Context)
 
     localDagScheduler.updateMetricsForStartedMonotask(macrotask0NetworkMonotask)

@@ -43,6 +43,8 @@ private[spark] class MemoryShuffleWriter[K, V](
       new SerializedObjectWriter(blockManager, dep, mapId, bucketId)
   }
 
+  override def shuffleBlockIds: Seq[ShuffleBlockId] = shuffleData.map(_.blockId)
+
   private val shuffleWriteMetrics = new ShuffleWriteMetrics()
   context.taskMetrics().shuffleWriteMetrics = Some(shuffleWriteMetrics)
 
@@ -99,7 +101,7 @@ private[spark] class SerializedObjectWriter(
   private val byteOutputStream = new ByteArrayOutputStreamWithZeroCopyByteBuffer()
   private val ser = Serializer.getSerializer(dep.serializer.getOrElse(null))
   private val shuffleId = dep.shuffleId
-  private val blockId = ShuffleBlockId(shuffleId, partitionId, bucketId)
+  val blockId = ShuffleBlockId(shuffleId, partitionId, bucketId)
 
   /* Only initialize compressionStream and serializationStream if some bytes are written, otherwise
    * 16 bytes will always be written to the byteOutputStream (and those bytes will be unnecessarily

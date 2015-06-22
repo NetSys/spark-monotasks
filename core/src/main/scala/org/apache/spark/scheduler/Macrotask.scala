@@ -25,8 +25,8 @@ import scala.language.existentials
 import org.apache.spark.{Logging, Partition, TaskContextImpl}
 import org.apache.spark.monotasks.Monotask
 import org.apache.spark.monotasks.compute.{ExecutionMonotask, ResultSerializationMonotask}
-import org.apache.spark.rdd.RDD
 import org.apache.spark.serializer.SerializerInstance
+import org.apache.spark.storage.BlockId
 import org.apache.spark.util.ByteBufferInputStream
 
 /**
@@ -52,28 +52,34 @@ private[spark] abstract class Macrotask[T](val stageId: Int, val partition: Part
   var epoch: Long = -1
 
   /**
-   * Deserializes the macrotask binary and returns the RDD that this macrotask will operate on, as
-   * well as the ExecutionMonotask that will perform the computation. This function is run within a
-   * compute monotask, so should not use network or disk.
-   */
-  def getExecutionMonotask(context: TaskContextImpl): (RDD[_], ExecutionMonotask[_, _])
-
-  /**
    * Returns the monotasks that need to be run in order to execute this macrotask. This function is
    * run within a compute monotask, so should not use network or disk.
    */
-  def getMonotasks(context: TaskContextImpl): Seq[Monotask] = {
-    val (rdd, executionMonotask) = getExecutionMonotask(context)
-    val resultSerializationMonotask =
-      new ResultSerializationMonotask(context, executionMonotask.getResultBlockId())
-    resultSerializationMonotask.addDependency(executionMonotask)
+  def getMonotasks(context: TaskContextImpl): Seq[Monotask]
 
-    val rddMonotasks =
-      rdd.buildDag(partition, dependencyIdToPartitions, context, executionMonotask)
-    val leaves = rddMonotasks.filter(_.dependents.isEmpty)
-    leaves.foreach(resultSerializationMonotask.addDependency(_))
-
-    rddMonotasks ++ Seq(executionMonotask, resultSerializationMonotask)
+  /**
+   * Accepts a list of monotasks to compute a macrotask, and adds a ResultSerializationMonotask
+   * (with all the necessary dependencies) that will serialize the macrotask's result. Returns
+   * a sequence of monotasks that includes all of the monotasks that were passed in, in addition
+   * to the result serialization monotask.
+   */
+  protected def addResultSerializationMonotask(
+      context: TaskContextImpl,
+      macrotaskResultBlockId: BlockId,
+      monotasks: Seq[Monotask]): Seq[Monotask] = {
+    val serializationMonotask = new ResultSerializationMonotask(context, macrotaskResultBlockId)
+    // Setup the dependencies for the ResultSerializationMonotask. It must depend directly on the
+    // execution monotask, because it serializes that task's result (so that task's result shouldn't
+    // be cleaned up until the ResultSerializationMonotask runs). It also needs to depend on all
+    // other monotasks, because it computes metrics for the macrotask that should include metrics
+    // about all monotasks that were run. We only add leaves as dependents, so that the result
+    // blocks for all other monotasks can be cleaned up before the serializationMonotask is run.
+    monotasks.foreach { monotask =>
+      if (monotask.dependents.isEmpty || monotask.isInstanceOf[ExecutionMonotask[_, _]]) {
+        serializationMonotask.addDependency(monotask)
+      }
+    }
+    monotasks ++ Seq(serializationMonotask)
   }
 }
 
