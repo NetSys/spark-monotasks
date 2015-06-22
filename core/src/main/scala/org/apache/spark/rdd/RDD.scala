@@ -338,12 +338,24 @@ abstract class RDD[T: ClassTag](
   }
 
   /**
-   * Builds a DAG of Monotasks that will compute this RDD and load it into the MemoryStore.
-   * nextMonotask, which is the monotask that will actually use this RDD, is provided as a parameter
-   * so that it can be inserted in the correct place in the DAG. This method is recursive: if this
-   * RDD has not been computed, then this method calls RDD.getInputMonotasks(), which in turn
-   * eventually calls RDD.buildDag() on each of this RDD's dependencies. The Seq that is returned
-   * does not include nextMonotask.
+   * Builds a DAG of Monotasks that will compute this RDD and performs any necessary caching.  If
+   * the RDD is already stored on disk, computing the RDD requires loading the RDD from
+   * disk using a DiskMonotask.  If the RDD is marked as being persisted to disk but hasn't been
+   * written to disk yet, the method will return a monotask to compute the RDD and another monotask
+   * to store the result on disk.
+   *
+   * This method is recursive: if this RDD has not been computed, then this method calls
+   * RDD.getInputMonotasks(), which in turn eventually calls RDD.buildDag() on each of this RDD's
+   * dependencies.
+   *
+   * @param partition The RDD partition that this macrotask is responible for calculating.
+   * @param dependencyIdToPartitions For each dependency of this RDD, the list of partitions
+   *                                 in that dependency that this RDD relies on.
+   * @param context Describes the Macrotask that this DAG is being built for.
+   * @param nextMonotask A monotask that performs some computation on this RDD. It will be inserted
+   *                     in the DAG at the appropriate location.
+   * @return All of the monotasks that have been added to the DAG (this Seq will not include
+   *         nextMonotask).
    */
   private[spark] final def buildDag(
       partition: Partition,

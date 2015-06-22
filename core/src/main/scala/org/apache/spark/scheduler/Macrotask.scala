@@ -68,12 +68,12 @@ private[spark] abstract class Macrotask[T](val stageId: Int, val partition: Part
       new ResultSerializationMonotask(context, executionMonotask.getResultBlockId())
     resultSerializationMonotask.addDependency(executionMonotask)
 
-    val inputMonotasks =
+    val rddMonotasks =
       rdd.buildDag(partition, dependencyIdToPartitions, context, executionMonotask)
-    val leaves = inputMonotasks.filter(_.dependents.isEmpty)
+    val leaves = rddMonotasks.filter(_.dependents.isEmpty)
     leaves.foreach(resultSerializationMonotask.addDependency(_))
 
-    inputMonotasks ++ Seq(executionMonotask, resultSerializationMonotask)
+    rddMonotasks ++ Seq(executionMonotask, resultSerializationMonotask)
   }
 }
 
