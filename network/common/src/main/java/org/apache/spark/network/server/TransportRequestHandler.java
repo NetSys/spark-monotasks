@@ -41,7 +41,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.spark.network.buffer.ManagedBuffer;
-import org.apache.spark.network.client.TransportClient;
 import org.apache.spark.network.protocol.BlockFetchFailure;
 import org.apache.spark.network.protocol.BlockFetchRequest;
 import org.apache.spark.network.protocol.BlockFetchSuccess;
@@ -62,18 +61,13 @@ public class TransportRequestHandler extends MessageHandler<RequestMessage> {
   /** The Netty channel that this handler is associated with. */
   private final Channel channel;
 
-  /** Client on the same channel allowing us to talk back to the requester. */
-  private final TransportClient reverseClient;
-
   /** Handles returning data for a given block id. */
   private final BlockFetcher blockFetcher;
 
   public TransportRequestHandler(
       Channel channel,
-      TransportClient reverseClient,
       BlockFetcher blockFetcher) {
     this.channel = channel;
-    this.reverseClient = reverseClient;
     this.blockFetcher = blockFetcher;
   }
 

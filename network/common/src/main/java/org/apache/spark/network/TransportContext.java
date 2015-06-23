@@ -137,9 +137,8 @@ public class TransportContext {
    */
   private TransportChannelHandler createChannelHandler(Channel channel) {
     TransportResponseHandler responseHandler = new TransportResponseHandler(channel);
-    TransportClient client = new TransportClient(channel, responseHandler);
-    TransportRequestHandler requestHandler = new TransportRequestHandler(channel, client,
-      blockFetcher);
+    TransportRequestHandler requestHandler = new TransportRequestHandler(channel, blockFetcher);
+      TransportClient client = new TransportClient(channel, responseHandler);
     return new TransportChannelHandler(client, responseHandler, requestHandler);
   }
 
