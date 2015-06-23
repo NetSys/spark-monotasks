@@ -933,18 +933,26 @@ private[spark] class BlockManager(
 
   /**
    * Updates the specified block's BlockInfo object to reflect that the block is now stored on a
-   * particular disk. If the BlockManager does not have a BlockInfo object corresponding to the
-   * block, one is created with the provided StorageLevel.
+   * particular disk.
    */
-  def updateBlockInfoOnWrite(blockId: BlockId, level: StorageLevel, diskId: String, size: Long) {
+  def updateBlockInfoOnWrite(blockId: BlockId, diskId: String, size: Long) {
     if (blockInfo.contains(blockId)) {
       val info = blockInfo(blockId)
       // Prevent concurrent access to a block's BlockInfo object.
       info.synchronized {
         info.diskId = Some(diskId)
+
+        // Update the storage level by adding disk.
+        val existingStorageLevel = info.level
+        info.level = StorageLevel(
+          true,
+          existingStorageLevel.useMemory,
+          existingStorageLevel.useOffHeap,
+          existingStorageLevel.deserialized,
+          existingStorageLevel.replication)
       }
     } else {
-      val newInfo = new BlockInfo(level, true, Some(diskId))
+      val newInfo = new BlockInfo(StorageLevel.DISK_ONLY, true, Some(diskId))
       newInfo.markReady(size)
       blockInfo(blockId) = newInfo
     }

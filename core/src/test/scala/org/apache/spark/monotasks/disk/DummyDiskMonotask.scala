@@ -33,7 +33,7 @@ private[spark] class DummyDiskMonotask(
     taskContext: TaskContextImpl,
     blockId: BlockId,
     val taskTime: Long)
-  extends DiskWriteMonotask(taskContext, blockId, null, null) {
+  extends DiskWriteMonotask(taskContext, blockId, null) {
 
   @volatile var isFinished = false
 

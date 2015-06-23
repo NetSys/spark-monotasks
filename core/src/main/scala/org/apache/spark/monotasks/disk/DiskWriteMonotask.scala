@@ -35,17 +35,13 @@ import org.apache.spark.util.Utils
  * that was stored in the BlockManager by a SerializationMonotask using a MonotaskResultBlockId and
  * then write that block to disk and update the BlockManager using the block's true BlockId.
  *
- * The provided StorageLevel is used to update the BlockManager's metadata if the BlockManager does
- * not know about the block yet.
- *
  * After the block has been written to disk, the DiskWriteMonotask will delete the block specified
  * by serializedDataBlockId from the MemoryStore.
  */
 private[spark] class DiskWriteMonotask(
     context: TaskContextImpl,
     blockId: BlockId,
-    val serializedDataBlockId: BlockId,
-    val level: StorageLevel)
+    val serializedDataBlockId: BlockId)
   extends DiskMonotask(context, blockId) with Logging {
 
   // Identifies the disk on which this DiskWriteMonotask will operate. Set by the DiskScheduler.
@@ -60,7 +56,7 @@ private[spark] class DiskWriteMonotask(
     blockManager.getLocalBytes(serializedDataBlockId).map { data =>
       val success = putBytes(rawDiskId, data)
       if (success) {
-        blockManager.updateBlockInfoOnWrite(blockId, level, rawDiskId, data.limit())
+        blockManager.updateBlockInfoOnWrite(blockId, rawDiskId, data.limit())
 
         val metrics = context.taskMetrics
         val oldUpdatedBlocks = metrics.updatedBlocks.getOrElse(Seq.empty)

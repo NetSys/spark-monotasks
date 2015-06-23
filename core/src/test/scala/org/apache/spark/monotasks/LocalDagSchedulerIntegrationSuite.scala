@@ -78,7 +78,7 @@ class LocalDagSchedulerIntegrationSuite extends FunSuite with BeforeAndAfter
         serializedDataBlockId, dataBuffer, StorageLevel.MEMORY_ONLY_SER, false)
       val blockId = new TestBlockId(i.toString)
       val diskWriteMonotask =
-        new DiskWriteMonotask(taskContext, blockId, serializedDataBlockId, StorageLevel.DISK_ONLY)
+        new DiskWriteMonotask(taskContext, blockId, serializedDataBlockId)
       writeResultMonotask.addDependency(diskWriteMonotask)
       diskWriteMonotask
     }

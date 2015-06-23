@@ -279,7 +279,7 @@ class BlockManagerSuite extends FunSuite with Matchers with BeforeAndAfterEach
     when(blockFileManager.contains(meq(blockId), any())).thenReturn(true)
     when(blockFileManager.getSize(blockId, diskId)).thenReturn(diskSizeBytes)
     when(store.blockFileManager).thenReturn(blockFileManager)
-    store.updateBlockInfoOnWrite(blockId, StorageLevel.DISK_ONLY, diskId, diskSizeBytes)
+    store.updateBlockInfoOnWrite(blockId, diskId, diskSizeBytes)
     val block = Array(1, 2, 3, 4).iterator
     store.cacheIterator(blockId, block, StorageLevel.MEMORY_ONLY, false)
 
@@ -785,69 +785,63 @@ class BlockManagerSuite extends FunSuite with Matchers with BeforeAndAfterEach
 
   test("updateBlockInfoOnWrite: creates a new BlockInfo object if the block is not yet known") {
     store = makeBlockManager(1000)
-    val level = StorageLevel.DISK_ONLY
     val diskId = "disk"
     for (i <- 1 to 3) {
       val blockId = new TestBlockId(i.toString)
-      store.updateBlockInfoOnWrite(blockId, level, diskId, 1000L)
+      store.updateBlockInfoOnWrite(blockId, diskId, 1000L)
 
       val statusOption = store.getStatus(blockId)
       assert(statusOption.isDefined)
       val status = statusOption.get
-      assert(status.storageLevel === level)
+      assert(status.storageLevel === StorageLevel.DISK_ONLY)
       val diskIdA = status.diskId
       assert(diskIdA.isDefined)
       assert(diskIdA.get === diskId)
     }
   }
 
-  test("updateBlockInfoOnWrite: updates an existing BlockInfo object") {
-    store = makeBlockManager(1000)
-    val level1 = StorageLevel.DISK_ONLY
-    val level2 = StorageLevel.MEMORY_AND_DISK
-    val diskId1 = "disk1"
-    val diskId2 = "disk2"
-    for (i <- 1 to 3) {
-      val blockId = new TestBlockId(i.toString)
-      // Create a BlockInfo object for this block.
-      store.updateBlockInfoOnWrite(blockId, level1, diskId1, 1000L)
-
-      /* Verify that the BlockManager's record of a block's diskId is updated in the event that a
-       * block already has a BlockInfo object when updateBlockInfoOnWrite() is called. */
-      store.updateBlockInfoOnWrite(blockId, level2, diskId2, 1000L)
-
-      val statusOpt = store.getStatus(blockId)
-      assert(statusOpt.isDefined)
-      val status = statusOpt.get
-      assert(status.storageLevel === level1)
-      val diskId = status.diskId
-      assert(diskId.isDefined)
-      assert(diskId.get === diskId2)
-    }
-  }
-
   test("updateBlockInfoOnWrite: correctly sends a block's info to the master") {
     store = makeBlockManager(1000)
-    val level = StorageLevel.DISK_ONLY
     val diskId = "disk"
     for (i <- 1 to 3) {
       val blockId = new TestBlockId(i.toString)
-      store.updateBlockInfoOnWrite(blockId, level, diskId, 1000L)
+      store.updateBlockInfoOnWrite(blockId, diskId, 1000L)
 
       val masterStatusOpt = store.master.getBlockStatus(blockId, true).get(store.blockManagerId)
       assert(masterStatusOpt.isDefined)
       val masterStatus = masterStatusOpt.get
-      assert(masterStatus.storageLevel === level)
+      assert(masterStatus.storageLevel === StorageLevel.DISK_ONLY)
       val diskIdA = masterStatus.diskId
       assert(diskIdA.isDefined)
       assert(diskIdA.get === diskId)
     }
   }
 
+  test("updateBlockInfoOnWrite: adds useDisk to storage level of existing blocks") {
+    store = makeBlockManager(1000)
+    val blockId = new TestBlockId("testBlockId")
+    val diskSizeBytes = 148L
+    val iterator = List(0, 1, 2, 3, 4).iterator
+    val diskId = "testDisk"
+
+    // First store the block in-memory.
+    val updatedBlocks = store.cacheIterator(blockId, iterator, StorageLevel.MEMORY_ONLY, true)
+    assert(updatedBlocks.size === 1)
+    assert(updatedBlocks(0)._2.storageLevel == StorageLevel.MEMORY_ONLY)
+
+    // Now, store the block on disk and verify that useDisk was added to the storage level.
+    store.updateBlockInfoOnWrite(blockId, diskId, diskSizeBytes)
+    val statusOpt = store.getStatus(blockId)
+    assert(statusOpt.isDefined)
+    val status = statusOpt.get
+    assert(status.diskId.isDefined)
+    assert(status.diskId.get === diskId)
+    assert(status.storageLevel === StorageLevel.MEMORY_AND_DISK)
+  }
+
   test("two puts of the same block with different StorageLevels") {
     store = spy(makeBlockManager(1000))
     val blockId = new TestBlockId("0")
-    val level = StorageLevel.DISK_ONLY
     val diskSizeBytes = 1000L
     val diskId = "diskId"
     val iterator = List(0, 1, 2, 3, 4).iterator
@@ -859,7 +853,7 @@ class BlockManagerSuite extends FunSuite with Matchers with BeforeAndAfterEach
 
     // Tell the BlockManager that the block is now on disk, and that it can also be stored either in
     // memory or disk.
-    store.updateBlockInfoOnWrite(blockId, level, diskId, 100L)
+    store.updateBlockInfoOnWrite(blockId, diskId, 100L)
 
     val updatedBlocks = store.cacheIterator(blockId, iterator, StorageLevel.MEMORY_ONLY, true)
 
@@ -873,7 +867,7 @@ class BlockManagerSuite extends FunSuite with Matchers with BeforeAndAfterEach
     val diskIdA = status.diskId
     assert(diskIdA.isDefined)
     assert(diskIdA.get === diskId)
-    assert(status.storageLevel === level)
+    assert(status.storageLevel === StorageLevel.DISK_ONLY)
     assert(status.diskSize === diskSizeBytes)
     assert(status.memSize != 0)
     assert(status.tachyonSize === 0)

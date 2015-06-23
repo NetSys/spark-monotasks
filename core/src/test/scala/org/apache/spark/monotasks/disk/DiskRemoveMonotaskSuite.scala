@@ -29,7 +29,7 @@ import org.apache.spark.{SparkConf, TaskContextImpl}
 import org.apache.spark.executor.TaskMetrics
 import org.apache.spark.monotasks.LocalDagScheduler
 import org.apache.spark.storage.{BlockFileManager, BlockManager, BlockStatus, MonotaskResultBlockId,
-  StorageLevel, TestBlockId}
+  TestBlockId}
 import org.apache.spark.util.Utils
 
 class DiskRemoveMonotaskSuite extends FunSuite with BeforeAndAfter {
@@ -78,7 +78,7 @@ class DiskRemoveMonotaskSuite extends FunSuite with BeforeAndAfter {
     val blockId = new TestBlockId("0")
     // Write a block to verify that it can be deleted correctly.
     val writeMonotask =
-      new DiskWriteMonotask(taskContext, blockId, serializedDataBlockId, StorageLevel.DISK_ONLY)
+      new DiskWriteMonotask(taskContext, blockId, serializedDataBlockId)
     val diskId = "diskId"
     writeMonotask.diskId = Some(diskId)
 
