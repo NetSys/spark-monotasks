@@ -49,7 +49,7 @@ class CpuCounters(val timeMillis: Long) extends Serializable with Logging {
       // (the remaining lines are for a particular core).
       if (line.startsWith("cpu ")) {
         val cpuTimes =
-          line.substring(CpuCounters.CPU_COUNTS_START_INDEX, line.length).split(" ").map(_.toInt)
+          line.substring(CpuCounters.CPU_COUNTS_START_INDEX, line.length).split(" ").map(_.toLong)
         totalUserJiffies = cpuTimes(CpuCounters.USER_JIFFIES_INDEX)
         totalSystemJiffies = cpuTimes(CpuCounters.SYSTEM_JIFFIES_INDEX)
       }
