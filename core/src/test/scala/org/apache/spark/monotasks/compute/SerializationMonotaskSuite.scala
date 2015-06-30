@@ -25,24 +25,20 @@ import org.mockito.Mockito.{mock, when}
 import org.scalatest.{BeforeAndAfterEach, FunSuite}
 
 import org.apache.spark.{SparkEnv, TaskContextImpl}
-import org.apache.spark.monotasks.LocalDagScheduler
 import org.apache.spark.storage.{BlockManager, BlockResult, TestBlockId}
 
 class SerializationMonotaskSuite extends FunSuite with BeforeAndAfterEach {
 
   private var blockManager: BlockManager = _
-  private var taskContext: TaskContextImpl = _
+  private val taskContext = new TaskContextImpl(0, 0, 0)
 
   override def beforeEach() {
     blockManager = mock(classOf[BlockManager])
     when(blockManager.dataSerialize(any(), any(), any())).thenReturn(mock(classOf[ByteBuffer]))
 
-    val localDagScheduler = mock(classOf[LocalDagScheduler])
-    when(localDagScheduler.blockManager).thenReturn(blockManager)
-
-    taskContext = mock(classOf[TaskContextImpl])
-    when(taskContext.env).thenReturn(mock(classOf[SparkEnv]))
-    when(taskContext.localDagScheduler).thenReturn(localDagScheduler)
+    val sparkEnv = mock(classOf[SparkEnv])
+    when(sparkEnv.blockManager).thenReturn(blockManager)
+    SparkEnv.set(sparkEnv)
   }
 
   test("execute: returns None on success") {

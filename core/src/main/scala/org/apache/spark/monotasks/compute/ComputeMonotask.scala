@@ -18,9 +18,9 @@ package org.apache.spark.monotasks.compute
 
 import java.nio.ByteBuffer
 
-import org.apache.spark.{Accumulators, ExceptionFailure, Logging, TaskContext, TaskContextImpl}
+import org.apache.spark.{Accumulators, Logging, SparkEnv, TaskContext, TaskContextImpl}
 import org.apache.spark.executor.CommitDeniedException
-import org.apache.spark.monotasks.{Monotask, TaskFailure, TaskSuccess}
+import org.apache.spark.monotasks.{Monotask, TaskSuccess}
 import org.apache.spark.shuffle.FetchFailedException
 import org.apache.spark.util.{SparkUncaughtExceptionHandler, Utils}
 
@@ -43,7 +43,7 @@ private[spark] abstract class ComputeMonotask(context: TaskContextImpl)
     // TODO: Consider instead changing the thread factory to just
     //       automatically set the class loader each time a new thread is created (this is fine
     //       because the dependency manager is the same for all tasks in an executor).
-    Thread.currentThread.setContextClassLoader(context.dependencyManager.replClassLoader)
+    Thread.currentThread.setContextClassLoader(SparkEnv.get.dependencyManager.replClassLoader)
 
     startTimeNanos = System.nanoTime()
     try {
@@ -51,20 +51,16 @@ private[spark] abstract class ComputeMonotask(context: TaskContextImpl)
       TaskContext.setTaskContext(context)
       val result = execute()
       TaskContext.unset()
-      context.localDagScheduler.post(TaskSuccess(this, result))
+      SparkEnv.get.localDagScheduler.post(TaskSuccess(this, result))
     } catch {
       case ffe: FetchFailedException => {
         // A FetchFailedException can be thrown by compute monotasks when local shuffle data
         // is missing from the block manager.
-        val closureSerializer = context.env.closureSerializer.newInstance()
-        context.localDagScheduler.post(TaskFailure(
-          this, closureSerializer.serialize(ffe.toTaskEndReason)))
+        handleException(ffe.toTaskFailedReason)
       }
 
       case cDE: CommitDeniedException => {
-        val closureSerializer = context.env.closureSerializer.newInstance()
-        context.localDagScheduler.post(TaskFailure(
-          this, closureSerializer.serialize(cDE.toTaskEndReason)))
+        handleException(cDE.toTaskFailedReason)
       }
 
       case t: Throwable => {
@@ -80,9 +76,7 @@ private[spark] abstract class ComputeMonotask(context: TaskContextImpl)
         }
 
         context.taskMetrics.setMetricsOnTaskCompletion()
-        val reason = new ExceptionFailure(t, Some(context.taskMetrics))
-        val closureSerializer = context.env.closureSerializer.newInstance()
-        context.localDagScheduler.post(TaskFailure(this, closureSerializer.serialize(reason)))
+        handleException(t)
       }
     } finally {
       accountForComputeTime()

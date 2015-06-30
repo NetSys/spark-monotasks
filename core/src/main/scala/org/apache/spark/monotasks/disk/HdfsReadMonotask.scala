@@ -21,7 +21,7 @@ import java.nio.ByteBuffer
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.mapreduce.lib.input.FileSplit
 
-import org.apache.spark.{Partition, TaskContextImpl}
+import org.apache.spark.{Partition, SparkEnv, TaskContextImpl}
 import org.apache.spark.executor.DataReadMethod
 import org.apache.spark.mapreduce.SparkHadoopMapReduceUtil
 import org.apache.spark.rdd.NewHadoopPartition
@@ -66,7 +66,7 @@ private[spark] class HdfsReadMonotask(
 
     try {
       stream.readFully(start - bytesFromPreviousSplit, buffer)
-      context.localDagScheduler.blockManager.cacheBytes(
+      SparkEnv.get.blockManager.cacheBytes(
         getResultBlockId(), ByteBuffer.wrap(buffer), StorageLevel.MEMORY_ONLY_SER, false)
     } finally {
       stream.close()

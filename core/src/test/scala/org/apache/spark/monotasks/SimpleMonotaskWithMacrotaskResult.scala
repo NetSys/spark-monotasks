@@ -18,7 +18,7 @@ package org.apache.spark.monotasks
 
 import java.nio.ByteBuffer
 
-import org.apache.spark.TaskContextImpl
+import org.apache.spark.{SparkEnv, TaskContextImpl}
 import org.apache.spark.storage.BlockManager
 
 /** A minimal subclass of Monotask for use in testing that generates a dummy macrotask result. */
@@ -26,6 +26,6 @@ class SimpleMonotaskWithMacrotaskResult(
     val blockManager: BlockManager, context: TaskContextImpl) extends SimpleMonotask(context) {
   override def executeAndHandleExceptions(): Unit = {
     val macrotaskResult = ByteBuffer.allocate(2)
-    context.localDagScheduler.post(TaskSuccess(this, Some(macrotaskResult)))
+    SparkEnv.get.localDagScheduler.post(TaskSuccess(this, Some(macrotaskResult)))
   }
 }

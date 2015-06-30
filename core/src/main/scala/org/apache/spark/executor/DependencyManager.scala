@@ -21,8 +21,9 @@ import java.net.URL
 
 import scala.collection.mutable.HashMap
 
-import org.apache.spark.{Logging, SparkConf, SparkEnv, SparkFiles}
+import org.apache.spark.{Logging, SecurityManager, SparkConf, SparkFiles}
 import org.apache.spark.deploy.SparkHadoopUtil
+import org.apache.spark.serializer.Serializer
 import org.apache.spark.util.{ChildFirstURLClassLoader, MutableURLClassLoader, Utils}
 
 /**
@@ -30,7 +31,11 @@ import org.apache.spark.util.{ChildFirstURLClassLoader, MutableURLClassLoader, U
  * that includes all classes that have been loaded by tasks run through this executor.
  */
 private[spark] class DependencyManager(
-    env: SparkEnv, conf: SparkConf, userClassPath: Seq[URL], isLocal: Boolean)
+    serializer: Serializer,
+    securityManager: SecurityManager,
+    conf: SparkConf,
+    userClassPath: Seq[URL],
+    isLocal: Boolean)
   extends Logging {
   // Application dependencies (added through SparkContext) that we've fetched so far on this node.
   // Each map holds the master's timestamp for the version of that file or JAR we got.
@@ -50,7 +55,7 @@ private[spark] class DependencyManager(
 
   // Set the classloader for serializer
   // TODO: is this necessary? We seem to always pass a class loader when we call (de)serialize.
-  env.serializer.setDefaultClassLoader(urlClassLoader)
+  serializer.setDefaultClassLoader(urlClassLoader)
 
   /**
    * Download any missing dependencies if we receive a new set of files and JARs from the
@@ -64,7 +69,7 @@ private[spark] class DependencyManager(
         logInfo("Fetching " + name + " with timestamp " + timestamp)
         // Fetch file with useCache mode, close cache for local mode.
         Utils.fetchFile(name, new File(SparkFiles.getRootDirectory), conf,
-          env.securityManager, hadoopConf, timestamp, useCache = !isLocal)
+          securityManager, hadoopConf, timestamp, useCache = !isLocal)
         currentFiles(name) = timestamp
       }
       for ((name, timestamp) <- newJars) {
@@ -74,7 +79,7 @@ private[spark] class DependencyManager(
           .getOrElse(-1L)
         if (currentTimeStamp < timestamp) {
           logInfo("Fetching " + name + " with timestamp " + timestamp)
-          Utils.fetchFile(name, new File(SparkFiles.getRootDirectory), conf, env.securityManager,
+          Utils.fetchFile(name, new File(SparkFiles.getRootDirectory), conf, securityManager,
             hadoopConf, timestamp, useCache = !isLocal)
           currentJars(name) = timestamp
           // Add it to our class loader

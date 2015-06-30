@@ -16,7 +16,7 @@
 
 package org.apache.spark.monotasks.disk
 
-import org.apache.spark.TaskContextImpl
+import org.apache.spark.{SparkEnv, TaskContextImpl}
 import org.apache.spark.monotasks.Monotask
 import org.apache.spark.storage.BlockId
 
@@ -28,7 +28,7 @@ import org.apache.spark.storage.BlockId
 private[spark] abstract class DiskMonotask(context: TaskContextImpl, val blockId: BlockId)
   extends Monotask(context) {
 
-  val blockManager = context.localDagScheduler.blockManager
+  val blockManager = SparkEnv.get.blockManager
 
   /**
    * Executes this DiskMonotask by interacting with a single physical disk. Throws an exception if

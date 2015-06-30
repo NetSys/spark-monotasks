@@ -19,14 +19,17 @@ package org.apache.spark.monotasks
 import scala.util.control.NonFatal
 
 import org.apache.spark.executor.ExecutorBackend
-import org.apache.spark.storage.BlockManager
+import org.apache.spark.storage.BlockFileManager
 
 /**
  * A wrapped version of LocalDagScheduler for use in testing.  This class wraps LocalDagScheduler
  * with a method to block waiting for an event to complete.
  */
-class LocalDagSchedulerWithSynchrony(executorBackend: ExecutorBackend, blockManager: BlockManager)
-  extends LocalDagScheduler(executorBackend, blockManager) {
+class LocalDagSchedulerWithSynchrony(
+    executorBackend: ExecutorBackend, blockFileManager: BlockFileManager)
+  extends LocalDagScheduler(blockFileManager) {
+
+  setExecutorBackend(executorBackend)
 
   def runEvent(event: LocalDagSchedulerEvent) {
     try {

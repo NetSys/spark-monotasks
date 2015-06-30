@@ -32,14 +32,16 @@ private[spark] class PrepareMonotask(context: TaskContextImpl, val serializedTas
 
   override def execute(): Option[ByteBuffer] = {
     val (taskFiles, taskJars, taskBytes) = Macrotask.deserializeWithDependencies(serializedTask)
+
+    val dependencyManager = SparkEnv.get.dependencyManager
     // TODO: This call is a little bit evil because it's synchronized, so can block and waste CPU
     //       resources.
-    context.dependencyManager.updateDependencies(taskFiles, taskJars)
+    dependencyManager.updateDependencies(taskFiles, taskJars)
 
     val deserializationStartTime = System.currentTimeMillis()
     val ser = SparkEnv.get.closureSerializer.newInstance()
-    val macrotask = ser.deserialize[Macrotask[Any]](
-      taskBytes, context.dependencyManager.replClassLoader)
+
+    val macrotask = ser.deserialize[Macrotask[Any]](taskBytes, dependencyManager.replClassLoader)
     context.taskMetrics.setExecutorDeserializeTime(
       System.currentTimeMillis() - deserializationStartTime)
 
@@ -47,7 +49,7 @@ private[spark] class PrepareMonotask(context: TaskContextImpl, val serializedTas
 
     SparkEnv.get.mapOutputTracker.updateEpoch(macrotask.epoch)
 
-    context.localDagScheduler.post(SubmitMonotasks(macrotask.getMonotasks(context)))
+    SparkEnv.get.localDagScheduler.post(SubmitMonotasks(macrotask.getMonotasks(context)))
     None
   }
 }

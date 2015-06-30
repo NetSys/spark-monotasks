@@ -22,7 +22,7 @@ import org.apache.spark.monotasks.compute.ComputeMonotask
 /** A minimal subclass of monotask for use in testing. */
 class SimpleMonotask(context: TaskContextImpl) extends ComputeMonotask(context) {
 
-  def this(taskAttemptId: Long) = this(new TaskContextImpl(null, null, 0, null, taskAttemptId, 0))
+  def this(taskAttemptId: Long) = this(new TaskContextImpl(0, taskAttemptId, 0))
 
   override def execute() = None
 

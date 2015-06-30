@@ -18,7 +18,7 @@ package org.apache.spark.monotasks.compute
 
 import java.nio.ByteBuffer
 
-import org.apache.spark.{Partition, TaskContextImpl}
+import org.apache.spark.{Partition, SparkEnv, TaskContextImpl}
 import org.apache.spark.rdd.RDD
 import org.apache.spark.storage.{RDDBlockId, StorageLevel}
 
@@ -34,7 +34,7 @@ private[spark] class RddComputeMonotask[T](context: TaskContextImpl, rdd: RDD[T]
 
   override def execute(): Option[ByteBuffer] = {
     val iterator = rdd.compute(split, context)
-    context.localDagScheduler.blockManager.cacheIterator(
+    SparkEnv.get.blockManager.cacheIterator(
       getResultBlockId(), iterator, StorageLevel.MEMORY_ONLY, true)
     None
   }

@@ -20,29 +20,32 @@ import java.nio.ByteBuffer
 
 import org.mockito.ArgumentMatcher
 import org.mockito.Matchers.argThat
-import org.mockito.Mockito.{mock, verify}
+import org.mockito.Mockito.{mock, verify, when}
 
 import org.scalatest.{BeforeAndAfterEach, FunSuite}
 
-import org.apache.spark.{LocalSparkContext, SparkConf, SparkContext, SparkEnv, TaskContextImpl}
+import org.apache.spark.{SecurityManager, SparkConf, SparkEnv, TaskContextImpl}
 import org.apache.spark.executor.DependencyManager
 import org.apache.spark.monotasks.{LocalDagScheduler, TaskFailure, TaskSuccess}
+import org.apache.spark.serializer.JavaSerializer
 
-class ComputeMonotaskSuite extends FunSuite with BeforeAndAfterEach with LocalSparkContext {
+class ComputeMonotaskSuite extends FunSuite with BeforeAndAfterEach {
 
   var localDagScheduler: LocalDagScheduler = _
-  var taskContext: TaskContextImpl = _
+  val taskContext = new TaskContextImpl(500, 12, 0)
 
   override def beforeEach() {
-    // Create a new SparkContext so that SparkEnv gets properly initialized.
-    val conf = new SparkConf(false)
-    sc = new SparkContext("local", "test", conf)
-
+    // Mock out SparkEnv to point to a mocked LocalDagScheduler, so that we can verify that
+    // ComputeMonotasks interact with the LocalDagScheduler in the way we expect.
     localDagScheduler = mock(classOf[LocalDagScheduler])
-    val dependencyManager = new DependencyManager(SparkEnv.get, conf, Nil, true)
-    taskContext = new TaskContextImpl(
-      SparkEnv.get, localDagScheduler, 500, dependencyManager, 12, 0)
-    taskContext.initialize(0, 0)
+    val sparkEnv = mock(classOf[SparkEnv])
+    when(sparkEnv.localDagScheduler).thenReturn(localDagScheduler)
+    val conf = new SparkConf(false)
+    val serializer = new JavaSerializer(conf)
+    when(sparkEnv.dependencyManager).thenReturn(
+      new DependencyManager(serializer, new SecurityManager(conf), conf, Nil, false))
+    when(sparkEnv.closureSerializer).thenReturn(serializer)
+    SparkEnv.set(sparkEnv)
   }
 
   test("executeAndHandleExceptions handles exceptions and notifies LocalDagScheduler of failure") {

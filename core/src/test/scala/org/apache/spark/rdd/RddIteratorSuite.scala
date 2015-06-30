@@ -46,19 +46,16 @@ class RddIteratorSuite extends FunSuite with BeforeAndAfter with LocalSparkConte
 
   private var blockManager: BlockManager = _
   private var split: Partition = _
-  private var context: TaskContext = _
+  private val context = new TaskContextImpl(0, 0, 0)
   /** An RDD which returns the values [1, 2, 3, 4]. */
   private var rddA: RDD[Int] = _
   private var rddB: RDD[Int] = _
 
   before {
-    // This is required because the TaskContext needs access to a SparkEnv. Pass in false to the
-    // SparkConf constructor so that the same configuration is loaded regardless of the system
-    // properties.
+    // Create a SparkContext as a convenient way to construct a BlockManager.
     sc = new SparkContext("local", "test", new SparkConf(false))
     blockManager = sc.env.blockManager
     split = new Partition { override def index: Int = 0 }
-    context = new TaskContextImpl(sc.env, null, 0, null, 0, 0)
 
     rddA = new RDD[Int](sc, Nil) {
       override def getPartitions: Array[Partition] = Array(split)
@@ -112,8 +109,7 @@ class RddIteratorSuite extends FunSuite with BeforeAndAfter with LocalSparkConte
 
   test("iterator: get uncached local rdd") {
     rddA.persist(StorageLevel.MEMORY_ONLY)
-    context = new TaskContextImpl(sc.env, null, 0, null, 0, 0, runningLocally = true)
-    val values = rddA.iterator(split, context)
+    val values = rddA.iterator(split, new TaskContextImpl(0, 0, 0, runningLocally = true))
     assert(values.toList === List(1, 2, 3, 4))
     // Since the task is running locally, the RDD should not be cached.
     assert(blockManager.getCurrentBlockStatus(new RDDBlockId(rddA.id, split.index)).isEmpty)

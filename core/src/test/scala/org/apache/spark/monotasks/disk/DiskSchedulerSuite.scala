@@ -29,38 +29,33 @@ import org.scalatest.{BeforeAndAfter, FunSuite}
 import org.scalatest.concurrent.Timeouts
 import org.scalatest.time.SpanSugar._
 
-import org.apache.spark.{LocalSparkContext, SparkConf, SparkContext, SparkEnv, TaskContextImpl}
-import org.apache.spark.executor.TaskMetrics
+import org.apache.spark.{SparkConf, SparkEnv, TaskContextImpl}
 import org.apache.spark.monotasks.{LocalDagScheduler, TaskFailure, TaskSuccess}
-import org.apache.spark.storage.{BlockFileManager, BlockId, BlockManager, TestBlockId}
+import org.apache.spark.serializer.JavaSerializer
+import org.apache.spark.storage.{BlockFileManager, BlockId, TestBlockId}
 import org.apache.spark.util.Utils
 
-class DiskSchedulerSuite extends FunSuite with BeforeAndAfter with Timeouts with LocalSparkContext {
-
-  private var conf: SparkConf = _
-  private var blockManager: BlockManager = _
+class DiskSchedulerSuite extends FunSuite with BeforeAndAfter with Timeouts {
   private var diskScheduler: DiskScheduler = _
-  private var taskContext: TaskContextImpl = _
-  private var localDagScheduler: LocalDagScheduler =_
+  private val taskContext: TaskContextImpl = new TaskContextImpl(0, 0, 0)
+  private var localDagScheduler: LocalDagScheduler = _
+  private var conf: SparkConf = _
   val timeoutMillis = 10000
   val numBlocks = 10
 
   before {
+    DummyDiskMonotask.clearTimes()
+
     // Pass in false to the SparkConf constructor so that the same configuration is loaded
     // regardless of the system properties.
     conf = new SparkConf(false)
-    // This is required because we need a SparkEnv to construct a TaskContextImpl.
-    sc = new SparkContext("local", "test", conf)
 
-    taskContext = mock(classOf[TaskContextImpl])
-    when(taskContext.env).thenReturn(SparkEnv.get)
-    when(taskContext.taskMetrics).thenReturn(TaskMetrics.empty)
+    // Set a SparkEnv with a (mocked) LocalDagScheduler so we can verify the interactions with it.
     localDagScheduler = mock(classOf[LocalDagScheduler])
-    blockManager = mock(classOf[BlockManager])
-    when(localDagScheduler.blockManager).thenReturn(blockManager)
-    when(taskContext.localDagScheduler).thenReturn(localDagScheduler)
-
-    DummyDiskMonotask.clearTimes()
+    val sparkEnv = mock(classOf[SparkEnv])
+    when(sparkEnv.localDagScheduler).thenReturn(localDagScheduler)
+    when(sparkEnv.closureSerializer).thenReturn(new JavaSerializer(conf))
+    SparkEnv.set(sparkEnv)
   }
 
   private def initializeDiskScheduler(numDisks: Int) {
@@ -71,8 +66,7 @@ class DiskSchedulerSuite extends FunSuite with BeforeAndAfter with Timeouts with
       val newLocalDirs = List.range(0, numDisks).map(i => oldLocalDir + i.toString).mkString(",")
       conf.set("spark.local.dir", newLocalDirs)
     }
-    when(blockManager.blockFileManager).thenReturn(new BlockFileManager(conf))
-    diskScheduler = new DiskScheduler(blockManager)
+    diskScheduler = new DiskScheduler(new BlockFileManager(conf))
   }
 
   test("submitTask: fails a DiskMonotask if its diskId is invalid") {

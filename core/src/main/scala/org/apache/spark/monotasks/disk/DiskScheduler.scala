@@ -22,9 +22,9 @@ import java.util.concurrent.LinkedBlockingQueue
 import scala.collection.mutable.HashMap
 import scala.util.Random
 
-import org.apache.spark.{ExceptionFailure, Logging, SparkException}
-import org.apache.spark.monotasks.{TaskFailure, TaskSuccess}
-import org.apache.spark.storage.BlockManager
+import org.apache.spark.{Logging, SparkEnv, SparkException}
+import org.apache.spark.monotasks.TaskSuccess
+import org.apache.spark.storage.BlockFileManager
 import org.apache.spark.util.{SparkUncaughtExceptionHandler, Utils}
 
 /**
@@ -32,7 +32,7 @@ import org.apache.spark.util.{SparkUncaughtExceptionHandler, Utils}
  * block, then the DiskScheduler determines which disk that block should be written to.
  * Maintains a set of threads, one for each disk, that execute DiskMonotasks.
  */
-private[spark] class DiskScheduler(blockManager: BlockManager) extends Logging {
+private[spark] class DiskScheduler(blockFileManager: BlockFileManager) extends Logging {
 
   // Mapping from disk identifier to the corresponding DiskAccessor object.
   private val diskAccessors = new HashMap[String, DiskAccessor]()
@@ -41,7 +41,7 @@ private[spark] class DiskScheduler(blockManager: BlockManager) extends Logging {
   /* A list of unique identifiers for all of this worker's physical disks. Assumes that each path in
    * the user-defined list of Spark local directories (spark.local.dirs or SPARK_LOCAL_DIRS, if it
    * is set) describes a separate physical disk. */
-  val diskIds = blockManager.blockFileManager.localDirs.keySet.toArray
+  val diskIds = blockFileManager.localDirs.keySet.toArray
   // An index into diskIds indicating which disk to use for the next write task.
   private var nextDisk: Int = 0
 
@@ -96,7 +96,7 @@ private[spark] class DiskScheduler(blockManager: BlockManager) extends Logging {
       case _ => {
         val exception = new SparkException(
           s"DiskMonotask $task (id: ${task.taskId}) rejected because its subtype is not supported.")
-        failDiskMonotask(task, exception)
+        task.handleException(exception)
         return
       }
     }
@@ -104,7 +104,7 @@ private[spark] class DiskScheduler(blockManager: BlockManager) extends Logging {
     if (!diskIds.contains(rawDiskId)) {
       val exception = new SparkException(s"DiskMonotask $task (id: ${task.taskId}) has an " +
         s"invalid diskId: $diskId. Valid diskIds are: ${diskIds.mkString(", ")}")
-      failDiskMonotask(task, exception)
+      task.handleException(exception)
       return
     }
 
@@ -119,22 +119,6 @@ private[spark] class DiskScheduler(blockManager: BlockManager) extends Logging {
     val diskId = diskIds(nextDisk)
     nextDisk = (nextDisk + 1) % diskIds.length
     diskId
-  }
-
-  /**
-   * Notifies the LocalDagScheduler that the provided DiskMonotask failed to complete. The provided
-   * Throwable details the reason for the failure. This method serializes the Throwable and passes
-   * it to the LocalDagScheduler, along with the failed DiskMonotask.
-   */
-  private def failDiskMonotask(monotask: DiskMonotask, reason: Throwable) {
-    logError(s"Executing DiskMonotask $monotask (id: ${monotask.taskId}) on " +
-      s"block ${monotask.blockId} failed.", reason)
-    val context = monotask.context
-    context.taskMetrics.setMetricsOnTaskCompletion()
-    val taskFailedReason = new ExceptionFailure(reason, Some(context.taskMetrics))
-    val closureSerializer = context.env.closureSerializer.newInstance()
-    context.localDagScheduler.post(
-      TaskFailure(monotask, closureSerializer.serialize(taskFailedReason)))
   }
 
   private def addShutdownHook() {
@@ -173,7 +157,7 @@ private[spark] class DiskScheduler(blockManager: BlockManager) extends Logging {
 
       logDebug(s"DiskMonotask $monotask (id: ${monotask.taskId}) operating on " +
         s"block ${monotask.blockId} completed successfully.")
-      monotask.context.localDagScheduler.post(TaskSuccess(monotask))
+      SparkEnv.get.localDagScheduler.post(TaskSuccess(monotask))
     } catch {
       case t: Throwable => {
         // An exception was thrown, causing the currently-executing DiskMonotask to fail. Attempt to
@@ -189,7 +173,7 @@ private[spark] class DiskScheduler(blockManager: BlockManager) extends Logging {
             "interrupted while performing I/O.")
         }
 
-        failDiskMonotask(monotask, t)
+        monotask.handleException(t)
       }
     }
   }

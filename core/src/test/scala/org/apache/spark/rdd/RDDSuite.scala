@@ -48,7 +48,7 @@ import org.scalatest.{BeforeAndAfter, FunSuite}
 
 import org.apache.spark._
 import org.apache.spark.api.java.{JavaRDD, JavaSparkContext}
-import org.apache.spark.monotasks.{LocalDagScheduler, Monotask}
+import org.apache.spark.monotasks.Monotask
 import org.apache.spark.monotasks.compute.{DummyComputeMonotask, RddComputeMonotask,
   SerializationMonotask}
 import org.apache.spark.monotasks.disk.{DiskReadMonotask, DiskWriteMonotask}
@@ -67,7 +67,7 @@ class RDDSuite extends FunSuite with BeforeAndAfter with SharedSparkContext {
   private var dependencyIdToPartitions: HashMap[Long, HashSet[Partition]] = _
   private var nextMonotask: Monotask = _
   private var partition: Partition = _
-  private var taskContext: TaskContextImpl = _
+  private var taskContext = new TaskContextImpl(0, 0, 0)
 
   /** Initializes the objects necessary to test the buildDag method. */
   private def initializeBuildDagTestObjects(): Unit = {
@@ -81,15 +81,6 @@ class RDDSuite extends FunSuite with BeforeAndAfter with SharedSparkContext {
     blockId = new RDDBlockId(rdd3.id, partitionIndex)
 
     blockManager = mock(classOf[BlockManager])
-    // Pass in false to the SparkConf constructor so that the same configuration is loaded
-    // regardless of the system properties.
-    when(blockManager.conf).thenReturn(new SparkConf(false))
-
-    val localDagScheduler = mock(classOf[LocalDagScheduler])
-    when(localDagScheduler.blockManager).thenReturn(blockManager)
-
-    taskContext = mock(classOf[TaskContextImpl])
-    when(taskContext.localDagScheduler).thenReturn(localDagScheduler)
 
     dependencyIdToPartitions = Dependency.getDependencyIdToPartitions(rdd3, partitionIndex)
     nextMonotask = new DummyComputeMonotask(taskContext)
@@ -1002,7 +993,9 @@ class RDDSuite extends FunSuite with BeforeAndAfter with SharedSparkContext {
     when(blockManager.isStored(blockId)).thenReturn(true)
     when(blockManager.getBlockLoadMonotask(meq(blockId), any())).thenReturn(None)
 
-    assert(rdd3.buildDag(partition, dependencyIdToPartitions, taskContext, nextMonotask).isEmpty)
+    val monotasks = rdd3.buildDag(
+      partition, dependencyIdToPartitions, taskContext, nextMonotask, blockManager)
+    assert(monotasks.isEmpty)
     assert(nextMonotask.dependencies.isEmpty)
     verify(blockManager).isStored(blockId)
     verify(blockManager).getBlockLoadMonotask(meq(blockId), any())
@@ -1019,8 +1012,8 @@ class RDDSuite extends FunSuite with BeforeAndAfter with SharedSparkContext {
     val diskReadMonotask = new DiskReadMonotask(taskContext, blockId, "diskId")
     when(blockManager.getBlockLoadMonotask(meq(blockId), any())).thenReturn(Some(diskReadMonotask))
 
-    val monotasks = rdd3.buildDag(partition, dependencyIdToPartitions, taskContext, nextMonotask)
-
+    val monotasks = rdd3.buildDag(
+      partition, dependencyIdToPartitions, taskContext, nextMonotask, blockManager)
     assert(monotasks.size === 1)
     assert(monotasks.head === diskReadMonotask)
     assert(nextMonotask.dependencies.size === 1)
@@ -1037,7 +1030,9 @@ class RDDSuite extends FunSuite with BeforeAndAfter with SharedSparkContext {
     when(blockManager.isStored(blockId)).thenReturn(false)
     rdd3.persist(StorageLevel.MEMORY_ONLY)
 
-    assert(rdd3.buildDag(partition, dependencyIdToPartitions, taskContext, nextMonotask).isEmpty)
+    val monotasks = rdd3.buildDag(
+      partition, dependencyIdToPartitions, taskContext, nextMonotask, blockManager)
+    assert(monotasks.isEmpty)
     assert(nextMonotask.dependencies.size === 0)
     verify(blockManager).isStored(blockId)
     verify(blockManager, never()).getBlockLoadMonotask(meq(blockId), any())
@@ -1051,7 +1046,9 @@ class RDDSuite extends FunSuite with BeforeAndAfter with SharedSparkContext {
     when(blockManager.isStored(blockId)).thenReturn(false)
     rdd3.persist(StorageLevel.OFF_HEAP)
 
-    assert(rdd3.buildDag(partition, dependencyIdToPartitions, taskContext, nextMonotask).isEmpty)
+    val monotasks = rdd3.buildDag(
+      partition, dependencyIdToPartitions, taskContext, nextMonotask, blockManager)
+    assert(monotasks.isEmpty)
     assert(nextMonotask.dependencies.size === 0)
     verify(blockManager).isStored(blockId)
     verify(blockManager, never()).getBlockLoadMonotask(meq(blockId), any())
@@ -1078,26 +1075,27 @@ class RDDSuite extends FunSuite with BeforeAndAfter with SharedSparkContext {
     when(blockManager.isStored(blockId)).thenReturn(false)
     rdd3.persist(StorageLevel.DISK_ONLY)
 
-    val monotasks = rdd3.buildDag(partition, dependencyIdToPartitions, taskContext, nextMonotask)
-
+    val monotasks = rdd3.buildDag(
+      partition, dependencyIdToPartitions, taskContext, nextMonotask, blockManager)
     assert(monotasks.size === 3)
     assert(nextMonotask.dependencies.size === 1)
     verify(blockManager).isStored(blockId)
     verify(blockManager, never()).getBlockLoadMonotask(meq(blockId), any())
 
     // Verify that the RddComputeMonotask is properly formed.
-    val rddCompute_dependent = findMonotask(nextMonotask.dependencies.head.taskId, monotasks) match {
-      case rddCompute: RddComputeMonotask[_] => {
-        val dependencies = rddCompute.dependencies
-        val dependents = rddCompute.dependents
-        assert(dependencies.isEmpty)
-        assert(dependents.size === 2)
-        val filteredDependents = dependents.filter(_.taskId != nextMonotask.taskId)
-        assert(filteredDependents.size === 1)
-        filteredDependents.head
-      } case monotask: Monotask => {
-        assert(false, s"Incorrect type of monotask found: $monotask")
-      }
+    val rddCompute_dependent =
+      findMonotask(nextMonotask.dependencies.head.taskId, monotasks) match {
+        case rddCompute: RddComputeMonotask[_] => {
+          val dependencies = rddCompute.dependencies
+          val dependents = rddCompute.dependents
+          assert(dependencies.isEmpty)
+          assert(dependents.size === 2)
+          val filteredDependents = dependents.filter(_.taskId != nextMonotask.taskId)
+          assert(filteredDependents.size === 1)
+          filteredDependents.head
+        } case monotask: Monotask => {
+          assert(false, s"Incorrect type of monotask found: $monotask")
+        }
     }
 
     // Verify that the SerializationMonotask is properly formed.
@@ -1129,7 +1127,8 @@ class RDDSuite extends FunSuite with BeforeAndAfter with SharedSparkContext {
     initializeBuildDagTestObjects()
     when(blockManager.isStored(blockId)).thenReturn(false)
 
-    val monotasks = rdd3.buildDag(partition, dependencyIdToPartitions, taskContext, nextMonotask)
+    val monotasks = rdd3.buildDag(
+      partition, dependencyIdToPartitions, taskContext, nextMonotask, blockManager)
 
     assert(monotasks.size === 0)
     assert(nextMonotask.dependencies.size === 0)
@@ -1155,7 +1154,8 @@ class RDDSuite extends FunSuite with BeforeAndAfter with SharedSparkContext {
     rdd2.persist(StorageLevel.MEMORY_ONLY)
     rdd3.persist(StorageLevel.DISK_ONLY)
 
-    val monotasks = rdd3.buildDag(partition, dependencyIdToPartitions, taskContext, nextMonotask)
+    val monotasks = rdd3.buildDag(
+      partition, dependencyIdToPartitions, taskContext, nextMonotask, blockManager)
 
     assert(monotasks.size === 6)
     assert(nextMonotask.dependencies.size === 1)

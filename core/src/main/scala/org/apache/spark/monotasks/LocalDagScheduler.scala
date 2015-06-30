@@ -21,11 +21,12 @@ import java.nio.ByteBuffer
 import scala.collection.mutable.{HashMap, HashSet}
 
 import org.apache.spark.{Logging, TaskState}
+import org.apache.spark.TaskState.TaskState
 import org.apache.spark.executor.ExecutorBackend
 import org.apache.spark.monotasks.compute.{ComputeMonotask, ComputeScheduler}
 import org.apache.spark.monotasks.disk.{DiskMonotask, DiskScheduler}
 import org.apache.spark.monotasks.network.{NetworkMonotask, NetworkScheduler}
-import org.apache.spark.storage.BlockManager
+import org.apache.spark.storage.BlockFileManager
 import org.apache.spark.util.{EventLoop, SparkUncaughtExceptionHandler}
 
 /**
@@ -38,37 +39,52 @@ import org.apache.spark.util.{EventLoop, SparkUncaughtExceptionHandler}
  * loop.  The only exception to this is monitoring functions (to get the number of running tasks,
  * for example), which are not processed by the event loop.
  */
-private[spark] class LocalDagScheduler(
-    executorBackend: ExecutorBackend,
-    val blockManager: BlockManager)
+private[spark] class LocalDagScheduler(blockFileManager: BlockFileManager)
   extends EventLoop[LocalDagSchedulerEvent]("local-dag-scheduler-event-loop") with Logging {
 
-  private val computeScheduler = new ComputeScheduler(executorBackend)
-  private val networkScheduler = new NetworkScheduler
-  private val diskScheduler = new DiskScheduler(blockManager)
+  /**
+   * Backend to send notifications to when macrotasks complete successfully. Set by
+   * setExecutorBackend().
+   */
+  private var executorBackend: Option[ExecutorBackend] = None
 
-  /* IDs of monotasks that are waiting for dependencies to be satisfied. This exists solely for
-   * debugging/testing and is not needed for maintaining correctness. */
+  private val computeScheduler = new ComputeScheduler
+  private val networkScheduler = new NetworkScheduler
+  private val diskScheduler = new DiskScheduler(blockFileManager)
+
+  /**
+   * IDs of monotasks that are waiting for dependencies to be satisfied. This exists solely for
+   * debugging/testing and is not needed for maintaining correctness.
+   */
   private[monotasks] val waitingMonotasks = new HashSet[Long]()
 
-  /* IDs of monotasks that have been submitted to a scheduler to be run. This exists solely for
-   * debugging/testing and is not needed for maintaining correctness. */
+  /**
+   * IDs of monotasks that have been submitted to a scheduler to be run. This exists solely for
+   * debugging/testing and is not needed for maintaining correctness.
+   */
   private[monotasks] val runningMonotasks = new HashSet[Long]()
 
-  /* IDs for macrotasks that currently are running. Used to determine whether to notify the
+  /**
+   * IDs for macrotasks that currently are running. Used to determine whether to notify the
    * executor backend that a task has failed (used to avoid duplicate failure messages if multiple
-   * monotasks for the macrotask fail). */
+   * monotasks for the macrotask fail).
+   */
   private[monotasks] val runningMacrotaskAttemptIds = new HashSet[Long]()
 
-  /* These maps each map a macrotask ID to the number of a particular type of monotasks that
-   * are running for that macrotask. Each map includes only macrotasks that have at least one
-   * running monotask of the relevant type. */
+  // These maps each map a macrotask ID to the number of a particular type of monotasks that
+  // are running for that macrotask. Each map includes only macrotasks that have at least one
+  // running monotask of the relevant type.
   private val macrotaskIdToNumRunningComputeMonotasks = new HashMap[Long, Int]()
   private val macrotaskIdToNumRunningDiskMonotasks = new HashMap[Long, Int]()
   private val macrotaskIdToNumRunningNetworkMonotasks = new HashMap[Long, Int]()
 
   // Start the event thread.
   start()
+
+  def setExecutorBackend(executorBackend: ExecutorBackend): Unit = {
+    this.executorBackend = Some(executorBackend)
+    computeScheduler.setExecutorBackend(executorBackend)
+  }
 
   def getNumRunningComputeMonotasks(): Int = {
     computeScheduler.numRunningTasks.get()
@@ -151,12 +167,25 @@ private[spark] class LocalDagScheduler(
   private[monotasks] def updateMetricsForFinishedMonotask(completedMonotask: Monotask) {
     val mapToUpdate = getMapToUpdateNumRunningMonotasks(completedMonotask)
     val macrotaskId = completedMonotask.context.taskAttemptId
-    val numCurrentlyRunningMonotasks = mapToUpdate(macrotaskId)
-    if (numCurrentlyRunningMonotasks == 1) {
-      mapToUpdate.remove(macrotaskId)
-    } else {
-      mapToUpdate(macrotaskId) = numCurrentlyRunningMonotasks - 1
+    mapToUpdate.get(macrotaskId) match {
+      case Some(numCurrentlyRunningMonotasks) =>
+        if (numCurrentlyRunningMonotasks == 1) {
+          mapToUpdate.remove(macrotaskId)
+        } else {
+          mapToUpdate(macrotaskId) = numCurrentlyRunningMonotasks - 1
+        }
+
+      case None =>
+        logWarning(s"Not updating metrics for macrotask $macrotaskId because no record of it " +
+          "could be found")
     }
+  }
+
+  private def sendStatusUpdate(taskId: Long, state: TaskState, data: ByteBuffer) {
+    executorBackend.getOrElse {
+      throw new IllegalStateException(
+        s"Attempt to send update for task $taskId before an ExecutorBackend has been configured")
+    }.statusUpdate(taskId, state, data)
   }
 
   /**
@@ -192,7 +221,7 @@ private[spark] class LocalDagScheduler(
         runningMacrotaskAttemptIds.remove(taskAttemptId)
         completedMonotask.context.markTaskCompleted()
         logDebug(s"Notifying executorBackend about successful completion of task $taskAttemptId")
-        executorBackend.statusUpdate(taskAttemptId, TaskState.FINISHED, result)
+        sendStatusUpdate(taskAttemptId, TaskState.FINISHED, result)
       }
     } else {
       // This will only happen if another monotask in this macrotask failed while completedMonotask
@@ -226,7 +255,7 @@ private[spark] class LocalDagScheduler(
     // Notify the executor backend that the macrotask has failed, if we didn't already.
     if (runningMacrotaskAttemptIds.remove(taskAttemptId)) {
       failedMonotask.context.markTaskCompleted()
-      executorBackend.statusUpdate(taskAttemptId, TaskState.FAILED, serializedFailureReason)
+      sendStatusUpdate(taskAttemptId, TaskState.FAILED, serializedFailureReason)
     }
   }
 

@@ -34,9 +34,8 @@
 package org.apache.spark
 
 import java.io.File
-import java.net.Socket
+import java.net.{Socket, URL}
 
-import scala.collection.JavaConversions._
 import scala.collection.mutable
 import scala.util.Properties
 
@@ -46,7 +45,9 @@ import com.google.common.collect.MapMaker
 import org.apache.spark.annotation.DeveloperApi
 import org.apache.spark.api.python.PythonWorkerFactory
 import org.apache.spark.broadcast.BroadcastManager
+import org.apache.spark.executor.DependencyManager
 import org.apache.spark.metrics.MetricsSystem
+import org.apache.spark.monotasks.LocalDagScheduler
 import org.apache.spark.network.BlockTransferService
 import org.apache.spark.network.netty.NettyBlockTransferService
 import org.apache.spark.network.nio.NioBlockTransferService
@@ -84,6 +85,8 @@ class SparkEnv (
     val metricsSystem: MetricsSystem,
     val shuffleMemoryManager: ShuffleMemoryManager,
     val outputCommitCoordinator: OutputCommitCoordinator,
+    val dependencyManager: DependencyManager,
+    val localDagScheduler: LocalDagScheduler,
     val conf: SparkConf) extends Logging {
 
   private[spark] var isStopped = false
@@ -197,6 +200,7 @@ object SparkEnv extends Logging {
       hostname: String,
       port: Int,
       numCores: Int,
+      userClassPath: Seq[URL],
       isLocal: Boolean): SparkEnv = {
     val env = create(
       conf,
@@ -205,7 +209,8 @@ object SparkEnv extends Logging {
       port,
       isDriver = false,
       isLocal = isLocal,
-      numUsableCores = numCores
+      numUsableCores = numCores,
+      userClassPath = userClassPath
     )
     SparkEnv.set(env)
     env
@@ -223,6 +228,7 @@ object SparkEnv extends Logging {
       isLocal: Boolean,
       listenerBus: LiveListenerBus = null,
       numUsableCores: Int = 0,
+      userClassPath: Seq[URL] = Nil,
       mockOutputCommitCoordinator: Option[OutputCommitCoordinator] = None): SparkEnv = {
 
     // Listener bus is only used on the driver
@@ -320,10 +326,21 @@ object SparkEnv extends Logging {
       "BlockManagerMaster",
       new BlockManagerMasterActor(isLocal, conf, listenerBus)), conf, isDriver)
 
+    val blockFileManager = new BlockFileManager(conf)
+    val localDagScheduler = new LocalDagScheduler(blockFileManager)
+
     // NB: blockManager is not valid until initialize() is called later.
-    val blockManager = new BlockManager(executorId, actorSystem, blockManagerMaster,
-      serializer, conf, mapOutputTracker, shuffleManager, blockTransferService, securityManager,
-      numUsableCores)
+    val blockManager = new BlockManager(
+      executorId,
+      actorSystem,
+      blockManagerMaster,
+      serializer,
+      conf,
+      mapOutputTracker,
+      shuffleManager,
+      blockTransferService,
+      blockFileManager,
+      localDagScheduler)
 
     val broadcastManager = new BroadcastManager(isDriver, conf, securityManager)
 
@@ -375,6 +392,9 @@ object SparkEnv extends Logging {
       new OutputCommitCoordinatorActor(outputCommitCoordinator))
     outputCommitCoordinator.coordinatorActor = Some(outputCommitCoordinatorActor)
 
+    val dependencyManager = new DependencyManager(
+      serializer, securityManager, conf, userClassPath, isLocal)
+
     new SparkEnv(
       executorId,
       actorSystem,
@@ -391,6 +411,8 @@ object SparkEnv extends Logging {
       metricsSystem,
       shuffleMemoryManager,
       outputCommitCoordinator,
+      dependencyManager,
+      localDagScheduler,
       conf)
   }
 

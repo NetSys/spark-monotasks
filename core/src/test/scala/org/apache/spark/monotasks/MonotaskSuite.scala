@@ -18,10 +18,17 @@ package org.apache.spark.monotasks
 
 import scala.collection.mutable.HashSet
 
+import org.mockito.Mockito.mock
+
 import org.scalatest.{FunSuite, Matchers}
+
+import org.apache.spark.SparkEnv
 
 class MonotaskSuite extends FunSuite with Matchers {
   test("monotasks are assigned unique IDs") {
+    // Setup a dummy SparkEnv to avoid a NPE when Monotask.scala tries to access it.
+    SparkEnv.set(mock(classOf[SparkEnv]))
+
     val numMonotasks = 10
     val monotaskList = Array.fill[Monotask](numMonotasks)(new SimpleMonotask(0))
 

@@ -33,8 +33,7 @@
 
 package org.apache.spark.storage
 
-import java.nio.{ByteBuffer, MappedByteBuffer}
-import java.util.Arrays
+import java.nio.ByteBuffer
 import java.util.concurrent.TimeUnit
 
 import scala.collection.mutable.ArrayBuffer
@@ -56,9 +55,10 @@ import org.scalatest.concurrent.Timeouts._
 
 import org.apache.spark.{MapOutputTrackerMaster, SparkConf, SparkContext, SecurityManager}
 import org.apache.spark.executor.DataReadMethod
+import org.apache.spark.monotasks.LocalDagScheduler
 import org.apache.spark.network.nio.NioBlockTransferService
 import org.apache.spark.scheduler.LiveListenerBus
-import org.apache.spark.serializer.{JavaSerializer, KryoSerializer}
+import org.apache.spark.serializer.KryoSerializer
 import org.apache.spark.shuffle.memory.MemoryShuffleManager
 import org.apache.spark.storage.BlockManagerMessages.BlockManagerHeartbeat
 import org.apache.spark.util._
@@ -76,6 +76,8 @@ class BlockManagerSuite extends FunSuite with Matchers with BeforeAndAfterEach
   val securityMgr = new SecurityManager(conf)
   val mapOutputTracker = new MapOutputTrackerMaster(conf)
   val shuffleManager = new MemoryShuffleManager(conf)
+  val blockFileManager = new BlockFileManager(conf)
+  val localDagScheduler = new LocalDagScheduler(blockFileManager)
 
   // Reuse a serializer across tests to avoid creating a new thread-local buffer on each test
   conf.set("spark.kryoserializer.buffer.mb", "1")
@@ -89,8 +91,18 @@ class BlockManagerSuite extends FunSuite with Matchers with BeforeAndAfterEach
       maxMem: Long,
       name: String = SparkContext.DRIVER_IDENTIFIER): BlockManager = {
     val transfer = new NioBlockTransferService(conf, securityMgr)
-    val manager = new BlockManager(name, actorSystem, master, serializer, maxMem, conf,
-      mapOutputTracker, shuffleManager, transfer, securityMgr, 0)
+    val manager = new BlockManager(
+      name,
+      actorSystem,
+      master,
+      serializer,
+      maxMem,
+      conf,
+      mapOutputTracker,
+      shuffleManager,
+      transfer,
+      blockFileManager,
+      localDagScheduler)
     manager.initialize("app-id")
     manager
   }

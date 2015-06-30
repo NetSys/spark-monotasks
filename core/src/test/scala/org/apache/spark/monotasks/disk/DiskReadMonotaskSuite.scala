@@ -25,9 +25,8 @@ import org.mockito.Mockito.{mock, verify, when}
 
 import org.scalatest.{BeforeAndAfter, FunSuite}
 
-import org.apache.spark.{SparkConf, TaskContextImpl}
+import org.apache.spark.{SparkConf, SparkEnv, TaskContextImpl}
 import org.apache.spark.executor.TaskMetrics
-import org.apache.spark.monotasks.LocalDagScheduler
 import org.apache.spark.storage._
 import org.apache.spark.util.Utils
 
@@ -57,11 +56,11 @@ class DiskReadMonotaskSuite extends FunSuite with BeforeAndAfter {
     val result = Seq((mock(classOf[BlockId]), mock(classOf[BlockStatus])))
     when(blockManager.cacheBytes(any(), any(), any(), any(), any())).thenReturn(result)
 
-    val localDagScheduler = mock(classOf[LocalDagScheduler])
-    when(localDagScheduler.blockManager).thenReturn(blockManager)
+    val sparkEnv = mock(classOf[SparkEnv])
+    when(sparkEnv.blockManager).thenReturn(blockManager)
+    SparkEnv.set(sparkEnv)
 
     taskContext = mock(classOf[TaskContextImpl])
-    when(taskContext.localDagScheduler).thenReturn(localDagScheduler)
     when(taskContext.taskMetrics).thenReturn(TaskMetrics.empty)
   }
 

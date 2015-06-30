@@ -43,7 +43,7 @@ class ShuffleHelper[K, V, C](
   extends Logging {
 
   private val localBlockIds = new ArrayBuffer[BlockId]()
-  private val blockManager = context.env.blockManager
+  private val blockManager = SparkEnv.get.blockManager
   private val readMetrics = context.taskMetrics.createShuffleReadMetricsForDependency()
 
   // Get the locations of the map output.
@@ -66,7 +66,7 @@ class ShuffleHelper[K, V, C](
       if (size > 0) {
         val blockId = new ShuffleBlockId(shuffleDependency.shuffleId, index, reduceId)
         blockIdToMapId(blockId) = index
-        if (address.executorId == context.env.blockManager.blockManagerId.executorId) {
+        if (address.executorId == blockManager.blockManagerId.executorId) {
           localBlockIds += blockId
         } else {
           val networkMonotask = new NetworkMonotask(context, address, blockId, size)

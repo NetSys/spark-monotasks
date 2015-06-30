@@ -21,7 +21,7 @@ import java.nio.ByteBuffer
 import scala.collection.mutable.{HashMap, HashSet}
 import scala.language.existentials
 
-import org.apache.spark.{Partition, ShuffleDependency, TaskContextImpl}
+import org.apache.spark.{Partition, ShuffleDependency, SparkEnv, TaskContextImpl}
 import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.monotasks.compute.{ExecutionMonotask, ShuffleMapMonotask}
 import org.apache.spark.rdd.RDD
@@ -47,9 +47,11 @@ private[spark] class ShuffleMapMacrotask(
   override def toString = "ShuffleMapTask(%d, %d)".format(stageId, partition.index)
 
   override def getExecutionMonotask(context: TaskContextImpl): (RDD[_], ExecutionMonotask[_, _]) = {
-    val ser = context.env.closureSerializer.newInstance()
+    val ser = SparkEnv.get.closureSerializer.newInstance()
+
+    val taskBinaryBuffer = ByteBuffer.wrap(taskBinary.value)
     val (rdd, dep) = ser.deserialize[(RDD[_], ShuffleDependency[Any, Any, _])](
-      ByteBuffer.wrap(taskBinary.value), context.dependencyManager.replClassLoader)
+        taskBinaryBuffer, SparkEnv.get.dependencyManager.replClassLoader)
     (rdd, new ShuffleMapMonotask(context, rdd, partition, dep))
   }
 }

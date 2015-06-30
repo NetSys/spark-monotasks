@@ -46,14 +46,14 @@ class TaskContextSuite extends FunSuite with BeforeAndAfter with LocalSparkConte
 
   test("executeOnCompleteCallbacks executed on task completion") {
     var callbackExecuted = false
-    val taskContext = new TaskContextImpl(null, null, 0, null, 0, 0)
+    val taskContext = new TaskContextImpl(0, 0, 0)
     taskContext.addTaskCompletionListener(context => callbackExecuted = true)
     taskContext.markTaskCompleted()
     assert(callbackExecuted)
   }
 
   test("all TaskCompletionListeners should be called even if some fail") {
-    val context = new TaskContextImpl(null, null, 0, null, 0, 0)
+    val context = new TaskContextImpl(0, 0, 0)
     val listener = mock(classOf[TaskCompletionListener])
     context.addTaskCompletionListener(_ => throw new Exception("blah"))
     context.addTaskCompletionListener(listener)

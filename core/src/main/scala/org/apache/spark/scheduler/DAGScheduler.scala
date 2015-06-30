@@ -648,10 +648,7 @@ class DAGScheduler(
       val rdd = job.finalStage.rdd
       val split = rdd.partitions(job.partitions(0))
       val taskContext = new TaskContextImpl(
-        env,
-        localDagScheduler = null,
         maximumResultSizeBytes = 0,
-        dependencyManager = null,
         taskAttemptId = 0,
         attemptNumber = 0,
         runningLocally = true)

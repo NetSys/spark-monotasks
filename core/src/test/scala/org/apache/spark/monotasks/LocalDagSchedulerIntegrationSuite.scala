@@ -23,10 +23,11 @@ import org.mockito.Mockito.{mock, when}
 import org.scalatest.{BeforeAndAfter, FunSuite}
 
 import org.apache.spark.{LocalSparkContext, SparkConf, SparkContext, SparkEnv, TaskContextImpl}
-import org.apache.spark.executor.{ExecutorBackend, TaskMetrics}
+import org.apache.spark.executor.ExecutorBackend
 import org.apache.spark.monotasks.disk.{DiskReadMonotask, DiskRemoveMonotask,
   DiskWriteMonotask}
 import org.apache.spark.rdd.RDD
+import org.apache.spark.serializer.JavaSerializer
 import org.apache.spark.storage._
 
 /**
@@ -36,31 +37,45 @@ import org.apache.spark.storage._
 class LocalDagSchedulerIntegrationSuite extends FunSuite with BeforeAndAfter
   with LocalSparkContext {
 
-  private var taskContext: TaskContextImpl = _
   private var blockManager: BlockManager = _
+  private var conf: SparkConf = _
 
   // Use a wrapped version of LocalDagScheduler so we can run events sychronously.
   private var localDagScheduler: LocalDagSchedulerWithSynchrony = _
 
   before {
-    // This is required because the LocalDagScheduler takes as input a BlockManager, which is
-    // obtained from SparkEnv. Pass in false to the SparkConf constructor so that the same
-    // configuration is loaded regardless of the system properties.
-    sc = new SparkContext("local", "test", new SparkConf(false))
+    // Pass in false to the SparkConf constructor so that the same configuration is loaded
+    // regardless of the system properties.
+    conf = new SparkConf(false)
+    sc = new SparkContext("local", "test", conf)
     blockManager = SparkEnv.get.blockManager
-    localDagScheduler = new LocalDagSchedulerWithSynchrony(
-      mock(classOf[ExecutorBackend]), blockManager)
+  }
 
-    taskContext = mock(classOf[TaskContextImpl])
-    when(taskContext.env).thenReturn(SparkEnv.get)
-    when(taskContext.localDagScheduler).thenReturn(localDagScheduler)
-    when(taskContext.taskMetrics).thenReturn(TaskMetrics.empty)
+  /** Sets up the SparkEnv with a special, synchronized local dag scheduler. */
+  private def setupLocalDagSchedulerWithSynchrony(): Unit = {
+    localDagScheduler = new LocalDagSchedulerWithSynchrony(
+      mock(classOf[ExecutorBackend]), blockManager.blockFileManager)
+
+
+    // Set a new SparkEnv that points to the synchronous LocalDagScheduler.
+    val sparkEnv = mock(classOf[SparkEnv])
+    when(sparkEnv.localDagScheduler).thenReturn(localDagScheduler)
+    when(sparkEnv.blockManager).thenReturn(blockManager)
+    when(sparkEnv.closureSerializer).thenReturn(new JavaSerializer(conf))
+    when(sparkEnv.conf).thenReturn(conf)
+    when(sparkEnv.broadcastManager).thenReturn(SparkEnv.get.broadcastManager)
+    when(sparkEnv.serializer).thenReturn(new JavaSerializer(conf))
+    when(sparkEnv.dependencyManager).thenReturn(SparkEnv.get.dependencyManager)
+    when(sparkEnv.mapOutputTracker).thenReturn(SparkEnv.get.mapOutputTracker)
+    SparkEnv.set(sparkEnv)
   }
 
   test("no crashes in end-to-end operation (write, read, remove) using the DiskScheduler") {
+    setupLocalDagSchedulerWithSynchrony()
     val timeoutMillis = 10000
     val numBlocks = 10
     val dataSizeBytes = 1000
+    val taskContext = new TaskContextImpl(0, 0, 0)
 
     val dataBuffer = ByteBuffer.allocate(dataSizeBytes)
     for (i <- 1 to dataSizeBytes) {

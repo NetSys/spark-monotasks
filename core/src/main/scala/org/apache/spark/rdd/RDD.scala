@@ -41,7 +41,7 @@ import scala.language.implicitConversions
 import scala.reflect.{classTag, ClassTag}
 
 import com.clearspring.analytics.stream.cardinality.HyperLogLogPlus
-import org.apache.hadoop.io.{Writable, BytesWritable, NullWritable, Text}
+import org.apache.hadoop.io.{BytesWritable, NullWritable, Text}
 import org.apache.hadoop.io.compress.CompressionCodec
 import org.apache.hadoop.mapred.TextOutputFormat
 
@@ -56,7 +56,8 @@ import org.apache.spark.partial.BoundedDouble
 import org.apache.spark.partial.CountEvaluator
 import org.apache.spark.partial.GroupedCountEvaluator
 import org.apache.spark.partial.PartialResult
-import org.apache.spark.storage.{BlockException, BlockId, BlockStatus, RDDBlockId, StorageLevel}
+import org.apache.spark.storage.{BlockException, BlockId, BlockManager, BlockStatus, RDDBlockId,
+  StorageLevel}
 import org.apache.spark.util.{BoundedPriorityQueue, Utils}
 import org.apache.spark.util.collection.OpenHashMap
 import org.apache.spark.util.random.{BernoulliSampler, PoissonSampler, BernoulliCellSampler,
@@ -361,9 +362,9 @@ abstract class RDD[T: ClassTag](
       partition: Partition,
       dependencyIdToPartitions: HashMap[Long, HashSet[Partition]],
       context: TaskContextImpl,
-      nextMonotask: Monotask): Seq[Monotask] = {
+      nextMonotask: Monotask,
+      blockManager: BlockManager = SparkEnv.get.blockManager): Seq[Monotask] = {
     val blockId = new RDDBlockId(this.id, partition.index)
-    val blockManager = context.localDagScheduler.blockManager
 
     if (blockManager.isStored(blockId)) {
       // This RDD is stored locally and might need to be loaded into the MemoryStore (if it is

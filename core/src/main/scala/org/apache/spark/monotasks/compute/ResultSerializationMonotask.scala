@@ -18,7 +18,7 @@ package org.apache.spark.monotasks.compute
 
 import java.nio.ByteBuffer
 
-import org.apache.spark.{Accumulators, Logging, TaskContextImpl}
+import org.apache.spark.{Accumulators, Logging, SparkEnv, TaskContextImpl}
 import org.apache.spark.scheduler.{DirectTaskResult, IndirectTaskResult}
 import org.apache.spark.storage.{BlockId, StorageLevel, TaskResultBlockId}
 
@@ -34,14 +34,14 @@ class ResultSerializationMonotask(context: TaskContextImpl, macrotaskResultBlock
 
   override def execute(): Option[ByteBuffer] = {
     val taskAttemptId = context.taskAttemptId
-    val blockManager = context.localDagScheduler.blockManager
+    val blockManager = SparkEnv.get.blockManager
     blockManager.getSingle(macrotaskResultBlockId).map { result =>
       context.markTaskCompleted()
 
       // The mysterious choice of which serializer to use when is written to be consistent with
       // Spark.
-      val closureSerializer = context.env.closureSerializer.newInstance()
-      val resultSer = context.env.serializer.newInstance()
+      val closureSerializer = SparkEnv.get.closureSerializer.newInstance()
+      val resultSer = SparkEnv.get.serializer.newInstance()
 
       val serializationStartTime = System.currentTimeMillis()
       val valueBytes = resultSer.serialize(result)

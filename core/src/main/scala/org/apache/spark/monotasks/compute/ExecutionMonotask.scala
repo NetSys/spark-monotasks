@@ -20,7 +20,7 @@ import java.nio.ByteBuffer
 
 import scala.reflect.ClassTag
 
-import org.apache.spark.{Partition, TaskContextImpl}
+import org.apache.spark.{Partition, SparkEnv, TaskContextImpl}
 import org.apache.spark.rdd.RDD
 import org.apache.spark.storage.{MonotaskResultBlockId, StorageLevel}
 
@@ -40,7 +40,7 @@ private[spark] abstract class ExecutionMonotask[T, U: ClassTag](
   def getResult(): U
 
   override protected def execute(): Option[ByteBuffer] = {
-    context.localDagScheduler.blockManager.cacheSingle(
+    SparkEnv.get.blockManager.cacheSingle(
       getResultBlockId(), getResult(), StorageLevel.MEMORY_ONLY, false)
     None
   }

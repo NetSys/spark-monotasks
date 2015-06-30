@@ -48,7 +48,7 @@ import sun.nio.ch.DirectBuffer
 import org.apache.spark._
 import org.apache.spark.executor._
 import org.apache.spark.io.CompressionCodec
-import org.apache.spark.monotasks.Monotask
+import org.apache.spark.monotasks.{LocalDagScheduler, Monotask}
 import org.apache.spark.monotasks.disk.DiskReadMonotask
 import org.apache.spark.network._
 import org.apache.spark.network.buffer.{ManagedBuffer, NioManagedBuffer}
@@ -87,11 +87,9 @@ private[spark] class BlockManager(
     mapOutputTracker: MapOutputTracker,
     shuffleManager: ShuffleManager,
     private[spark] val blockTransferService: BlockTransferService,
-    securityManager: SecurityManager,
-    numUsableCores: Int)
+    val blockFileManager: BlockFileManager,
+    private val localDagScheduler: LocalDagScheduler)
   extends BlockFetcher with Logging {
-
-  val blockFileManager = new BlockFileManager(conf)
 
   private val blockInfo = new TimeStampedHashMap[BlockId, BlockInfo]
 
@@ -153,10 +151,20 @@ private[spark] class BlockManager(
       mapOutputTracker: MapOutputTracker,
       shuffleManager: ShuffleManager,
       blockTransferService: BlockTransferService,
-      securityManager: SecurityManager,
-      numUsableCores: Int) = {
-    this(execId, actorSystem, master, serializer, BlockManager.getMaxMemory(conf),
-      conf, mapOutputTracker, shuffleManager, blockTransferService, securityManager, numUsableCores)
+      blockFileManager: BlockFileManager,
+      localDagScheduler: LocalDagScheduler) = {
+    this(
+      execId,
+      actorSystem,
+      master,
+      serializer,
+      BlockManager.getMaxMemory(conf),
+      conf,
+      mapOutputTracker,
+      shuffleManager,
+      blockTransferService,
+      blockFileManager,
+      localDagScheduler)
   }
 
   /**

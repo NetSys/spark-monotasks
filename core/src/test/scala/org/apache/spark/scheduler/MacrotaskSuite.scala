@@ -16,13 +16,9 @@
 
 package org.apache.spark.scheduler
 
-import org.mockito.Mockito.{mock, when}
-
 import org.scalatest.{BeforeAndAfter, FunSuite}
 
-import org.apache.spark.{Dependency, LocalSparkContext, SparkConf, SparkContext, SparkEnv,
-  TaskContextImpl}
-import org.apache.spark.monotasks.{LocalDagScheduler, Monotask}
+import org.apache.spark.{Dependency, LocalSparkContext, SparkConf, SparkContext, TaskContextImpl}
 import org.apache.spark.monotasks.compute.{ExecutionMonotask, ResultMonotask,
   ResultSerializationMonotask}
 import org.apache.spark.rdd.RDD
@@ -43,10 +39,7 @@ class MacrotaskSuite extends FunSuite with BeforeAndAfter with LocalSparkContext
     //               \                                                   /
     //                `-- Serialization -- DiskWrite -------------------'
     //
-    val localDagScheduler = mock(classOf[LocalDagScheduler])
-    when(localDagScheduler.blockManager).thenReturn(SparkEnv.get.blockManager)
-    val context = mock(classOf[TaskContextImpl])
-    when(context.localDagScheduler).thenReturn(localDagScheduler)
+    val context = new TaskContextImpl(0, 0, 0)
 
     val diskLevel = StorageLevel.DISK_ONLY
     val rdd = sc.parallelize(1 to 10).persist(diskLevel).map(2 * _).persist(diskLevel)

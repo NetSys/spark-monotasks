@@ -19,7 +19,7 @@ package org.apache.spark.monotasks.compute
 import java.lang.IllegalStateException
 import java.nio.ByteBuffer
 
-import org.apache.spark.{Logging, TaskContextImpl}
+import org.apache.spark.{Logging, SparkEnv, TaskContextImpl}
 import org.apache.spark.storage.{BlockId, MonotaskResultBlockId, StorageLevel}
 
 /**
@@ -32,9 +32,9 @@ private[spark] class SerializationMonotask(context: TaskContextImpl, blockId: Bl
   resultBlockId = Some(new MonotaskResultBlockId(taskId))
 
   override def execute(): Option[ByteBuffer] = {
-    val blockManager = context.localDagScheduler.blockManager
+    val blockManager = SparkEnv.get.blockManager
     blockManager.get(blockId).map { blockResult =>
-      val buffer = blockManager.dataSerialize(blockId, blockResult.data, context.env.serializer)
+      val buffer = blockManager.dataSerialize(blockId, blockResult.data, SparkEnv.get.serializer)
       blockManager.cacheBytes(getResultBlockId(), buffer, StorageLevel.MEMORY_ONLY_SER, false)
     }.getOrElse {
       logError(s"Could not serialize block $blockId because it could not be found in memory.")

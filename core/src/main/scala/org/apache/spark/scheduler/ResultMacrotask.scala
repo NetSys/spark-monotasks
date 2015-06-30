@@ -21,7 +21,7 @@ import java.nio.ByteBuffer
 import scala.collection.mutable.{HashMap, HashSet}
 import scala.reflect.ClassTag
 
-import org.apache.spark.{Logging, Partition, TaskContext, TaskContextImpl}
+import org.apache.spark.{Logging, Partition, SparkEnv, TaskContext, TaskContextImpl}
 import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.monotasks.compute.{ExecutionMonotask, ResultMonotask}
 import org.apache.spark.rdd.RDD
@@ -50,9 +50,9 @@ private[spark] class ResultMacrotask[T, U: ClassTag](
 
   override def getExecutionMonotask(context: TaskContextImpl): (RDD[_], ExecutionMonotask[_, _]) = {
     // TODO: Task.run() setups up TaskContext and sets hostname in metrics; need to do that here!
-    val ser = context.env.closureSerializer.newInstance()
+    val ser = SparkEnv.get.closureSerializer.newInstance()
     val (rdd, func) = ser.deserialize[(RDD[T], (TaskContext, Iterator[T]) => U)](
-      ByteBuffer.wrap(taskBinary.value), context.dependencyManager.replClassLoader)
+        ByteBuffer.wrap(taskBinary.value), SparkEnv.get.dependencyManager.replClassLoader)
     (rdd, new ResultMonotask(context, rdd, partition, func))
   }
 }

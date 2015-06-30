@@ -33,7 +33,6 @@
 
 package org.apache.spark.executor
 
-import java.net.URL
 import java.nio.ByteBuffer
 
 import scala.util.control.NonFatal
@@ -41,7 +40,7 @@ import scala.util.control.NonFatal
 import akka.actor.Props
 
 import org.apache.spark._
-import org.apache.spark.monotasks.{LocalDagScheduler, SubmitMonotask}
+import org.apache.spark.monotasks.SubmitMonotask
 import org.apache.spark.monotasks.compute.PrepareMonotask
 import org.apache.spark.util.{SparkUncaughtExceptionHandler, AkkaUtils, Utils}
 import org.apache.spark.performance_logging.ContinuousMonitor
@@ -55,7 +54,6 @@ private[spark] class Executor(
     executorHostname: String,
     executorBackend: ExecutorBackend,
     private val env: SparkEnv,
-    userClassPath: Seq[URL] = Nil,
     isLocal: Boolean = false)
   extends Logging {
 
@@ -91,14 +89,12 @@ private[spark] class Executor(
   private val executorActor = env.actorSystem.actorOf(
     Props(new ExecutorActor(executorId)), "ExecutorActor")
 
-  // Create our DependencyManager, which manages the class loader.
-  private val dependencyManager = new DependencyManager(env, conf, userClassPath, isLocal)
-
   // If a task result is larger than this, we use the block manager to send the task result back.
   private val maximumResultSizeBytes =
     AkkaUtils.maxFrameSizeBytes(conf) - AkkaUtils.reservedSizeBytes
 
-  private val localDagScheduler = new LocalDagScheduler(executorBackend, env.blockManager)
+  private val localDagScheduler = env.localDagScheduler
+  localDagScheduler.setExecutorBackend(executorBackend)
 
   private val continuousMonitor = new ContinuousMonitor(
     conf,
@@ -118,10 +114,7 @@ private[spark] class Executor(
       taskName: String,
       serializedTask: ByteBuffer) {
     val context = new TaskContextImpl(
-      env,
-      localDagScheduler,
       maximumResultSizeBytes,
-      dependencyManager,
       taskAttemptId,
       attemptNumber)
     val prepareMonotask = new PrepareMonotask(context, serializedTask)

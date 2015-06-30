@@ -25,9 +25,8 @@ import org.mockito.Mockito.{mock, verify, when}
 
 import org.scalatest.{BeforeAndAfter, FunSuite}
 
-import org.apache.spark.{SparkConf, TaskContextImpl}
+import org.apache.spark.{SparkConf, SparkEnv, TaskContextImpl}
 import org.apache.spark.executor.TaskMetrics
-import org.apache.spark.monotasks.LocalDagScheduler
 import org.apache.spark.storage.{BlockFileManager, BlockId, BlockManager, BlockStatus,
   MonotaskResultBlockId, TestBlockId}
 import org.apache.spark.util.Utils
@@ -37,7 +36,6 @@ class DiskWriteMonotaskSuite extends FunSuite with BeforeAndAfter {
   private var blockManager: BlockManager = _
   private var taskContext: TaskContextImpl = _
   private var blockFileManager: BlockFileManager = _
-  private val numBlocks = 10
   private val dataSizeBytes = 1000
   private val dataBuffer = makeDataBuffer()
   private val serializedDataBlockId = new MonotaskResultBlockId(0L)
@@ -51,11 +49,11 @@ class DiskWriteMonotaskSuite extends FunSuite with BeforeAndAfter {
     when(blockManager.getCurrentBlockStatus(any())).thenReturn(Some(mock(classOf[BlockStatus])))
     when(blockManager.getLocalBytes(serializedDataBlockId)).thenReturn(Some(dataBuffer))
 
-    val localDagScheduler = mock(classOf[LocalDagScheduler])
-    when(localDagScheduler.blockManager).thenReturn(blockManager)
+    val sparkEnv = mock(classOf[SparkEnv])
+    when(sparkEnv.blockManager).thenReturn(blockManager)
+    SparkEnv.set(sparkEnv)
 
     taskContext = mock(classOf[TaskContextImpl])
-    when(taskContext.localDagScheduler).thenReturn(localDagScheduler)
     when(taskContext.taskMetrics).thenReturn(TaskMetrics.empty)
   }
 

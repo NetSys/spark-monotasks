@@ -47,7 +47,7 @@ class LocalDagSchedulerSuite extends FunSuite with BeforeAndAfterEach with Local
     sc = new SparkContext("local", "test", new SparkConf(false))
     executorBackend = mock(classOf[ExecutorBackend])
     localDagScheduler = new LocalDagSchedulerWithSynchrony(
-      executorBackend, SparkEnv.get.blockManager)
+      executorBackend, SparkEnv.get.blockManager.blockFileManager)
   }
 
   test("submitMonotasks: tasks with no dependencies are run immediately") {
@@ -84,8 +84,9 @@ class LocalDagSchedulerSuite extends FunSuite with BeforeAndAfterEach with Local
     val blockManager = SparkEnv.get.blockManager
     val env = mock(classOf[SparkEnv])
     when(env.blockManager).thenReturn(blockManager)
+    SparkEnv.set(env)
+
     val context = mock(classOf[TaskContextImpl])
-    when(context.env).thenReturn(env)
 
     val blockId = new TestBlockId("0")
     val monotaskA = new SimpleMonotask(context) {
@@ -361,7 +362,7 @@ class LocalDagSchedulerSuite extends FunSuite with BeforeAndAfterEach with Local
    */
   test("updateMetricsForStartedMonotask and updateMetricsForFinishedMonotask") {
     // Setup the 3 monotasks for macrotask 0.
-    val macrotask0Context = new TaskContextImpl(null, localDagScheduler, 0, null, 0, 0)
+    val macrotask0Context = new TaskContextImpl(0, 0, 0)
     val macrotask0NetworkMonotask = mock(classOf[NetworkMonotask])
     when(macrotask0NetworkMonotask.dependencies).thenReturn(ArrayBuffer.empty[Monotask])
     when(macrotask0NetworkMonotask.context).thenReturn(macrotask0Context)
@@ -373,7 +374,7 @@ class LocalDagSchedulerSuite extends FunSuite with BeforeAndAfterEach with Local
     when(macrotask0DiskMonotask.context).thenReturn(macrotask0Context)
 
     // Setup the 2 monotasks for macrotask 1.
-    val macrotask1Context = new TaskContextImpl(null, localDagScheduler, 0, null, 1, 0)
+    val macrotask1Context = new TaskContextImpl(0, 1, 0)
     val macrotask1DiskMonotask = mock(classOf[DiskMonotask])
     when(macrotask1DiskMonotask.dependencies).thenReturn(ArrayBuffer.empty[Monotask])
     when(macrotask1DiskMonotask.context).thenReturn(macrotask1Context)

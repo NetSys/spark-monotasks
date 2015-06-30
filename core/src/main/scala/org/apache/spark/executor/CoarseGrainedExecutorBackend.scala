@@ -82,7 +82,7 @@ private[spark] class CoarseGrainedExecutorBackend(
     case RegisteredExecutor =>
       logInfo("Successfully registered with driver")
       val (hostname, _) = Utils.parseHostPort(hostPort)
-      executor = new Executor(executorId, hostname, this, env, userClassPath, isLocal = false)
+      executor = new Executor(executorId, hostname, this, env, isLocal = false)
 
     case RegisterExecutorFailed(message) =>
       logError("Slave registration failed: " + message)
@@ -176,7 +176,7 @@ private[spark] object CoarseGrainedExecutorBackend extends Logging {
         }
       }
       val env = SparkEnv.createExecutorEnv(
-        driverConf, executorId, hostname, port, cores, isLocal = false)
+        driverConf, executorId, hostname, port, cores, userClassPath, isLocal = false)
 
       // SparkEnv sets spark.driver.port so it shouldn't be 0 anymore.
       val boundPort = env.conf.getInt("spark.executor.port", 0)
