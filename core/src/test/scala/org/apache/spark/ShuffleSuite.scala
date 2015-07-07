@@ -39,7 +39,7 @@ import org.scalatest.Matchers
 import org.apache.spark.ShuffleSuite.NonJavaSerializableClass
 import org.apache.spark.rdd.{CoGroupedRDD, OrderedRDDFunctions, RDD, ShuffledRDD, SubtractedRDD}
 import org.apache.spark.serializer.KryoSerializer
-import org.apache.spark.storage.{ShuffleDataBlockId, ShuffleBlockId}
+import org.apache.spark.storage.ShuffleBlockId
 import org.apache.spark.util.MutablePair
 
 abstract class ShuffleSuite extends FunSuite with Matchers with LocalSparkContext {
