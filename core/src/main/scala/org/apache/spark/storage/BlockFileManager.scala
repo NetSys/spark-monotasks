@@ -75,8 +75,6 @@ private[spark] class BlockFileManager(conf: SparkConf) extends Logging {
    * large inodes at the top level. */
   private val subDirs = createSubDirs()
 
-  addShutdownHook()
-
   def getFile(filename: String, diskId: String): Option[File] = {
     if (!localDirs.contains(diskId) || !subDirs.contains(diskId)) {
       logError(s"Unable to retrieve file due to invalid diskId: $diskId")
@@ -162,6 +160,9 @@ private[spark] class BlockFileManager(conf: SparkConf) extends Logging {
         /* For disk scheduling purposes, each Spark local directory is considered to be a separate
          * physical disk. In reality, this does not have to be the case. */
         localDirs(localDir.toPath().toString()) = localDir
+
+        // Register this local directory to be automatically deleted during shutdown.
+        Utils.registerShutdownDeleteDir(localDir)
       } else {
         logError(s"Failed $MAX_DIR_CREATION_ATTEMPTS attempts to create local dir in $rootDir. " +
           "Ignoring this directory.")
@@ -188,30 +189,5 @@ private[spark] class BlockFileManager(conf: SparkConf) extends Logging {
       subDirs(diskId) = new Array[File](subDirsPerLocalDir)
     }
     subDirs
-  }
-
-  private def addShutdownHook() {
-    localDirs.values.foreach(localDir => Utils.registerShutdownDeleteDir(localDir))
-    Runtime.getRuntime.addShutdownHook(new Thread("delete Spark local dirs") {
-      override def run(): Unit = Utils.logUncaughtExceptions {
-        logDebug("Shutdown hook called")
-        BlockFileManager.this.stop()
-      }
-    })
-  }
-
-  /** Cleanup local directories. */
-  def stop() {
-    localDirs.foreach { (f: (String, File)) =>
-      val localDir = f._2
-      if (localDir.isDirectory() && localDir.exists()) {
-        try {
-          if (!Utils.hasRootAsShutdownDeleteDir(localDir)) Utils.deleteRecursively(localDir)
-        } catch {
-          case e: Exception =>
-            logError(s"Exception while deleting local spark dir: $localDir", e)
-        }
-      }
-    }
   }
 }

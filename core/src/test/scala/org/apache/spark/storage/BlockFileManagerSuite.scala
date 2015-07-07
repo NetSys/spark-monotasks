@@ -69,10 +69,6 @@ class BlockFileManagerSuite extends FunSuite with BeforeAndAfterEach with Before
     diskIds = blockFileManager.localDirs.keys.toArray
   }
 
-  override def afterEach() {
-    blockFileManager.stop()
-  }
-
   test("basic block creation") {
     val blockId = new TestBlockId("test")
     assertFileEquals(blockId, blockId.name, 0)

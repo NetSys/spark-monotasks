@@ -962,7 +962,6 @@ private[spark] class BlockManager(
 
   def stop(): Unit = {
     blockTransferService.close()
-    blockFileManager.stop()
     actorSystem.stop(slaveActor)
     blockInfo.clear()
     memoryStore.clear()
