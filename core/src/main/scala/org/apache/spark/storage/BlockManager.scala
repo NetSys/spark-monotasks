@@ -197,10 +197,12 @@ private[spark] class BlockManager(
   private def reportAllBlocks(): Unit = {
     logInfo(s"Reporting ${blockInfo.size} blocks to the master.")
     for ((blockId, info) <- blockInfo) {
-      val status = getCurrentBlockStatus(blockId, info)
-      if (!tryToReportBlockStatus(blockId, info, status)) {
-        logError(s"Failed to report $blockId to master; giving up.")
-        return
+      info.synchronized {
+        val status = getCurrentBlockStatus(blockId, info)
+        if (!tryToReportBlockStatus(blockId, info, status)) {
+          logError(s"Failed to report $blockId to master; giving up.")
+          return
+        }
       }
     }
   }
@@ -315,18 +317,27 @@ private[spark] class BlockManager(
   }
 
   /**
-   * Tells the master about the current storage status of the specified block, if this BlockManager
-   * knows about it. This is a wrapper for the reportBlockStatus() above.
+   * Tells the master about the current storage status of the specified block using the provided
+   * StorageLevel, if it is not StorageLevel.NONE. This is a wrapper for reportBlockStatus() above.
+   *
+   * The caller is responsible for synchronizing on "info".
    */
-  private def reportBlockStatus(blockId: BlockId) {
-    if (blockInfo.contains(blockId)) {
-      val info = blockInfo(blockId)
+  private def reportBlockStatus(blockId: BlockId, info: BlockInfo): Unit = {
+    val status = getCurrentBlockStatus(blockId, info)
+    if (status.storageLevel != StorageLevel.NONE) {
+      reportBlockStatus(blockId, info, status)
+    }
+  }
+
+  /**
+   * Tells the master about the current storage status of the specified block, if this BlockManager
+   * knows about it. This is a wrapper for reportBlockStatus() above.
+   */
+  private def reportBlockStatus(blockId: BlockId): Unit = {
+    blockInfo.get(blockId).foreach { info =>
       // Prevent concurrent access to a block's BlockInfo object.
       info.synchronized {
-        val status = getCurrentBlockStatus(blockId, info)
-        if (status.storageLevel != StorageLevel.NONE) {
-          reportBlockStatus(blockId, info, status)
-        }
+        reportBlockStatus(blockId, info)
       }
     }
   }
@@ -357,25 +368,25 @@ private[spark] class BlockManager(
    * Return the updated storage status of the block with the given ID. More specifically, if
    * the block is dropped from memory and possibly added to disk, return the new storage level
    * and the updated in-memory and on-disk sizes.
+   *
+   * The caller is responsible for synchronizing on "info".
    */
   private def getCurrentBlockStatus(blockId: BlockId, info: BlockInfo): BlockStatus = {
-    info.synchronized {
-      info.level match {
-        case null =>
-          BlockStatus(StorageLevel.NONE, 0L, 0L, 0L, None)
-        case level =>
-          val inMem = level.useMemory && memoryStore.contains(blockId)
-          val inTachyon = level.useOffHeap && tachyonStore.contains(blockId)
-          val diskId = info.diskId
-          val onDisk = level.useDisk && blockFileManager.contains(blockId, diskId)
-          val deserialized = if (inMem) level.deserialized else false
-          val replication = if (inMem || inTachyon || onDisk) level.replication else 1
-          val storageLevel = StorageLevel(onDisk, inMem, inTachyon, deserialized, replication)
-          val memSize = if (inMem) memoryStore.getSize(blockId) else 0L
-          val tachyonSize = if (inTachyon) tachyonStore.getSize(blockId) else 0L
-          val diskSize = if (onDisk) blockFileManager.getSize(blockId, diskId.get) else 0L
-          BlockStatus(storageLevel, memSize, diskSize, tachyonSize, diskId)
-      }
+    info.level match {
+      case null =>
+        BlockStatus(StorageLevel.NONE, 0L, 0L, 0L, None)
+      case level =>
+        val inMem = level.useMemory && memoryStore.contains(blockId)
+        val inTachyon = level.useOffHeap && tachyonStore.contains(blockId)
+        val diskId = info.diskId
+        val onDisk = level.useDisk && blockFileManager.contains(blockId, diskId)
+        val deserialized = if (inMem) level.deserialized else false
+        val replication = if (inMem || inTachyon || onDisk) level.replication else 1
+        val storageLevel = StorageLevel(onDisk, inMem, inTachyon, deserialized, replication)
+        val memSize = if (inMem) memoryStore.getSize(blockId) else 0L
+        val tachyonSize = if (inTachyon) tachyonStore.getSize(blockId) else 0L
+        val diskSize = if (onDisk) blockFileManager.getSize(blockId, diskId.get) else 0L
+        BlockStatus(storageLevel, memSize, diskSize, tachyonSize, diskId)
     }
   }
 
@@ -383,16 +394,8 @@ private[spark] class BlockManager(
    * Returns the current status of the specified block, or None if the BlockManager does not know
    * about the block.
    */
-  def getCurrentBlockStatus(blockId: BlockId): Option[BlockStatus] = {
-    val info = blockInfo.get(blockId).orNull
-    if (info != null) {
-      info.synchronized {
-        Some(getCurrentBlockStatus(blockId, info))
-      }
-    } else {
-      None
-    }
-  }
+  def getCurrentBlockStatus(blockId: BlockId): Option[BlockStatus] =
+    blockInfo.get(blockId).map(info => info.synchronized(getCurrentBlockStatus(blockId, info)))
 
   /**
    * Get locations of an array of blocks.
@@ -434,8 +437,7 @@ private[spark] class BlockManager(
   }
 
   private def doGetLocal(blockId: BlockId, asBlockResult: Boolean): Option[Any] = {
-    val info = blockInfo.get(blockId).orNull
-    if (info != null) {
+    blockInfo.get(blockId).foreach { info =>
       info.synchronized {
         // Double check to make sure the block is still there. There is a small chance that the
         // block has been removed by removeBlock (which also synchronizes on the blockInfo object).
@@ -491,9 +493,9 @@ private[spark] class BlockManager(
           }
         }
       }
-    } else {
-      logDebug(s"Block $blockId not registered locally")
     }
+
+    logDebug(s"Block $blockId not cached locally.")
     None
   }
 
@@ -803,10 +805,9 @@ private[spark] class BlockManager(
    * (for example, the serialized version of a block that is cached in the MemoryStore so that the
    * block can be written to disk by a DiskWriteMonotask).
    */
-  def removeBlockFromMemory(blockId: BlockId, tellMaster: Boolean = true) = {
+  def removeBlockFromMemory(blockId: BlockId, tellMaster: Boolean = true): Unit = {
     logInfo(s"Removing block $blockId from the MemoryStore")
-    val info = blockInfo.get(blockId).orNull
-    if (info != null) {
+    blockInfo.get(blockId).foreach { info =>
       info.synchronized {
         // Removals are idempotent in memory store. At worst, we get a warning.
         if (memoryStore.remove(blockId)) {
@@ -829,8 +830,7 @@ private[spark] class BlockManager(
   /** Remove a block from memory, tachyon, and disk. */
   def removeBlock(blockId: BlockId, tellMaster: Boolean = true): Unit = {
     logInfo(s"Removing block $blockId")
-    val info = blockInfo.get(blockId).orNull
-    if (info != null) {
+    blockInfo.get(blockId).foreach {info =>
       info.synchronized {
         // Removals are idempotent in memory store. At worst, we get a warning.
         val removedFromMemory = memoryStore.remove(blockId)
@@ -943,28 +943,41 @@ private[spark] class BlockManager(
    * Updates the specified block's BlockInfo object to reflect that the block is now stored on a
    * particular disk.
    */
-  def updateBlockInfoOnWrite(blockId: BlockId, diskId: String, size: Long) {
-    if (blockInfo.contains(blockId)) {
-      val info = blockInfo(blockId)
-      // Prevent concurrent access to a block's BlockInfo object.
-      info.synchronized {
-        info.diskId = Some(diskId)
+  def updateBlockInfoOnWrite(blockId: BlockId, diskId: String, size: Long): Unit = {
+    blockInfo.get(blockId) match {
+      case Some(info) => {
+        // Prevent another thread from accessing info until the master has been updated.
+        info.synchronized {
+          info.diskId = Some(diskId)
 
-        // Update the storage level by adding disk.
-        val existingStorageLevel = info.level
-        info.level = StorageLevel(
-          true,
-          existingStorageLevel.useMemory,
-          existingStorageLevel.useOffHeap,
-          existingStorageLevel.deserialized,
-          existingStorageLevel.replication)
+          // Update the storage level by adding disk.
+          val existingStorageLevel = info.level
+          info.level = StorageLevel(
+            true,
+            existingStorageLevel.useMemory,
+            existingStorageLevel.useOffHeap,
+            existingStorageLevel.deserialized,
+            existingStorageLevel.replication)
+
+          // This needs to be inside info.synchronized{} so that another thread does not modify the
+          // block's status before the master is updated.
+          reportBlockStatus(blockId, info)
+        }
       }
-    } else {
-      val newInfo = new BlockInfo(StorageLevel.DISK_ONLY, true, Some(diskId))
-      newInfo.markReady(size)
-      blockInfo(blockId) = newInfo
+
+      case None => {
+        val newInfo = new BlockInfo(StorageLevel.DISK_ONLY, true, Some(diskId))
+        // Prevent another thread from accessing newInfo until the master has been updated.
+        newInfo.synchronized {
+          newInfo.markReady(size)
+          blockInfo(blockId) = newInfo
+
+          // This needs to be inside newInfo.synchronized{} so that another thread does modify the
+          // block's status before the master is updated.
+          reportBlockStatus(blockId, newInfo)
+        }
+      }
     }
-    reportBlockStatus(blockId)
   }
 
   /** Returns a Boolean indicating if the specified block is stored by any BlockManager. */
@@ -976,8 +989,7 @@ private[spark] class BlockManager(
    * block is already in the MemoryStore or is not stored by this BlockManager.
    */
   def getBlockLoadMonotask(blockId: BlockId, context: TaskContextImpl): Option[Monotask] = {
-    val info = blockInfo.get(blockId).orNull
-    if (info != null) {
+    blockInfo.get(blockId).foreach { info =>
       info.synchronized {
         val level = info.level
         val diskId = info.diskId
