@@ -51,18 +51,15 @@ import org.apache.spark.performance_logging.ContinuousMonitor
  * In coarse-grained mode, an existing actor system is provided.
  */
 private[spark] class Executor(
-    executorId: String,
+    private val executorId: String,
     executorHostname: String,
     executorBackend: ExecutorBackend,
-    env: SparkEnv,
+    private val env: SparkEnv,
     userClassPath: Seq[URL] = Nil,
     isLocal: Boolean = false)
-  extends Logging
-{
+  extends Logging {
 
   logInfo(s"Starting executor ID $executorId on host $executorHostname")
-
-  private val EMPTY_BYTE_BUFFER = ByteBuffer.wrap(new Array[Byte](0))
 
   private val conf = env.conf
 
