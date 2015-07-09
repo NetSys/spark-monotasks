@@ -35,8 +35,18 @@ package org.apache.spark.storage
 
 import java.util.concurrent.ConcurrentHashMap
 
+/**
+ * This class tracks a block's storage metadata and provides functionality that prevents access to
+ * the block until it has been stored.
+ *
+ * @param deserialized Refers to whether the block is stored as serialized bytes or deserialized
+ *                     objects. This field is only used when the block is stored in the MemoryStore.
+ * @param tellMaster Whether to report changes in this block's storage status to the master.
+ * @param diskId The physical disk on which this block is stored, or None if the block is not stored
+ *               on disk.
+ */
 private[storage] class BlockInfo(
-    var level: StorageLevel,
+    var deserialized: Boolean,
     val tellMaster: Boolean,
     var diskId: Option[String]) {
 

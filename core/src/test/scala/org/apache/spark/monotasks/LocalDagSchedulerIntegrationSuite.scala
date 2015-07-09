@@ -123,7 +123,7 @@ class LocalDagSchedulerIntegrationSuite extends FunSuite with BeforeAndAfter
       readAndRemoveResultMonotask.addDependency(removeMonotask)
       List(readMonotask, removeMonotask)
     }
-    
+
     localDagScheduler.runEvent(SubmitMonotasks(readAndRemoveMonotasks))
     localDagScheduler.runEvent(SubmitMonotask(readAndRemoveResultMonotask))
 

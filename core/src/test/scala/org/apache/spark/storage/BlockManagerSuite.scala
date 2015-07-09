@@ -112,7 +112,7 @@ class BlockManagerSuite extends FunSuite with Matchers with BeforeAndAfterEach
   }
 
   override def beforeEach(): Unit = {
-    blockFileManager = new BlockFileManager(conf)
+    blockFileManager = spy(new BlockFileManager(conf))
     localDagScheduler = new LocalDagScheduler(blockFileManager)
 
     val (actorSystem, boundPort) = AkkaUtils.createActorSystem(
@@ -286,7 +286,7 @@ class BlockManagerSuite extends FunSuite with Matchers with BeforeAndAfterEach
     store.cacheIterator(blockId, block, StorageLevel.MEMORY_ONLY, false)
 
     store.removeBlockFromMemory(blockId)
-    assert(store.getCurrentBlockStatus(blockId).isEmpty)
+    assert(store.getStatus(blockId).isEmpty)
   }
 
   test("removeBlockFromMemory: doesn't delete the BlockInfo if the block was not just in memory") {
@@ -303,7 +303,7 @@ class BlockManagerSuite extends FunSuite with Matchers with BeforeAndAfterEach
     store.cacheIterator(blockId, block, StorageLevel.MEMORY_ONLY, false)
 
     store.removeBlockFromMemory(blockId)
-    val statusOpt = store.getCurrentBlockStatus(blockId)
+    val statusOpt = store.getStatus(blockId)
     assert(statusOpt.isDefined)
     val status = statusOpt.get
     assert(status.storageLevel === StorageLevel.DISK_ONLY)
@@ -665,6 +665,7 @@ class BlockManagerSuite extends FunSuite with Matchers with BeforeAndAfterEach
 
   test("get matching blocks") {
     store = makeBlockManager(12000)
+    when(blockFileManager.getAllBlocks()).thenReturn(Seq.empty)
     val list = List.fill(2)(new Array[Byte](100))
 
     // insert some blocks
@@ -698,16 +699,15 @@ class BlockManagerSuite extends FunSuite with Matchers with BeforeAndAfterEach
 
   test("unroll blocks using cacheIterator") {
     store = makeBlockManager(12000)
-    val memOnly = StorageLevel.MEMORY_ONLY
     val memoryStore = store.memoryStore
     val smallList = List.fill(40)(new Array[Byte](100))
     val bigList = List.fill(40)(new Array[Byte](1000))
     def smallIterator = smallList.iterator.asInstanceOf[Iterator[Any]]
     def bigIterator = bigList.iterator.asInstanceOf[Iterator[Any]]
 
-    val result1 = memoryStore.cacheIterator("b1", smallIterator, memOnly, returnValues = true)
+    val result1 = memoryStore.cacheIterator("b1", smallIterator, true, true)
     // This should fail because bigIterator is too large.
-    val result2 = memoryStore.cacheIterator("b2", bigIterator, memOnly, returnValues = true)
+    val result2 = memoryStore.cacheIterator("b2", bigIterator, true, true)
     assert(memoryStore.contains("b1"))
     assert(!memoryStore.contains("b2"))
     assert(result1.size > 0)
@@ -802,121 +802,168 @@ class BlockManagerSuite extends FunSuite with Matchers with BeforeAndAfterEach
     }
   }
 
-  test("updateBlockInfoOnWrite: creates a new BlockInfo object if the block is not yet known") {
+  test("updateBlockInfoOnWrite: new storage level recognized for a previously unknown block") {
     store = makeBlockManager(1000)
-    val diskId = "disk"
-    for (i <- 1 to 3) {
-      val blockId = new TestBlockId(i.toString)
-      store.updateBlockInfoOnWrite(blockId, diskId, 1000L)
-
-      val statusOption = store.getStatus(blockId)
-      assert(statusOption.isDefined)
-      val status = statusOption.get
-      assert(status.storageLevel === StorageLevel.DISK_ONLY)
-      val diskIdA = status.diskId
-      assert(diskIdA.isDefined)
-      assert(diskIdA.get === diskId)
-    }
-  }
-
-  test("updateBlockInfoOnWrite: correctly sends a block's info to the master") {
-    store = makeBlockManager(1000)
-    val diskId = "disk"
-    for (i <- 1 to 3) {
-      val blockId = new TestBlockId(i.toString)
-      store.updateBlockInfoOnWrite(blockId, diskId, 1000L)
-
-      val masterStatusOpt = store.master.getBlockStatus(blockId, true).get(store.blockManagerId)
-      assert(masterStatusOpt.isDefined)
-      val masterStatus = masterStatusOpt.get
-      assert(masterStatus.storageLevel === StorageLevel.DISK_ONLY)
-      val diskIdA = masterStatus.diskId
-      assert(diskIdA.isDefined)
-      assert(diskIdA.get === diskId)
-    }
-  }
-
-  test("updateBlockInfoOnWrite: adds useDisk to storage level of existing blocks") {
-    store = makeBlockManager(1000)
-    val blockId = new TestBlockId("testBlockId")
-    val diskSizeBytes = 148L
-    val iterator = List(0, 1, 2, 3, 4).iterator
-    val diskId = "testDisk"
-
-    // First store the block in-memory.
-    val updatedBlocks = store.cacheIterator(blockId, iterator, StorageLevel.MEMORY_ONLY, true)
-    assert(updatedBlocks.size === 1)
-    assert(updatedBlocks(0)._2.storageLevel == StorageLevel.MEMORY_ONLY)
-
-    // Now, store the block on disk and verify that useDisk was added to the storage level.
-    store.updateBlockInfoOnWrite(blockId, diskId, diskSizeBytes)
-    val statusOpt = store.getStatus(blockId)
-    assert(statusOpt.isDefined)
-    val status = statusOpt.get
-    assert(status.diskId.isDefined)
-    assert(status.diskId.get === diskId)
-    assert(status.storageLevel === StorageLevel.MEMORY_AND_DISK)
-  }
-
-  test("two puts of the same block with different StorageLevels") {
-    store = spy(makeBlockManager(1000))
     val blockId = new TestBlockId("0")
-    val diskSizeBytes = 1000L
     val diskId = "diskId"
-    val iterator = List(0, 1, 2, 3, 4).iterator
-
-    val blockFileManager = mock(classOf[BlockFileManager])
-    when(blockFileManager.contains(meq(blockId), any())).thenReturn(true)
+    val diskSizeBytes = 100L
+    when(blockFileManager.contains(blockId, Some(diskId))).thenReturn(true)
     when(blockFileManager.getSize(blockId, diskId)).thenReturn(diskSizeBytes)
-    when(store.blockFileManager).thenReturn(blockFileManager)
-
-    // Tell the BlockManager that the block is now on disk, and that it can also be stored either in
-    // memory or disk.
-    store.updateBlockInfoOnWrite(blockId, diskId, 100L)
-
-    val updatedBlocks = store.cacheIterator(blockId, iterator, StorageLevel.MEMORY_ONLY, true)
-
-    assert(updatedBlocks.size === 1)
-    val (updatedBlockId, _) = updatedBlocks.head
-    assert(updatedBlockId === blockId)
+    store.updateBlockInfoOnWrite(blockId, diskId, diskSizeBytes)
 
     val statusOpt = store.getStatus(blockId)
     assert(statusOpt.isDefined)
     val status = statusOpt.get
-    val diskIdA = status.diskId
-    assert(diskIdA.isDefined)
-    assert(diskIdA.get === diskId)
     assert(status.storageLevel === StorageLevel.DISK_ONLY)
+    assert(status.diskId.map(_ === diskId).getOrElse(false))
+    assert(status.diskSize === diskSizeBytes)
+    assert(status.memSize === 0)
+    assert(status.tachyonSize === 0)
+  }
+
+  test("updateBlockInfoOnWrite: correctly sends a block's status to the master") {
+    store = makeBlockManager(1000)
+    val blockId = new TestBlockId("0")
+    val diskId = "diskId"
+    val diskSizeBytes = 100L
+    when(blockFileManager.contains(blockId, Some(diskId))).thenReturn(true)
+    when(blockFileManager.getSize(blockId, diskId)).thenReturn(diskSizeBytes)
+    store.updateBlockInfoOnWrite(blockId, diskId, diskSizeBytes)
+
+    val masterStatusOpt = store.master.getBlockStatus(blockId, true).get(store.blockManagerId)
+    assert(masterStatusOpt.isDefined)
+    val masterStatus = masterStatusOpt.get
+    assert(masterStatus.storageLevel === StorageLevel.DISK_ONLY)
+    assert(masterStatus.diskId.map(_ === diskId).getOrElse(false))
+    assert(masterStatus.diskSize === diskSizeBytes)
+    assert(masterStatus.memSize === 0)
+    assert(masterStatus.tachyonSize === 0)
+  }
+
+  test("updateBlockInfoOnWrite: all storage levels recognized when a block is already cached") {
+    store = makeBlockManager(1000)
+    val blockId = new TestBlockId("0")
+
+    // First, store the block in memory.
+    val iterator = List(0, 1, 2, 3, 4).iterator
+    val updatedBlocks = store.cacheIterator(blockId, iterator, StorageLevel.MEMORY_ONLY, true)
+
+    assert(updatedBlocks.size === 1)
+    var statusOpt = store.getStatus(blockId)
+    assert(statusOpt.isDefined)
+    var status = statusOpt.get
+    assert(status.storageLevel === StorageLevel.MEMORY_ONLY)
+    assert(status.diskId.isEmpty)
+    assert(status.diskSize === 0)
+    assert(status.memSize != 0)
+    assert(status.tachyonSize === 0)
+
+    // Tell the BlockManager that the block is now on disk and verify that useDisk was added to the
+    // storage level.
+    val diskId = "diskId"
+    val diskSizeBytes = 100L
+    when(blockFileManager.contains(blockId, Some(diskId))).thenReturn(true)
+    when(blockFileManager.getSize(blockId, diskId)).thenReturn(diskSizeBytes)
+    store.updateBlockInfoOnWrite(blockId, diskId, diskSizeBytes)
+
+    statusOpt = store.getStatus(blockId)
+    assert(statusOpt.isDefined)
+    status = statusOpt.get
+    assert(status.storageLevel === StorageLevel.MEMORY_AND_DISK)
+    assert(status.diskId.map(_ === diskId).getOrElse(false))
     assert(status.diskSize === diskSizeBytes)
     assert(status.memSize != 0)
     assert(status.tachyonSize === 0)
   }
 
-  test("two puts of the same block where the second put does nothing") {
+  test("doCache: all storage levels recognized when a block is put at multiple storage levels") {
     store = makeBlockManager(1000)
     val blockId = new TestBlockId("0")
-    val level = StorageLevel.MEMORY_ONLY
+
+    // Tell the BlockManager that the block is now on disk.
+    val diskId = "diskId"
+    val diskSizeBytes = 100L
+    when(blockFileManager.contains(blockId, Some(diskId))).thenReturn(true)
+    when(blockFileManager.getSize(blockId, diskId)).thenReturn(diskSizeBytes)
+    store.updateBlockInfoOnWrite(blockId, diskId, diskSizeBytes)
+
+    var statusOpt = store.getStatus(blockId)
+    assert(statusOpt.isDefined)
+    var status = statusOpt.get
+    assert(status.storageLevel === StorageLevel.DISK_ONLY)
+    assert(status.diskId.map(_ === diskId).getOrElse(false))
+    assert(status.diskSize === diskSizeBytes)
+    assert(status.memSize === 0)
+    assert(status.tachyonSize === 0)
+
+    // Cache the block in memory too. The new storage level should be MEMORY_AND_DISK_SER.
     val iterator = List(0, 1, 2, 3, 4).iterator
+    val updatedBlocks = store.cacheIterator(blockId, iterator, StorageLevel.MEMORY_ONLY_SER, true)
 
-    // Put the block in memory, and tell the BlockManager that the block can only be stored in
-    // memory.
-    val updatedBlocks1 = store.cacheIterator(blockId, iterator, level, true)
-
-    assert(updatedBlocks1.size === 1)
-    val (updatedBlockId, _) = updatedBlocks1.head
+    assert(updatedBlocks.size === 1)
+    val (updatedBlockId, _) = updatedBlocks.head
     assert(updatedBlockId === blockId)
 
-    val originalStatus = store.getStatus(blockId)
-    assert(originalStatus.isDefined)
+    statusOpt = store.getStatus(blockId)
+    assert(statusOpt.isDefined)
+    status = statusOpt.get
+    assert(status.storageLevel === StorageLevel.MEMORY_AND_DISK_SER)
+    assert(status.diskId.map(_ === diskId).getOrElse(false))
+    assert(status.diskSize === diskSizeBytes)
+    assert(status.memSize != 0)
+    assert(status.tachyonSize === 0)
+  }
+
+  test("doCache: BlockStatus does not change when caching a block twice") {
+    store = makeBlockManager(1000)
+    val blockId = new TestBlockId("0")
+
+    // Put the block in memory.
+    val level = StorageLevel.MEMORY_ONLY
+    val iterator = List(0, 1, 2, 3, 4).iterator
+    var updatedBlocks = store.cacheIterator(blockId, iterator, level, true)
+
+    assert(updatedBlocks.size === 1)
+    assert(updatedBlocks.head._1 === blockId)
+
+    val originalStatusOpt = store.getStatus(blockId)
+    assert(originalStatusOpt.isDefined)
+    val originalStatus = originalStatusOpt.get
+    assert(originalStatus.storageLevel === level)
+    assert(originalStatus.diskId.isEmpty)
+    assert(originalStatus.diskSize === 0)
+    assert(originalStatus.memSize != 0)
+    assert(originalStatus.tachyonSize === 0)
 
     // Try to put the block in memory a second time. This should do nothing.
-    val updatedBlocks2 = store.cacheIterator(blockId, iterator, level, true)
+    updatedBlocks = store.cacheIterator(blockId, iterator, level, true)
 
-    assert(updatedBlocks2.isEmpty)
+    assert(updatedBlocks.isEmpty)
     // Make sure that the BlockStatus has not changed.
     assert(
-      store.getStatus(blockId).map(_ === originalStatus.get).getOrElse(false),
+      store.getStatus(blockId).map(_ === originalStatus).getOrElse(false),
       "BlockInfo modifed or removed by second put.")
+  }
+
+  test("doCache: throws an exception when caching a block in both memory and tachyon") {
+    val blockId = new TestBlockId("0")
+    val iterator = List(0, 1, 2, 3, 4).iterator
+
+    // Verify that caching a block in memory and then tachyon fails.
+    store = makeBlockManager(1000)
+    store.cacheIterator(blockId, iterator, StorageLevel.MEMORY_ONLY, true)
+    intercept[IllegalArgumentException] {
+      store.cacheIterator(blockId, iterator, StorageLevel.OFF_HEAP, true)
+    }
+
+    if (conf.getBoolean("spark.test.tachyon.enable", false)) {
+      // Verify that caching a block in tachyon and then memory fails.
+      store = makeBlockManager(1000)
+      store.cacheIterator(blockId, iterator, StorageLevel.OFF_HEAP, true)
+      intercept[IllegalArgumentException] {
+        store.cacheIterator(blockId, iterator, StorageLevel.MEMORY_ONLY, true)
+      }
+    }
   }
 
   test("removeBlock removes blocks from disk") {

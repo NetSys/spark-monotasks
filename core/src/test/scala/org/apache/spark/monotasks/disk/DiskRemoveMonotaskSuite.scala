@@ -49,7 +49,7 @@ class DiskRemoveMonotaskSuite extends FunSuite with BeforeAndAfter {
 
     val blockManager = mock(classOf[BlockManager])
     when(blockManager.blockFileManager).thenReturn(blockFileManager)
-    when(blockManager.getCurrentBlockStatus(any())).thenReturn(Some(mock(classOf[BlockStatus])))
+    when(blockManager.getStatus(any())).thenReturn(Some(mock(classOf[BlockStatus])))
     when(blockManager.getLocalBytes(serializedDataBlockId)).thenReturn(Some(makeDataBuffer()))
 
     val sparkEnv = mock(classOf[SparkEnv])

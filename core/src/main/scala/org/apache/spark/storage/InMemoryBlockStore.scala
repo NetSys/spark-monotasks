@@ -42,7 +42,7 @@ import org.apache.spark.Logging
 /** Abstract class to store blocks in memory. */
 private[spark] abstract class InMemoryBlockStore(val blockManager: BlockManager) extends Logging {
 
-  def cacheBytes(blockId: BlockId, bytes: ByteBuffer, level: StorageLevel): CacheResult
+  def cacheBytes(blockId: BlockId, bytes: ByteBuffer, deserialized: Boolean): CacheResult
 
   /**
    * Cache a block and, possibly, also return its contents as either bytes or another Iterator.
@@ -54,13 +54,13 @@ private[spark] abstract class InMemoryBlockStore(val blockManager: BlockManager)
   def cacheIterator(
     blockId: BlockId,
     values: Iterator[Any],
-    level: StorageLevel,
+    deserialized: Boolean,
     returnValues: Boolean): CacheResult
 
   def cacheArray(
     blockId: BlockId,
     values: Array[Any],
-    level: StorageLevel,
+    deserialized: Boolean,
     returnValues: Boolean): CacheResult
 
   /**

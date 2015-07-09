@@ -115,7 +115,7 @@ class RddIteratorSuite extends FunSuite with BeforeAndAfter with LocalSparkConte
     val values = rddA.iterator(split, new TaskContextImpl(0, 0, 0, runningLocally = true))
     assert(values.toList === List(1, 2, 3, 4))
     // Since the task is running locally, the RDD should not be cached.
-    assert(blockManager.getCurrentBlockStatus(new RDDBlockId(rddA.id, split.index)).isEmpty)
+    assert(blockManager.getStatus(new RDDBlockId(rddA.id, split.index)).isEmpty)
   }
 
   test("iterator: verify task metrics updated correctly for in-memory blocks") {

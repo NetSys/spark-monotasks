@@ -260,7 +260,7 @@ abstract class RDD[T: ClassTag](
   final def iterator(split: Partition, context: TaskContext): Iterator[T] = {
     // Check if this RDD is cached in memory.
     val blockId = new RDDBlockId(id, split.index)
-    val inMemory = SparkEnv.get.blockManager.getCurrentBlockStatus(blockId).map { status =>
+    val inMemory = SparkEnv.get.blockManager.getStatus(blockId).map { status =>
       val level = status.storageLevel
       level.useMemory || level.useOffHeap
     }.getOrElse(false)

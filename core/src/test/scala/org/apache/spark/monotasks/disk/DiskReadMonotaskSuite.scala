@@ -50,11 +50,11 @@ class DiskReadMonotaskSuite extends FunSuite with BeforeAndAfter {
 
     blockManager = mock(classOf[BlockManager])
     when(blockManager.blockFileManager).thenReturn(blockFileManager)
-    when(blockManager.getCurrentBlockStatus(any())).thenReturn(Some(mock(classOf[BlockStatus])))
+    when(blockManager.getStatus(any())).thenReturn(Some(mock(classOf[BlockStatus])))
     when(blockManager.getLocalBytes(serializedDataBlockId)).thenReturn(Some(dataBuffer))
 
     val result = Seq((mock(classOf[BlockId]), mock(classOf[BlockStatus])))
-    when(blockManager.cacheBytes(any(), any(), any(), any(), any())).thenReturn(result)
+    when(blockManager.cacheBytes(any(), any(), any(), any())).thenReturn(result)
 
     val sparkEnv = mock(classOf[SparkEnv])
     when(sparkEnv.blockManager).thenReturn(blockManager)

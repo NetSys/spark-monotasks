@@ -198,7 +198,7 @@ private[spark] class BlockManager(
     logInfo(s"Reporting ${blockInfo.size} blocks to the master.")
     for ((blockId, info) <- blockInfo) {
       info.synchronized {
-        val status = getCurrentBlockStatus(blockId, info)
+        val status = getStatus(blockId, info)
         if (!tryToReportBlockStatus(blockId, info, status)) {
           logError(s"Failed to report $blockId to master; giving up.")
           return
@@ -270,21 +270,6 @@ private[spark] class BlockManager(
   }
 
   /**
-   * Get the BlockStatus for the block identified by the given ID, if it exists.
-   * NOTE: This is mainly for testing, and it doesn't fetch information from Tachyon.
-   */
-  def getStatus(blockId: BlockId): Option[BlockStatus] = {
-    blockInfo.get(blockId).map { info =>
-      val memSize = if (memoryStore.contains(blockId)) memoryStore.getSize(blockId) else 0L
-      val diskId = info.diskId
-      val isOnDisk = blockFileManager.contains(blockId, info.diskId)
-      val diskSize = if (isOnDisk) blockFileManager.getSize(blockId, diskId.get) else 0L
-      // Assume that block is not in Tachyon
-      BlockStatus(info.level, memSize, diskSize, 0L, info.diskId)
-    }
-  }
-
-  /**
    * Get the ids of existing blocks that match the given filter. Note that this will
    * query the blocks stored in the BlockFileManager (that the BlockManager
    * may not know of).
@@ -323,7 +308,7 @@ private[spark] class BlockManager(
    * The caller is responsible for synchronizing on "info".
    */
   private def reportBlockStatus(blockId: BlockId, info: BlockInfo): Unit = {
-    val status = getCurrentBlockStatus(blockId, info)
+    val status = getStatus(blockId, info)
     if (status.storageLevel != StorageLevel.NONE) {
       reportBlockStatus(blockId, info, status)
     }
@@ -365,37 +350,29 @@ private[spark] class BlockManager(
   }
 
   /**
-   * Return the updated storage status of the block with the given ID. More specifically, if
-   * the block is dropped from memory and possibly added to disk, return the new storage level
-   * and the updated in-memory and on-disk sizes.
+   * Returns the specified block's current storage status.
    *
    * The caller is responsible for synchronizing on "info".
    */
-  private def getCurrentBlockStatus(blockId: BlockId, info: BlockInfo): BlockStatus = {
-    info.level match {
-      case null =>
-        BlockStatus(StorageLevel.NONE, 0L, 0L, 0L, None)
-      case level =>
-        val inMem = level.useMemory && memoryStore.contains(blockId)
-        val inTachyon = level.useOffHeap && tachyonStore.contains(blockId)
-        val diskId = info.diskId
-        val onDisk = level.useDisk && blockFileManager.contains(blockId, diskId)
-        val deserialized = if (inMem) level.deserialized else false
-        val replication = if (inMem || inTachyon || onDisk) level.replication else 1
-        val storageLevel = StorageLevel(onDisk, inMem, inTachyon, deserialized, replication)
-        val memSize = if (inMem) memoryStore.getSize(blockId) else 0L
-        val tachyonSize = if (inTachyon) tachyonStore.getSize(blockId) else 0L
-        val diskSize = if (onDisk) blockFileManager.getSize(blockId, diskId.get) else 0L
-        BlockStatus(storageLevel, memSize, diskSize, tachyonSize, diskId)
-    }
+  private def getStatus(blockId: BlockId, info: BlockInfo): BlockStatus = {
+    val diskId = info.diskId
+    val onDisk = blockFileManager.contains(blockId, diskId)
+    val inMem = memoryStore.contains(blockId)
+    val inTachyon = tachyonInitialized && tachyonStore.contains(blockId)
+    val deserialized = if (inMem) info.deserialized else false
+    val storageLevel = StorageLevel(onDisk, inMem, inTachyon, deserialized, 1)
+    val memSize = if (inMem) memoryStore.getSize(blockId) else 0L
+    val tachyonSize = if (inTachyon) tachyonStore.getSize(blockId) else 0L
+    val diskSize = if (onDisk) blockFileManager.getSize(blockId, diskId.get) else 0L
+    BlockStatus(storageLevel, memSize, diskSize, tachyonSize, diskId)
   }
 
   /**
-   * Returns the current status of the specified block, or None if the BlockManager does not know
-   * about the block.
+   * Returns the specified block's current storage status, or None if this BlockManager does not
+   * know about the block.
    */
-  def getCurrentBlockStatus(blockId: BlockId): Option[BlockStatus] =
-    blockInfo.get(blockId).map(info => info.synchronized(getCurrentBlockStatus(blockId, info)))
+  def getStatus(blockId: BlockId): Option[BlockStatus] =
+    blockInfo.get(blockId).map(info => info.synchronized(getStatus(blockId, info)))
 
   /**
    * Get locations of an array of blocks.
@@ -456,11 +433,8 @@ private[spark] class BlockManager(
           return None
         }
 
-        val level = info.level
-        logDebug(s"Level for block $blockId is $level")
-
         // Look for the block in memory
-        if (level.useMemory) {
+        if (memoryStore.contains(blockId)) {
           logDebug(s"Getting block $blockId from memory")
           val result = if (asBlockResult) {
             memoryStore.getValues(blockId).map(new BlockResult(_, DataReadMethod.Memory, info.size))
@@ -476,20 +450,18 @@ private[spark] class BlockManager(
         }
 
         // Look for the block in Tachyon
-        if (level.useOffHeap) {
+        if (tachyonInitialized && tachyonStore.contains(blockId)) {
           logDebug(s"Getting block $blockId from tachyon")
-          if (tachyonStore.contains(blockId)) {
-            tachyonStore.getBytes(blockId) match {
-              case Some(bytes) =>
-                if (!asBlockResult) {
-                  return Some(bytes)
-                } else {
-                  return Some(new BlockResult(
-                    dataDeserialize(blockId, bytes), DataReadMethod.Memory, info.size))
-                }
-              case None =>
-                logDebug(s"Block $blockId not found in tachyon")
-            }
+          tachyonStore.getBytes(blockId) match {
+            case Some(bytes) =>
+              if (!asBlockResult) {
+                return Some(bytes)
+              } else {
+                return Some(new BlockResult(
+                  dataDeserialize(blockId, bytes), DataReadMethod.Memory, info.size))
+              }
+            case None =>
+              logDebug(s"Block $blockId not found in tachyon")
           }
         }
       }
@@ -555,10 +527,9 @@ private[spark] class BlockManager(
       blockId: BlockId,
       values: Iterator[Any],
       level: StorageLevel,
-      tellMaster: Boolean = true,
-      effectiveStorageLevel: Option[StorageLevel] = None): Seq[(BlockId, BlockStatus)] = {
+      tellMaster: Boolean = true): Seq[(BlockId, BlockStatus)] = {
     require(values != null, "Values is null")
-    doCache(blockId, IteratorValues(values), level, tellMaster, effectiveStorageLevel)
+    doCache(blockId, IteratorValues(values), level, tellMaster)
   }
 
   /**
@@ -586,10 +557,9 @@ private[spark] class BlockManager(
       blockId: BlockId,
       values: Array[Any],
       level: StorageLevel,
-      tellMaster: Boolean = true,
-      effectiveStorageLevel: Option[StorageLevel] = None): Seq[(BlockId, BlockStatus)] = {
+      tellMaster: Boolean = true): Seq[(BlockId, BlockStatus)] = {
     require(values != null, "Values is null")
-    doCache(blockId, ArrayValues(values), level, tellMaster, effectiveStorageLevel)
+    doCache(blockId, ArrayValues(values), level, tellMaster)
   }
 
   /**
@@ -600,45 +570,34 @@ private[spark] class BlockManager(
       blockId: BlockId,
       bytes: ByteBuffer,
       level: StorageLevel,
-      tellMaster: Boolean = true,
-      effectiveStorageLevel: Option[StorageLevel] = None): Seq[(BlockId, BlockStatus)] = {
+      tellMaster: Boolean = true): Seq[(BlockId, BlockStatus)] = {
     require(bytes != null, "Bytes is null")
-    doCache(blockId, ByteBufferValues(bytes), level, tellMaster, effectiveStorageLevel)
+    doCache(blockId, ByteBufferValues(bytes), level, tellMaster)
   }
 
   /**
    * Cache the provided block according to the given level in one of the in-memory block stores
-   * (MemoryStore or TachyonStore).
-   *
-   * The effectiveStorageLevel refers to the level according to which the block will actually be
-   * handled. This allows the caller to specify an alternate behavior for doCache while preserving
-   * the original level specified by the user.
+   * (MemoryStore or TachyonStore). Note that caching a block in both the MemoryStore and the
+   * TachyonStore is not supported.
    *
    * If the block is already stored in memory, tachyon, or on disk, then it will only be cached a
    * second time if it is not already stored at the specified StorageLevel. This can be used to
    * temporarily store blocks in memory that are normally stored on disk so that they can be
-   * consumed by ComputeMonotasks. To enable this functionality, if doCache() is called on a block
-   * that's already stored at a different StorageLevel, the block will be stored at the new
-   * StorageLevel but the BlockInfo's StorageLevel will not be changed.
+   * consumed by ComputeMonotasks.
    */
   private def doCache(
       blockId: BlockId,
       data: BlockValues,
       level: StorageLevel,
-      tellMaster: Boolean = true,
-      effectiveStorageLevel: Option[StorageLevel] = None)
-    : Seq[(BlockId, BlockStatus)] = {
+      tellMaster: Boolean = true): Seq[(BlockId, BlockStatus)] = {
 
     require(blockId != null, "BlockId is null")
     require(level != null && level.isValid, "StorageLevel is null or invalid")
-    effectiveStorageLevel.foreach { effectiveLevel =>
-      require(
-          (effectiveLevel != null) && effectiveLevel.isValid,
-          "Effective StorageLevel is null or invalid")
+    if (level == StorageLevel.DISK_ONLY) {
+      throw new IllegalArgumentException("Cannot write blocks to disk using the BlockManager.")
     }
-
-    // The level we will actually use to cache the block.
-    val cachedLevel = effectiveStorageLevel.getOrElse(level)
+    val useMemory = level.useMemory
+    val deserialized = level.deserialized
 
     // Return value
     val updatedBlocks = new ArrayBuffer[(BlockId, BlockStatus)]
@@ -648,24 +607,36 @@ private[spark] class BlockManager(
     var alreadyKnown = false
     // Other threads will not be able to get() this block until we call markReady on its BlockInfo.
     val cachedBlockInfo = {
-      val tinfo = new BlockInfo(level, tellMaster, None)
+      val tinfo = new BlockInfo(deserialized, tellMaster, None)
       // Do atomically !
       blockInfo.putIfAbsent(blockId, tinfo).map { oldInfo =>
         if (oldInfo.waitForReady()) {
-          // We abort the cache operation if the block is already stored where we were going to
-          // cache it.
-          if ((cachedLevel.useMemory && memoryStore.contains(blockId)) ||
-            (cachedLevel.useOffHeap && tachyonStore.contains(blockId))) {
-            logWarning(s"Block $blockId already exists on this machine at level $cachedLevel; " +
-              "not re-adding it")
-            return updatedBlocks
-          } else {
-            alreadyKnown = true
+          oldInfo.synchronized {
+            // We abort the cache operation if the block is already stored where we were going to
+            // cache it.
+            if ((useMemory && memoryStore.contains(blockId)) ||
+              (level.useOffHeap && tachyonInitialized && tachyonStore.contains(blockId))) {
+              logWarning(s"Block $blockId already exists on this machine at level $level; " +
+                "not re-adding it")
+              return updatedBlocks
+            } else if ((useMemory && tachyonInitialized && tachyonStore.contains(blockId)) ||
+                (level.useOffHeap && memoryStore.contains(blockId))) {
+              throw new IllegalArgumentException(
+                "Unable to cache a block in both memory and tachyon.")
+            } else {
+              alreadyKnown = true
+            }
+
+            // TODO: When block replication is supported again, the oldInfo.replication field should
+            //       be updated if necessary. This raises the question: what should happen if
+            //       oldLevel.replication != level.replication?
+            oldInfo.deserialized = deserialized
           }
+        } else {
+          // TODO: So the BlockInfo exists, but the previous attempt to load it (?) failed. What do
+          //       we do now? Retry on it?
         }
 
-        // TODO: So the BlockInfo exists, but the previous attempt to load it (?) failed. What do we
-        //       do now? Retry on it?
         oldInfo
       }.getOrElse{
         tinfo
@@ -686,38 +657,24 @@ private[spark] class BlockManager(
 
       var marked = false
       try {
-        // returnValues - Whether to return the cached values
-        // blockStore - The type of storage to cache these values in
-        val (returnValues, blockStore: InMemoryBlockStore) = {
-          if (cachedLevel.useMemory) {
-            (true, memoryStore)
-          } else if (cachedLevel.useOffHeap) {
-            // Use tachyon for off-heap storage.
-            (false, tachyonStore)
-          } else {
-            if (cachedLevel.useDisk) {
-              logWarning(s"Attempting to use the BlockManager to write block $blockId to disk. " +
-                "This is no longer supported. Use a DiskWriteMonotask instead.")
-            }
-            throw new BlockException(
-              blockId,
-              s"Attempted to cache block $blockId with an invalid StorageLevel: $cachedLevel")
-          }
-        }
+        // Whether to return the cached values
+        val returnValues = useMemory
+        // The type of storage to cache these values in
+        val blockStore = if (useMemory) memoryStore else tachyonStore
 
         // Actually cache the values
         val result = data match {
           case IteratorValues(iterator) =>
-            blockStore.cacheIterator(blockId, iterator, cachedLevel, returnValues)
+            blockStore.cacheIterator(blockId, iterator, deserialized, returnValues)
           case ArrayValues(array) =>
-            blockStore.cacheArray(blockId, array, cachedLevel, returnValues)
+            blockStore.cacheArray(blockId, array, deserialized, returnValues)
           case ByteBufferValues(bytes) =>
             bytes.rewind()
-            blockStore.cacheBytes(blockId, bytes, cachedLevel)
+            blockStore.cacheBytes(blockId, bytes, deserialized)
         }
         size = result.size
 
-        val cachedBlockStatus = getCurrentBlockStatus(blockId, cachedBlockInfo)
+        val cachedBlockStatus = getStatus(blockId, cachedBlockInfo)
         if (cachedBlockStatus.storageLevel != StorageLevel.NONE) {
           // Now that the block has been cached in either the memory or tachyon store, let other
           // threads read it and tell the master about it
@@ -811,12 +768,16 @@ private[spark] class BlockManager(
       info.synchronized {
         // Removals are idempotent in memory store. At worst, we get a warning.
         if (memoryStore.remove(blockId)) {
-          val status = getCurrentBlockStatus(blockId, info)
+
+          val status = getStatus(blockId, info)
           if (status.storageLevel == StorageLevel.NONE) {
             blockInfo.remove(blockId)
             logInfo(s"Block $blockId is no longer stored locally, so the BlockManager discarded " +
               "its metadata.")
+          } else {
+            info.deserialized = false
           }
+
           if (tellMaster && info.tellMaster) {
             reportBlockStatus(blockId, info, status)
           }
@@ -859,7 +820,7 @@ private[spark] class BlockManager(
         }
         blockInfo.remove(blockId)
         if (tellMaster && info.tellMaster) {
-          val status = getCurrentBlockStatus(blockId, info)
+          val status = getStatus(blockId, info)
           reportBlockStatus(blockId, info, status)
         }
       }
@@ -883,15 +844,13 @@ private[spark] class BlockManager(
       val (id, info, time) = (entry.getKey, entry.getValue.value, entry.getValue.timestamp)
       if (time < cleanupTime && shouldDrop(id)) {
         info.synchronized {
-          val level = info.level
-          if (level.useMemory) { memoryStore.remove(id) }
-          if (level.useOffHeap) { tachyonStore.remove(id) }
+          if (memoryStore.contains(id)) { memoryStore.remove(id) }
+          if (tachyonInitialized && tachyonStore.contains(id)) { tachyonStore.remove(id) }
           initiateBlockRemovalFromDisk(id, info)
           iterator.remove()
           logInfo(s"Dropped block $id")
+          reportBlockStatus(id, info)
         }
-        val status = getCurrentBlockStatus(id, info)
-        reportBlockStatus(id, info, status)
       }
     }
   }
@@ -967,15 +926,6 @@ private[spark] class BlockManager(
         info.synchronized {
           info.diskId = Some(diskId)
 
-          // Update the storage level by adding disk.
-          val existingStorageLevel = info.level
-          info.level = StorageLevel(
-            true,
-            existingStorageLevel.useMemory,
-            existingStorageLevel.useOffHeap,
-            existingStorageLevel.deserialized,
-            existingStorageLevel.replication)
-
           // This needs to be inside info.synchronized{} so that another thread does not modify the
           // block's status before the master is updated.
           reportBlockStatus(blockId, info)
@@ -983,7 +933,7 @@ private[spark] class BlockManager(
       }
 
       case None => {
-        val newInfo = new BlockInfo(StorageLevel.DISK_ONLY, true, Some(diskId))
+        val newInfo = new BlockInfo(false, true, Some(diskId))
         // Prevent another thread from accessing newInfo until the master has been updated.
         newInfo.synchronized {
           newInfo.markReady(size)
@@ -1008,11 +958,10 @@ private[spark] class BlockManager(
   def getBlockLoadMonotask(blockId: BlockId, context: TaskContextImpl): Option[Monotask] = {
     blockInfo.get(blockId).foreach { info =>
       info.synchronized {
-        val level = info.level
         val diskId = info.diskId
-        if (level.useMemory && memoryStore.contains(blockId)) {
+        if (memoryStore.contains(blockId)) {
           return None
-        } else if (level.useDisk && blockFileManager.contains(blockId, info.diskId)) {
+        } else if (blockFileManager.contains(blockId, diskId)) {
           return Some(new DiskReadMonotask(context, blockId, diskId.get))
         }
       }

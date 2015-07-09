@@ -75,15 +75,15 @@ private[spark] class MemoryStore(blockManager: BlockManager, maxMemory: Long)
   override def cacheBytes(
       blockId: BlockId,
       bytes: ByteBuffer,
-      level: StorageLevel): CacheResult = {
+      deserialized: Boolean): CacheResult = {
     // Work on a duplicate - since the original input might be used elsewhere.
     val bytesCopy = bytes.duplicate()
     bytesCopy.rewind()
-    if (level.deserialized) {
+    if (deserialized) {
       val values = blockManager.dataDeserialize(blockId, bytesCopy)
-      cacheIterator(blockId, values, level, returnValues = true)
+      cacheIterator(blockId, values, deserialized, true)
     } else {
-      tryToCache(blockId, bytesCopy, bytesCopy.limit, deserialized = false)
+      tryToCache(blockId, bytesCopy, bytesCopy.limit, deserialized)
       CacheResult(bytesCopy.limit(), Right(bytesCopy.duplicate()))
     }
   }
@@ -91,15 +91,15 @@ private[spark] class MemoryStore(blockManager: BlockManager, maxMemory: Long)
   override def cacheArray(
       blockId: BlockId,
       values: Array[Any],
-      level: StorageLevel,
+      deserialized: Boolean,
       returnValues: Boolean): CacheResult = {
-    if (level.deserialized) {
+    if (deserialized) {
       val sizeEstimate = SizeEstimator.estimate(values.asInstanceOf[AnyRef])
-      tryToCache(blockId, values, sizeEstimate, deserialized = true)
+      tryToCache(blockId, values, sizeEstimate, deserialized)
       CacheResult(sizeEstimate, Left(values.iterator))
     } else {
       val bytes = blockManager.dataSerialize(blockId, values.iterator)
-      tryToCache(blockId, bytes, bytes.limit, deserialized = false)
+      tryToCache(blockId, bytes, bytes.limit, deserialized)
       CacheResult(bytes.limit(), Right(bytes.duplicate()))
     }
   }
@@ -108,9 +108,9 @@ private[spark] class MemoryStore(blockManager: BlockManager, maxMemory: Long)
   override def cacheIterator(
       blockId: BlockId,
       values: Iterator[Any],
-      level: StorageLevel,
+      deserialized: Boolean,
       returnValues: Boolean): CacheResult =
-    cacheArray(blockId, values.toArray, level, returnValues)
+    cacheArray(blockId, values.toArray, deserialized, returnValues)
 
   override def getBytes(blockId: BlockId): Option[ByteBuffer] = {
     val entry = entries.synchronized {

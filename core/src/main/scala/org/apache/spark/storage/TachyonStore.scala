@@ -56,22 +56,25 @@ private[spark] class TachyonStore(
     tachyonManager.getFile(blockId.name).length
   }
 
-  override def cacheBytes(blockId: BlockId, bytes: ByteBuffer, level: StorageLevel): CacheResult = {
+  override def cacheBytes(
+      blockId: BlockId,
+      bytes: ByteBuffer,
+      deserialized: Boolean): CacheResult = {
     cacheInTachyonStore(blockId, bytes, returnValues = true)
   }
 
   override def cacheArray(
       blockId: BlockId,
       values: Array[Any],
-      level: StorageLevel,
+      deserialized: Boolean,
       returnValues: Boolean): CacheResult = {
-    cacheIterator(blockId, values.toIterator, level, returnValues)
+    cacheIterator(blockId, values.toIterator, deserialized, returnValues)
   }
 
   override def cacheIterator(
       blockId: BlockId,
       values: Iterator[Any],
-      level: StorageLevel,
+      deserialized: Boolean,
       returnValues: Boolean): CacheResult = {
     logDebug(s"Attempting to write values for block $blockId")
     val bytes = blockManager.dataSerialize(blockId, values)
