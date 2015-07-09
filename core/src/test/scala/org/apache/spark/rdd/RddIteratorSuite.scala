@@ -46,12 +46,15 @@ class RddIteratorSuite extends FunSuite with BeforeAndAfter with LocalSparkConte
 
   private var blockManager: BlockManager = _
   private var split: Partition = _
-  private val context = new TaskContextImpl(0, 0, 0)
+  private var context: TaskContextImpl = _
   /** An RDD which returns the values [1, 2, 3, 4]. */
   private var rddA: RDD[Int] = _
   private var rddB: RDD[Int] = _
 
   before {
+    // Make a new task context for each test so each test gets its own set of task metrics.
+    context = new TaskContextImpl(0, 0, 0)
+
     // Create a SparkContext as a convenient way to construct a BlockManager.
     sc = new SparkContext("local", "test", new SparkConf(false))
     blockManager = sc.env.blockManager
