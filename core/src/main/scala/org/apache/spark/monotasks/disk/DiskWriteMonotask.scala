@@ -69,8 +69,10 @@ private[spark] class DiskWriteMonotask(
       case _ =>
         val metrics = context.taskMetrics
         val oldUpdatedBlocks = metrics.updatedBlocks.getOrElse(Seq.empty)
-        val updatedBlock = Seq((blockId, blockManager.getStatus(blockId).get))
-        metrics.updatedBlocks = Some(oldUpdatedBlocks ++ updatedBlock)
+        val status = blockManager.getStatus(blockId).getOrElse(
+          throw new IllegalStateException(
+            s"The BlockManager does not know about block $blockId after it was written to disk."))
+        metrics.updatedBlocks = Some(oldUpdatedBlocks ++ Seq((blockId, status)))
     }
   }
 
