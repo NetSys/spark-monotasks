@@ -33,10 +33,10 @@
 
 package org.apache.spark.storage
 
+import java.io.PrintWriter
 import java.nio.ByteBuffer
 import java.util.concurrent.TimeUnit
 
-import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.Await
 import scala.concurrent.duration._
 import scala.language.implicitConversions
@@ -53,7 +53,8 @@ import org.scalatest._
 import org.scalatest.concurrent.Eventually._
 import org.scalatest.concurrent.Timeouts._
 
-import org.apache.spark.{MapOutputTrackerMaster, SparkConf, SparkContext, SecurityManager}
+import org.apache.spark.{MapOutputTrackerMaster, SparkConf, SparkContext, SparkEnv,
+  SecurityManager}
 import org.apache.spark.executor.DataReadMethod
 import org.apache.spark.monotasks.LocalDagScheduler
 import org.apache.spark.network.nio.NioBlockTransferService
@@ -76,8 +77,11 @@ class BlockManagerSuite extends FunSuite with Matchers with BeforeAndAfterEach
   val securityMgr = new SecurityManager(conf)
   val mapOutputTracker = new MapOutputTrackerMaster(conf)
   val shuffleManager = new MemoryShuffleManager(conf)
-  val blockFileManager = new BlockFileManager(conf)
-  val localDagScheduler = new LocalDagScheduler(blockFileManager)
+
+  // The BlockFileManager needs to be initialized for each test, because afterEach() stops the
+  // BlockManager, which causes the BlockFileManager to delete all of it's local directories.
+  var blockFileManager: BlockFileManager = _
+  var localDagScheduler: LocalDagScheduler = _
 
   // Reuse a serializer across tests to avoid creating a new thread-local buffer on each test
   conf.set("spark.kryoserializer.buffer.mb", "1")
@@ -108,6 +112,9 @@ class BlockManagerSuite extends FunSuite with Matchers with BeforeAndAfterEach
   }
 
   override def beforeEach(): Unit = {
+    blockFileManager = new BlockFileManager(conf)
+    localDagScheduler = new LocalDagScheduler(blockFileManager)
+
     val (actorSystem, boundPort) = AkkaUtils.createActorSystem(
       "test", "localhost", 0, conf = conf, securityManager = securityMgr)
     this.actorSystem = actorSystem
@@ -910,5 +917,41 @@ class BlockManagerSuite extends FunSuite with Matchers with BeforeAndAfterEach
     assert(
       store.getStatus(blockId).map(_ === originalStatus.get).getOrElse(false),
       "BlockInfo modifed or removed by second put.")
+  }
+
+  test("removeBlock removes blocks from disk") {
+    store = makeBlockManager(10)
+
+    // Setup a SparkEnv, which is needed so the DiskRemoveMonotask can access the BlockManager and
+    // the LocalDagScheduler.
+    val env = mock(classOf[SparkEnv])
+    when(env.blockManager).thenReturn(store)
+    when(env.localDagScheduler).thenReturn(localDagScheduler)
+    SparkEnv.set(env)
+
+    // Store a block on disk.
+    val blockId = new TestBlockId("testBlock")
+    val diskId = blockFileManager.localDirs.keySet.head
+    val file = blockFileManager.getBlockFile(blockId, diskId).getOrElse(
+      fail("Unable to create file to store test block"))
+    val writer = new PrintWriter(file)
+    writer.write("This is some test data.")
+    writer.close()
+    assert(file.exists())
+    // Tell the block manager that the block is now stored on-disk.
+    val dummySize = 15
+    store.updateBlockInfoOnWrite(blockId, diskId, dummySize)
+
+    // Validate that the block is actually stored on disk.
+    val status = store.getStatus(blockId).getOrElse(
+      fail(s"Block $blockId should be stored in the block manager"))
+    assert(status.storageLevel === StorageLevel.DISK_ONLY)
+
+    store.removeBlock(blockId)
+
+    // Make sure the block is eventually deleted from disk.
+    eventually(timeout(1000 milliseconds)) { !file.exists() }
+
+    assert(store.getStatus(blockId) === None)
   }
 }

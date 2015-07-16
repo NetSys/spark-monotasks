@@ -20,7 +20,7 @@ import java.nio.ByteBuffer
 
 import scala.collection.mutable.{HashMap, HashSet}
 
-import org.apache.spark.{Logging, TaskState}
+import org.apache.spark.{Logging, TaskContextImpl, TaskState}
 import org.apache.spark.TaskState.TaskState
 import org.apache.spark.executor.ExecutorBackend
 import org.apache.spark.monotasks.compute.{ComputeMonotask, ComputeScheduler}
@@ -41,6 +41,12 @@ import org.apache.spark.util.{EventLoop, SparkUncaughtExceptionHandler}
  */
 private[spark] class LocalDagScheduler(blockFileManager: BlockFileManager)
   extends EventLoop[LocalDagSchedulerEvent]("local-dag-scheduler-event-loop") with Logging {
+
+  /**
+   * TaskContextImpl to use for monotasks that do not correspond to a macrotask running on this
+   * machine (e.g., DiskRemoveMonotasks that are removing shuffle data that is no longer needed).
+   */
+  val genericTaskContext = new TaskContextImpl(0, -1, 0)
 
   /**
    * Backend to send notifications to when macrotasks complete successfully. Set by

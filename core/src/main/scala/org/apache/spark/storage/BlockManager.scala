@@ -48,8 +48,8 @@ import sun.nio.ch.DirectBuffer
 import org.apache.spark._
 import org.apache.spark.executor._
 import org.apache.spark.io.CompressionCodec
-import org.apache.spark.monotasks.{LocalDagScheduler, Monotask}
-import org.apache.spark.monotasks.disk.DiskReadMonotask
+import org.apache.spark.monotasks.{LocalDagScheduler, Monotask, SubmitMonotask}
+import org.apache.spark.monotasks.disk.{DiskReadMonotask, DiskRemoveMonotask}
 import org.apache.spark.network._
 import org.apache.spark.network.buffer.{ManagedBuffer, NioManagedBuffer}
 import org.apache.spark.network.server.BlockFetcher
@@ -827,6 +827,23 @@ private[spark] class BlockManager(
     }
   }
 
+  /**
+   * If the given block is stored on disk, submits a DiskRemoveMonotask to asynchronously delete
+   * the block. Returns true if a DiskRemoveMonotask was submitted, and false if the block was not
+   * stored on disk.
+   *
+   * The caller is responsible for synchronizing on info.
+   */
+  private def initiateBlockRemovalFromDisk(blockId: BlockId, info: BlockInfo): Boolean = {
+    if (blockFileManager.contains(blockId, info.diskId)) {
+      localDagScheduler.post(SubmitMonotask(
+        new DiskRemoveMonotask(localDagScheduler.genericTaskContext, blockId, info.diskId.get)))
+      true
+    } else {
+      false
+    }
+  }
+
   /** Remove a block from memory, tachyon, and disk. */
   def removeBlock(blockId: BlockId, tellMaster: Boolean = true): Unit = {
     logInfo(s"Removing block $blockId")
@@ -834,11 +851,11 @@ private[spark] class BlockManager(
       info.synchronized {
         // Removals are idempotent in memory store. At worst, we get a warning.
         val removedFromMemory = memoryStore.remove(blockId)
-        // TODO: Use a DiskRemoveMonotask to remove the block from disk.
         val removedFromTachyon = if (tachyonInitialized) tachyonStore.remove(blockId) else false
-        if (!removedFromMemory && !removedFromTachyon) {
-          logWarning(s"Block $blockId could not be removed as it was not found in either " +
-            "the memory or tachyon stores")
+        val diskRemovalStarted = initiateBlockRemovalFromDisk(blockId, info)
+        if (!removedFromMemory && !removedFromTachyon && !diskRemovalStarted) {
+          logWarning(s"Block $blockId could not be removed as it was not found in " +
+            "the memory store, the tachyon store, or on disk")
         }
         blockInfo.remove(blockId)
         if (tellMaster && info.tellMaster) {
@@ -868,8 +885,8 @@ private[spark] class BlockManager(
         info.synchronized {
           val level = info.level
           if (level.useMemory) { memoryStore.remove(id) }
-          // TODO: Use a DiskRemoveMonotask to remove the block from disk.
           if (level.useOffHeap) { tachyonStore.remove(id) }
+          initiateBlockRemovalFromDisk(id, info)
           iterator.remove()
           logInfo(s"Dropped block $id")
         }
