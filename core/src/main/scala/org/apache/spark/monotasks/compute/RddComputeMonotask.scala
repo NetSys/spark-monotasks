@@ -20,7 +20,7 @@ import java.nio.ByteBuffer
 
 import org.apache.spark.{Partition, SparkEnv, TaskContextImpl}
 import org.apache.spark.rdd.RDD
-import org.apache.spark.storage.{RDDBlockId, StorageLevel}
+import org.apache.spark.storage.{MonotaskResultBlockId, StorageLevel}
 
 /**
  * Computes the specified partition of the specified RDD and stores the result in the BlockManager.
@@ -30,12 +30,12 @@ import org.apache.spark.storage.{RDDBlockId, StorageLevel}
 private[spark] class RddComputeMonotask[T](context: TaskContextImpl, rdd: RDD[T], split: Partition)
   extends ComputeMonotask(context) {
 
-  resultBlockId = Some(new RDDBlockId(rdd.id, split.index))
+  resultBlockId = Some(new MonotaskResultBlockId(taskId))
 
   override def execute(): Option[ByteBuffer] = {
     val iterator = rdd.compute(split, context)
     SparkEnv.get.blockManager.cacheIterator(
-      getResultBlockId(), iterator, StorageLevel.MEMORY_ONLY, true)
+      getResultBlockId(), iterator, StorageLevel.MEMORY_ONLY, tellMaster = false)
     None
   }
 }

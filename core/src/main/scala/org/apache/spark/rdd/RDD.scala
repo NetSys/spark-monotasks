@@ -398,7 +398,8 @@ abstract class RDD[T: ClassTag](
 
       // Create a SerializationMonotask to serialize the block and a DiskWriteMonotask to write it
       // to disk.
-      val serializationMonotask = new SerializationMonotask(context, blockId)
+      val serializationMonotask =
+        new SerializationMonotask(context, rddComputeMonotask.getResultBlockId())
       serializationMonotask.addDependency(rddComputeMonotask)
       val diskWriteMonotask = new DiskWriteMonotask(
         context, blockId, serializationMonotask.getResultBlockId())
