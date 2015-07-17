@@ -54,12 +54,32 @@ private[spark] abstract class Monotask(val context: TaskContextImpl) extends Log
   val dependents = new HashSet[Monotask]()
 
   /**
+   * If specified, this function will be called to handle an exception, and the LocalDagScheduler
+   * will be told that the monotask was successful. This is used to circumvent the usual error
+   * handling done in the LocalDagScheduler, which is useful for monotasks that are fetching data
+   * for a remote executor, in which case we want to inform the remote executor about the failure
+   * rather than handling it ourselves.
+   */
+  private var failureHandler: Option[TaskFailedReason => Unit] = None
+
+  /**
    * Registers a monotask that must complete before this monotask can be run (by updating state
    * in both this monotask and in the passed dependency).
    */
   def addDependency(dependency: Monotask): Unit = {
     dependencies += dependency
     dependency.dependents += this
+  }
+
+  /**
+   * Registers an exception handler to use instead of the usual exception handling that's done
+   * in the LocalDagScheduler.
+   *
+   * @param alternateFailureHandler Function that accepts a TaskFailedReason and handles the given
+   *                                failure.
+   */
+  def addAlternateFailureHandler(alternateFailureHandler: (TaskFailedReason => Unit)): Unit = {
+    failureHandler = Some(alternateFailureHandler)
   }
 
   def getResultBlockId(): BlockId = {
@@ -110,11 +130,21 @@ private[spark] abstract class Monotask(val context: TaskContextImpl) extends Log
    */
   def handleException(taskFailedReason: TaskFailedReason): Unit = {
     logError(s"Monotask $taskId failed with an exception: ${taskFailedReason.toErrorString}}")
-    // Set the task metrics, since this failure will cause the macrotask to be failed.
-    context.taskMetrics.setMetricsOnTaskCompletion()
     val env = SparkEnv.get
-    val closureSerializer = env.closureSerializer.newInstance()
-    env.localDagScheduler.post(TaskFailure(this, closureSerializer.serialize(taskFailedReason)))
+    val event = failureHandler match {
+      case Some(handleTaskFailure) =>
+        handleTaskFailure(taskFailedReason)
+        // Tell the LocalDagScheduler that the task was successful, since the failure was handled
+        // by failureHandler.
+        TaskSuccess(this, None)
+
+      case None =>
+        // Set the task metrics, since this failure will cause the macrotask to be failed.
+        context.taskMetrics.setMetricsOnTaskCompletion()
+        val closureSerializer = env.closureSerializer.newInstance()
+        TaskFailure(this, Some(closureSerializer.serialize(taskFailedReason)))
+    }
+    env.localDagScheduler.post(event)
   }
 
   def handleException(throwable: Throwable): Unit = {

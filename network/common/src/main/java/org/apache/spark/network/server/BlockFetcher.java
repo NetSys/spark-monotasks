@@ -16,12 +16,14 @@
 
 package org.apache.spark.network.server;
 
-import org.apache.spark.network.buffer.ManagedBuffer;
+import io.netty.channel.Channel;
 
 /**
- * Interface for getting data identified by a block id. Used by TransportRequestHandler to
- * service requests from remote hosts for particular blocks.
+ * Interface for asynchronously getting data identified by a block id. The requested data (or an
+ * error, if applicable) is sent back on the given channel.
+ *
+ * Used by TransportRequestHandler to service requests from remote hosts for particular blocks.
  */
 public abstract class BlockFetcher {
-  public abstract ManagedBuffer getBlockData(String blockId);
+  public abstract void getBlockData(String blockId, Channel channel);
 }

@@ -43,13 +43,15 @@ import scala.concurrent.duration._
 import scala.util.Random
 
 import akka.actor.{ActorSystem, Props}
+import io.netty.channel.Channel
 import sun.nio.ch.DirectBuffer
 
 import org.apache.spark._
 import org.apache.spark.executor._
 import org.apache.spark.io.CompressionCodec
-import org.apache.spark.monotasks.{LocalDagScheduler, Monotask, SubmitMonotask}
+import org.apache.spark.monotasks.{LocalDagScheduler, Monotask, SubmitMonotask, SubmitMonotasks}
 import org.apache.spark.monotasks.disk.{DiskReadMonotask, DiskRemoveMonotask}
+import org.apache.spark.monotasks.network.NetworkResponseMonotask
 import org.apache.spark.network._
 import org.apache.spark.network.buffer.{ManagedBuffer, NioManagedBuffer}
 import org.apache.spark.network.server.BlockFetcher
@@ -246,8 +248,32 @@ private[spark] class BlockManager(
     }
   }
 
-  override def getBlockData(blockId: String): ManagedBuffer = {
-    getBlockData(BlockId(blockId))
+  override def getBlockData(blockIdStr: String, channel: Channel): Unit = {
+    val blockId = BlockId(blockIdStr)
+
+    val networkResponseMonotask = new NetworkResponseMonotask(
+      blockId, channel, localDagScheduler.genericTaskContext)
+
+    // Try to send the block back from in-memory.
+    if (memoryStore.contains(blockId)) {
+      localDagScheduler.post(SubmitMonotask(networkResponseMonotask))
+    } else {
+      // Try to load the block from disk.
+      getBlockLoadMonotask(blockId, localDagScheduler.genericTaskContext) match {
+        case Some(blockLoadMonotask) =>
+          blockLoadMonotask.addAlternateFailureHandler { failureReason: TaskFailedReason =>
+            networkResponseMonotask.markAsFailed(failureReason.toErrorString)
+          }
+          networkResponseMonotask.addDependency(blockLoadMonotask)
+          localDagScheduler.post(SubmitMonotasks(Seq(networkResponseMonotask, blockLoadMonotask)))
+
+        case None =>
+          val failureMessage = s"Block $blockId not found in memory or on disk"
+          logError(failureMessage)
+          networkResponseMonotask.markAsFailed(failureMessage)
+          localDagScheduler.post(SubmitMonotask(networkResponseMonotask))
+      }
+    }
   }
 
   /**
@@ -255,18 +281,9 @@ private[spark] class BlockManager(
    * cannot be read successfully.
    */
   def getBlockData(blockId: BlockId): ManagedBuffer = {
-    if (blockId.isShuffle) {
-      shuffleManager.shuffleBlockManager.getBlockData(blockId.asInstanceOf[ShuffleBlockId])
-    } else {
-      val blockBytesOpt = doGetLocal(blockId, asBlockResult = false)
-        .asInstanceOf[Option[ByteBuffer]]
-      if (blockBytesOpt.isDefined) {
-        val buffer = blockBytesOpt.get
-        new NioManagedBuffer(buffer)
-      } else {
-        throw new BlockNotFoundException(blockId.toString)
-      }
-    }
+    val blockBytes = doGetLocal(blockId, asBlockResult = false).map(_.asInstanceOf[ByteBuffer])
+      .getOrElse(throw new BlockNotFoundException(blockId.toString))
+    new NioManagedBuffer(blockBytes)
   }
 
   /**
@@ -388,20 +405,7 @@ private[spark] class BlockManager(
    */
   def getLocalBytes(blockId: BlockId): Option[ByteBuffer] = {
     logDebug(s"Getting local block $blockId as bytes")
-    // As an optimization for map output fetches, if the block is for a shuffle, return it
-    // without acquiring a lock; the disk store never deletes (recent) items so this should work
-    if (blockId.isShuffle) {
-      val shuffleBlockManager = shuffleManager.shuffleBlockManager
-      shuffleBlockManager.getBytes(blockId.asInstanceOf[ShuffleBlockId]) match {
-        case Some(bytes) =>
-          Some(bytes)
-        case None =>
-          throw new BlockException(
-            blockId, s"Block $blockId not found on disk, though it should be")
-      }
-    } else {
-      doGetLocal(blockId, asBlockResult = false).asInstanceOf[Option[ByteBuffer]]
-    }
+    doGetLocal(blockId, asBlockResult = false).asInstanceOf[Option[ByteBuffer]]
   }
 
   private def doGetLocal(blockId: BlockId, asBlockResult: Boolean): Option[Any] = {

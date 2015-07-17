@@ -190,7 +190,7 @@ class DiskSchedulerSuite extends FunSuite with BeforeAndAfter with Timeouts {
 
     override def matches(o: Object): Boolean = o match {
       case failure: TaskFailure =>
-        (failure.failedMonotask == monotask) && (failure.serializedFailureReason != null)
+        (failure.failedMonotask == monotask) && (failure.serializedFailureReason.isDefined)
       case _ =>
         false
     }

@@ -30,5 +30,5 @@ private[monotasks] case class TaskSuccess(
   extends LocalDagSchedulerEvent
 
 private[monotasks] case class TaskFailure(
-    failedMonotask: Monotask, serializedFailureReason: ByteBuffer)
+    failedMonotask: Monotask, serializedFailureReason: Option[ByteBuffer])
   extends LocalDagSchedulerEvent

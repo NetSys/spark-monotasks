@@ -16,89 +16,14 @@
 
 package org.apache.spark.monotasks.network
 
-import org.apache.spark.{FetchFailed, Logging, SparkEnv, SparkException,
-  TaskContextImpl}
-import org.apache.spark.monotasks.{Monotask, TaskSuccess}
-import org.apache.spark.network.buffer.ManagedBuffer
-import org.apache.spark.network.client.BlockReceivedCallback
-import org.apache.spark.storage.{BlockId, BlockManagerId, MonotaskResultBlockId, ShuffleBlockId,
-  StorageLevel}
-import org.apache.spark.util.Utils
+import org.apache.spark.{SparkEnv, TaskContextImpl}
+import org.apache.spark.monotasks.Monotask
 
 /**
- * A monotask that uses the network to fetch shuffle data.  This monotask handles only fetching
- * data, and does not deserialize it.
- *
- * @param remoteAddress remote BlockManager to fetch from.
- * @param shuffleBlockId Id of the remote block to fetch.
- * @param size Estimated size of the data to fetch (used to keep track of how many bytes are in
- *             flight).
+ * Parent class for all monotasks that transfer data over the network.
  */
-private[spark] class NetworkMonotask(
-    context: TaskContextImpl,
-    private val remoteAddress: BlockManagerId,
-    private val shuffleBlockId: ShuffleBlockId,
-    private val size: Long)
-  extends Monotask(context) with Logging with BlockReceivedCallback {
+private[spark] abstract class NetworkMonotask(context: TaskContextImpl) extends Monotask(context) {
+  protected val localDagScheduler = SparkEnv.get.localDagScheduler
 
-  resultBlockId = Some(new MonotaskResultBlockId(taskId))
-
-  /** Scheduler to notify about bytes received over the network. Set by execute(). */
-  var networkScheduler: NetworkScheduler = _
-
-  def execute(scheduler: NetworkScheduler) {
-    logInfo(s"Sending request for block $shuffleBlockId (size (${Utils.bytesToString(size)}}) " +
-      s"to $remoteAddress")
-    networkScheduler = scheduler
-    networkScheduler.addOutstandingBytes(size)
-
-    try {
-      SparkEnv.get.blockTransferService.fetchBlock(
-        remoteAddress.host,
-        remoteAddress.port,
-        shuffleBlockId.toString,
-        this)
-    } catch {
-      case t: Throwable => {
-        logError(s"Failed to initiate fetchBlock for shuffle block $shuffleBlockId", t)
-        val failureReason = FetchFailed(
-          remoteAddress,
-          shuffleBlockId.shuffleId,
-          shuffleBlockId.mapId,
-          context.partitionId,
-          Utils.exceptionString(t))
-        handleException(failureReason)
-      }
-
-    }
-  }
-
-  override def onSuccess(blockId: String, buf: ManagedBuffer): Unit = {
-    networkScheduler.addOutstandingBytes(-size)
-    // Increment the ref count because we need to pass this to a different thread.
-    // This needs to be released after use.
-    buf.retain()
-    SparkEnv.get.blockManager.cacheSingle(getResultBlockId(), buf, StorageLevel.MEMORY_ONLY, false)
-    SparkEnv.get.localDagScheduler.post(TaskSuccess(this))
-  }
-
-  override def onFailure(failedBlockId: String, e: Throwable): Unit = {
-    networkScheduler.addOutstandingBytes(-size)
-    logError(s"Failed to get block(s) from ${remoteAddress.host}:${remoteAddress.port}", e)
-    BlockId(failedBlockId) match {
-      case ShuffleBlockId(shuffleId, mapId, _) =>
-        val failureReason = FetchFailed(
-          remoteAddress,
-          shuffleId.toInt,
-          mapId,
-          context.partitionId,
-          Utils.exceptionString(e))
-        handleException(failureReason)
-
-      case _ =>
-        val exception = new SparkException(
-          s"Failed to get block $failedBlockId, which is not a shuffle block")
-        handleException(exception)
-    }
-  }
+  def execute(scheduler: NetworkScheduler): Unit
 }

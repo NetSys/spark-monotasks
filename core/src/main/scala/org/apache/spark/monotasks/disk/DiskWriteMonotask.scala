@@ -55,7 +55,8 @@ private[spark] class DiskWriteMonotask(
         "because the BlockFileManager could not provide the appropriate file."))
     val data = blockManager.getLocalBytes(serializedDataBlockId).getOrElse(
       throw new IllegalStateException(s"Writing block $blockId to disk $rawDiskId failed " +
-        "because the block's serialized bytes could not be found in memory."))
+        s"because the block's serialized bytes (block $serializedDataBlockId) could not be found " +
+        "in memory."))
     putBytes(file, data)
     blockManager.updateBlockInfoOnWrite(blockId, rawDiskId, data.limit())
 

@@ -103,7 +103,7 @@ class LocalDagSchedulerSuite extends FunSuite with BeforeAndAfterEach with Local
     if (success) {
       localDagScheduler.runEvent(TaskSuccess(monotaskB, None))
     } else {
-      localDagScheduler.runEvent(TaskFailure(monotaskB, ByteBuffer.allocate(0)))
+      localDagScheduler.runEvent(TaskFailure(monotaskB, Some(ByteBuffer.allocate(0))))
     }
     // At this point, blockId should still be stored in the BlockManager.
     assert(blockManager.getLocalBytes(blockId).isDefined)
@@ -111,7 +111,7 @@ class LocalDagSchedulerSuite extends FunSuite with BeforeAndAfterEach with Local
     if (success) {
       localDagScheduler.runEvent(TaskSuccess(monotaskC, None))
     } else {
-      localDagScheduler.runEvent(TaskFailure(monotaskC, ByteBuffer.allocate(0)))
+      localDagScheduler.runEvent(TaskFailure(monotaskC, Some(ByteBuffer.allocate(0))))
     }
     assert(blockManager.getLocalBytes(blockId).isEmpty)
   }
@@ -257,7 +257,7 @@ class LocalDagSchedulerSuite extends FunSuite with BeforeAndAfterEach with Local
     secondMonotask.addDependency(firstMonotask)
     localDagScheduler.runEvent(SubmitMonotasks(List(firstMonotask, secondMonotask)))
 
-    localDagScheduler.runEvent(TaskFailure(monotaskA, ByteBuffer.allocate(12)))
+    localDagScheduler.runEvent(TaskFailure(monotaskA, Some(ByteBuffer.allocate(12))))
     val waitingErrorMessage = ("The only remaining waiting monotask should be the monotask from " +
       s"task attempt $taskAttemptId2")
     assert(Set(secondMonotask.taskId) === localDagScheduler.waitingMonotasks, waitingErrorMessage)
@@ -293,14 +293,14 @@ class LocalDagSchedulerSuite extends FunSuite with BeforeAndAfterEach with Local
     // The first monotask failure should result in both marking the TaskContext as completed and
     // sending a status update to the executor backend.
     val failureReason = ByteBuffer.allocate(20)
-    localDagScheduler.runEvent(TaskFailure(monotaskB, failureReason))
+    localDagScheduler.runEvent(TaskFailure(monotaskB, Some(failureReason)))
     assert(monotaskB.context.isCompleted)
     verify(executorBackend).statusUpdate(
       meq(taskAttemptId), meq(TaskState.FAILED), meq(failureReason))
 
     // Another failure for the same macrotask should not trigger another status update (so including
     // the earlier time statusUpdate() was called, the total invocation count should be 1).
-    localDagScheduler.runEvent(TaskFailure(monotaskA, ByteBuffer.allocate(1)))
+    localDagScheduler.runEvent(TaskFailure(monotaskA, Some(ByteBuffer.allocate(1))))
     verify(executorBackend).statusUpdate(any(), any(), any())
   }
 
@@ -333,7 +333,7 @@ class LocalDagSchedulerSuite extends FunSuite with BeforeAndAfterEach with Local
       SubmitMonotasks(List(monotaskA, monotaskB, monotaskC, monotaskD, monotaskE)))
 
     // Create a dummy failure reason.
-    val failureReason = ByteBuffer.allocate(2)
+    val failureReason = Some(ByteBuffer.allocate(2))
     localDagScheduler.runEvent(TaskFailure(monotaskD, failureReason))
 
     // Verify that D removed E from the list of waiting monotask and removed the macrotask from

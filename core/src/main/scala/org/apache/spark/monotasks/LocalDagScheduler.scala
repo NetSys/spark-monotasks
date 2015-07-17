@@ -248,7 +248,7 @@ private[spark] class LocalDagScheduler(blockFileManager: BlockFileManager)
    * @param serializedFailureReason A serialized TaskFailedReason describing why the task failed.
    */
   private def handleTaskFailure(
-      failedMonotask: Monotask, serializedFailureReason: ByteBuffer): Unit = {
+      failedMonotask: Monotask, serializedFailureReason: Option[ByteBuffer]): Unit = {
     logInfo(s"Monotask ${failedMonotask.taskId} (for macrotask " +
       s"${failedMonotask.context.taskAttemptId}) failed")
     failedMonotask.cleanup()
@@ -258,10 +258,17 @@ private[spark] class LocalDagScheduler(blockFileManager: BlockFileManager)
     failDependentMonotasks(failedMonotask, Some(failedMonotask.taskId))
     val taskAttemptId = failedMonotask.context.taskAttemptId
 
-    // Notify the executor backend that the macrotask has failed, if we didn't already.
-    if (runningMacrotaskAttemptIds.remove(taskAttemptId)) {
+    // Notify the executor backend that the macrotask has failed if we didn't already, and if the
+    // monotask failure corresponded to a macrotask running on this machine.
+    if (runningMacrotaskAttemptIds.remove(taskAttemptId) &&
+      (failedMonotask.context != genericTaskContext)) {
+
       failedMonotask.context.markTaskCompleted()
-      sendStatusUpdate(taskAttemptId, TaskState.FAILED, serializedFailureReason)
+      val failureReason = serializedFailureReason.getOrElse {
+        throw new IllegalStateException(
+          s"Expect a failure reason to be passed in when monotasks for local macrotasks fail")
+      }
+      sendStatusUpdate(taskAttemptId, TaskState.FAILED, failureReason)
     }
   }
 
