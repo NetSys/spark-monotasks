@@ -20,7 +20,7 @@ import java.io.{File, FileOutputStream}
 import java.nio.ByteBuffer
 
 import org.apache.spark.{Logging, TaskContextImpl}
-import org.apache.spark.storage.BlockId
+import org.apache.spark.storage.{BlockId, ShuffleBlockId}
 import org.apache.spark.util.Utils
 
 /**
@@ -60,10 +60,18 @@ private[spark] class DiskWriteMonotask(
     putBytes(file, data)
     blockManager.updateBlockInfoOnWrite(blockId, rawDiskId, data.limit())
 
-    val metrics = context.taskMetrics
-    val oldUpdatedBlocks = metrics.updatedBlocks.getOrElse(Seq.empty)
-    val updatedBlock = Seq((blockId, blockManager.getStatus(blockId).get))
-    metrics.updatedBlocks = Some(oldUpdatedBlocks ++ updatedBlock)
+    // Add the block that was written to TaskMetrics.updatedBlocks if it wasn't a shuffle block
+    // (the driver doesn't need to know about shuffle blocks written to disk).
+    blockId match {
+      case _: ShuffleBlockId =>
+        // Do nothing.
+
+      case _ =>
+        val metrics = context.taskMetrics
+        val oldUpdatedBlocks = metrics.updatedBlocks.getOrElse(Seq.empty)
+        val updatedBlock = Seq((blockId, blockManager.getStatus(blockId).get))
+        metrics.updatedBlocks = Some(oldUpdatedBlocks ++ updatedBlock)
+    }
   }
 
   private def putBytes(file: File, data: ByteBuffer): Unit = {
