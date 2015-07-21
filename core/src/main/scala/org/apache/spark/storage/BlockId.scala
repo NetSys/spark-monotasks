@@ -94,9 +94,13 @@ case class TaskResultBlockId(taskId: Long) extends BlockId {
   def name = "taskresult_" + taskId
 }
 
+/**
+ * Block ID for a monotask result. If the block is stored serialized, compress specifies whether
+ * the block is compressed.
+ */
 @DeveloperApi
-case class MonotaskResultBlockId(monotaskId: Long) extends BlockId {
-  def name = "monotaskresult_" + monotaskId
+case class MonotaskResultBlockId(monotaskId: Long, compress: Boolean = false) extends BlockId {
+  def name = s"monotaskresult_${monotaskId}_$compress"
 }
 
 @DeveloperApi
@@ -127,7 +131,7 @@ object BlockId {
   val SHUFFLE_INDEX = "shuffle_([0-9]+)_([0-9]+)_([0-9]+).index".r
   val BROADCAST = "broadcast_([0-9]+)([_A-Za-z0-9]*)".r
   val TASKRESULT = "taskresult_([0-9]+)".r
-  val MONOTASKRESULT = "monotaskresult_([0-9]+)".r
+  val MONOTASKRESULT = "monotaskresult_([0-9]+)_(.*)".r
   val STREAM = "input-([0-9]+)-([0-9]+)".r
   val TEST = "test_(.*)".r
 
@@ -145,8 +149,8 @@ object BlockId {
       BroadcastBlockId(broadcastId.toLong, field.stripPrefix("_"))
     case TASKRESULT(taskId) =>
       TaskResultBlockId(taskId.toLong)
-    case MONOTASKRESULT(monotaskId) =>
-      MonotaskResultBlockId(monotaskId.toLong)
+    case MONOTASKRESULT(monotaskId, compress) =>
+      MonotaskResultBlockId(monotaskId.toLong, compress.toBoolean)
     case STREAM(streamId, uniqueId) =>
       StreamBlockId(streamId.toInt, uniqueId.toLong)
     case TEST(value) =>

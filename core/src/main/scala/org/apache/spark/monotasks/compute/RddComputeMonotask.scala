@@ -30,7 +30,7 @@ import org.apache.spark.storage.{MonotaskResultBlockId, StorageLevel}
 private[spark] class RddComputeMonotask[T](context: TaskContextImpl, rdd: RDD[T], split: Partition)
   extends ComputeMonotask(context) {
 
-  resultBlockId = Some(new MonotaskResultBlockId(taskId))
+  resultBlockId = Some(new MonotaskResultBlockId(taskId, SparkEnv.get.blockManager.compressRdds))
 
   override def execute(): Option[ByteBuffer] = {
     val iterator = rdd.compute(split, context)
