@@ -215,10 +215,13 @@ private[spark] class LocalDagScheduler(blockFileManager: BlockFileManager)
       // If the macrotask has not failed, schedule any newly-ready monotasks.
       completedMonotask.dependents.foreach { monotask =>
         if (monotask.dependenciesSatisfied()) {
-          assert(
-            waitingMonotasks.contains(monotask.taskId),
-            "Monotask dependencies should only include tasks that have not yet run")
-          scheduleMonotask(monotask)
+          if (waitingMonotasks.contains(monotask.taskId)) {
+            scheduleMonotask(monotask)
+          } else {
+            logWarning(s"Monotask $monotask (id ${monotask.taskId}) is no longer in " +
+              "waitingMonotasks, but it should not have been run yet, because one of its " +
+              s"dependencies ($completedMonotask, id ${completedMonotask.taskId}) just finished.")
+          }
         }
       }
 
