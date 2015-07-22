@@ -1601,7 +1601,8 @@ class GitVCS(VersionControlSystem):
     extra_args = extra_args[:]
     if self.options.revision:
       if ":" in self.options.revision:
-        extra_args = self.options.revision.split(":", 1) + extra_args
+        # Replace a colon with "..", which is what git uses to describe ranges.
+        extra_args = [self.options.revision.replace(":", "..", 1)] + extra_args
       else:
         extra_args = [self.options.revision] + extra_args
     else:
