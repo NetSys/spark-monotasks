@@ -18,6 +18,7 @@ package org.apache.spark.monotasks.disk
 
 import java.nio.channels.ClosedByInterruptException
 import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.atomic.AtomicInteger
 
 import scala.collection.mutable.HashMap
 import scala.util.Random
@@ -65,6 +66,17 @@ private[spark] class DiskScheduler(blockFileManager: BlockFileManager) extends L
   }
 
   /**
+   * Returns a mapping of disk identifier to the number of running and queued disk monotasks on
+   * that disk.
+   */
+  def getDiskIdToNumRunningAndQueuedDiskMonotasks: HashMap[String, Int] = {
+    diskAccessors.map {
+      case (diskId, diskAccessor) =>
+        (diskId, diskAccessor.getNumRunningAndQueuedDiskMonotasks)
+    }
+  }
+
+  /**
    * Looks up the disk on which the provided DiskMonotask will operate, and adds it to that disk's
    * task queue.
    */
@@ -108,7 +120,7 @@ private[spark] class DiskScheduler(blockFileManager: BlockFileManager) extends L
       return
     }
 
-    diskAccessors(rawDiskId).taskQueue.add(task)
+    diskAccessors(rawDiskId).submitMonotask(task)
   }
 
   /**
@@ -183,7 +195,16 @@ private[spark] class DiskScheduler(blockFileManager: BlockFileManager) extends L
   private class DiskAccessor() extends Runnable {
 
     // A queue of DiskMonotasks that are waiting to be executed.
-    val taskQueue = new LinkedBlockingQueue[DiskMonotask]()
+    private val taskQueue = new LinkedBlockingQueue[DiskMonotask]()
+
+    private val numRunningAndQueuedDiskMonotasks = new AtomicInteger(0)
+
+    def submitMonotask(monotask: DiskMonotask): Unit = {
+      taskQueue.put(monotask)
+      numRunningAndQueuedDiskMonotasks.incrementAndGet()
+    }
+
+    def getNumRunningAndQueuedDiskMonotasks: Int = numRunningAndQueuedDiskMonotasks.get()
 
     /** Continuously executes DiskMonotasks from the task queue. */
     def run(): Unit = {
@@ -193,6 +214,7 @@ private[spark] class DiskScheduler(blockFileManager: BlockFileManager) extends L
       try {
         while (!currentThread.isInterrupted()) {
           executeMonotask(taskQueue.take())
+          numRunningAndQueuedDiskMonotasks.decrementAndGet()
         }
       } catch {
         case _: InterruptedException => {

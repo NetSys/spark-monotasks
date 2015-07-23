@@ -100,6 +100,10 @@ private[spark] class LocalDagScheduler(blockFileManager: BlockFileManager)
     runningMacrotaskAttemptIds.size
   }
 
+  def getDiskIdToNumRunningAndQueuedDiskMonotasks(): HashMap[String, Int] = {
+    diskScheduler.getDiskIdToNumRunningAndQueuedDiskMonotasks
+  }
+
   /**
    * Returns the number of macrotasks that have at least one compute monotask that is ready to be
    * run (i.e., all of its dependencies have finished) or is already running.

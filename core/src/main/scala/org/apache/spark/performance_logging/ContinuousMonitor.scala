@@ -19,9 +19,10 @@ package org.apache.spark.performance_logging
 import java.io.{File, PrintWriter}
 import java.util.concurrent.TimeUnit
 
+import scala.collection.mutable.HashMap
 import scala.concurrent.duration.Duration
 
-import org.json4s.JsonAST.JValue
+import org.json4s.JsonAST.{JArray, JValue}
 import org.json4s.JsonDSL._
 import org.json4s.jackson.JsonMethods
 
@@ -35,6 +36,7 @@ private[spark] class ContinuousMonitor(
     sparkConf: SparkConf,
     getOutstandingNetworkBytes: () => Long,
     getNumRunningComputeMonotasks: () => Int,
+    getDiskIdToNumRunningAndQueuedDiskMonotasks: () => HashMap[String, Int],
     getNumRunningMacrotasks: () => Int,
     getNumMacrotasksInCompute: () => Long,
     getNumMacrotasksInDisk: () => Long,
@@ -47,6 +49,13 @@ private[spark] class ContinuousMonitor(
   private var previousCpuCounters = new CpuCounters()
   private var previousDiskCounters = new DiskCounters()
   private var previousNetworkCounters = new NetworkCounters()
+
+  private def getDiskIdToCountsJson(diskIdToCount: HashMap[String, Int]): JValue = {
+    JArray(diskIdToCount.toList.map {
+      case (id, count) =>
+        ("Disk ID" -> id) ~ ("Running And Queued Monotasks" -> count)
+    })
+  }
 
   private def getUtilizationJson(): JValue = {
     val currentCpuCounters = new CpuCounters()
@@ -73,6 +82,8 @@ private[spark] class ContinuousMonitor(
     ("Network Utilization" -> JsonProtocol.networkUtilizationToJson(networkUtilization)) ~
     ("Outstanding Network Bytes" -> getOutstandingNetworkBytes()) ~
     ("Running Compute Monotasks" -> getNumRunningComputeMonotasks()) ~
+    ("Running Disk Monotasks" ->
+      getDiskIdToCountsJson(getDiskIdToNumRunningAndQueuedDiskMonotasks())) ~
     ("Running Macrotasks" -> getNumRunningMacrotasks()) ~
     ("Macrotasks In Compute" -> getNumMacrotasksInCompute()) ~
     ("Macrotasks In Disk" -> getNumMacrotasksInDisk()) ~
