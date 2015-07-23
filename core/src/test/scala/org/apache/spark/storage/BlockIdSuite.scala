@@ -109,7 +109,7 @@ class BlockIdSuite extends FunSuite {
     val id = MonotaskResultBlockId(60)
     assertSame(id, MonotaskResultBlockId(60))
     assertDifferent(id, MonotaskResultBlockId(61))
-    assert(id.name === "monotaskresult_60")
+    assert(id.name === "monotaskresult_60_false")
     assert(id.asRDDId === None)
     assert(id.monotaskId === 60)
     assert(!id.isRDD)
