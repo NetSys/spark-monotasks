@@ -34,7 +34,8 @@ case class NetworkCounters() extends Serializable with Logging {
     // doesn't work on m2.4xlarge instances (it's just the same as the total counters) and (b) if it
     // did work, it wouldn't include the HDFS network data (because that happens in a separate
     // process) which can be important to understanding utilization.
-    Source.fromFile(NetworkCounters.NETWORK_TOTALS_FILENAME).getLines().foreach { line =>
+    val totalNetworkUseFile = Source.fromFile(NetworkCounters.NETWORK_TOTALS_FILENAME)
+    totalNetworkUseFile.getLines().foreach { line =>
       if (line.contains(":") && !line.contains("lo")) {
         val counts = line.split(":")(1).split(" ").filter(_.length > 0).map(_.toLong)
         receivedBytes += counts(NetworkCounters.RECEIVED_BYTES_INDEX)
@@ -43,6 +44,7 @@ case class NetworkCounters() extends Serializable with Logging {
         transmittedPackets += counts(NetworkCounters.TRANSMITTED_PACKETS_INDEX)
       }
     }
+    totalNetworkUseFile.close()
   } catch {
     case e: FileNotFoundException =>
       if (!NetworkCounters.emittedMissingFileWarning) {

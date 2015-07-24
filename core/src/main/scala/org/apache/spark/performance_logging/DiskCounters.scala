@@ -44,12 +44,14 @@ class DiskCounters(
     this(System.currentTimeMillis(), new HashMap[String, BlockDeviceCounters]())
 
     try {
-      Source.fromFile(DiskCounters.DISK_TOTALS_FILENAME).getLines().foreach { line =>
+      val totalDiskUseFile = Source.fromFile(DiskCounters.DISK_TOTALS_FILENAME)
+      totalDiskUseFile.getLines().foreach { line =>
         if (line.indexOf("loop") == -1) {
           val deviceCounters = BlockDeviceCounters(line)
           this.deviceNameToCounters += deviceCounters.deviceName -> deviceCounters
         }
       }
+      totalDiskUseFile.close()
     } catch {
       case e: FileNotFoundException =>
         if (!DiskCounters.emittedMissingFileWarning) {

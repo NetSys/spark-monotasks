@@ -35,13 +35,16 @@ class CpuCounters(val timeMillis: Long) extends Serializable with Logging {
   var totalSystemJiffies = 0L
 
   try {
-    Source.fromFile(s"/proc/${Utils.getPid()}/stat").getLines().foreach { line =>
+    val processCpuUseFile = Source.fromFile(s"/proc/${Utils.getPid()}/stat")
+    processCpuUseFile.getLines().foreach { line =>
       val values = line.split(" ")
       processUserJiffies = values(CpuCounters.UTIME_INDEX).toLong
       processSystemJiffies = values(CpuCounters.STIME_INDEX).toLong
     }
+    processCpuUseFile.close()
 
-    Source.fromFile(CpuCounters.CPU_TOTALS_FILENAME).getLines().foreach { line =>
+    val totalCpuUseFile = Source.fromFile(CpuCounters.CPU_TOTALS_FILENAME)
+    totalCpuUseFile.getLines().foreach { line =>
       // Look for only the line that starts with "cpu  ", which has the totals across all CPUs
       // (the remaining lines are for a particular core).
       if (line.startsWith("cpu ")) {
@@ -51,6 +54,7 @@ class CpuCounters(val timeMillis: Long) extends Serializable with Logging {
         totalSystemJiffies = cpuTimes(CpuCounters.SYSTEM_JIFFIES_INDEX)
       }
     }
+    totalCpuUseFile.close()
   } catch {
     case e: FileNotFoundException =>
       if (!CpuCounters.emittedMissingFilesWarning) {
