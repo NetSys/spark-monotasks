@@ -176,7 +176,7 @@ class NewHadoopRDD[K, V](
     val hadoopTaskId =
       newTaskAttemptID(jobTrackerId, id, isMap = false, sparkPartition.index, shortenedTaskId)
     val hadoopTaskContext = newTaskAttemptContext(localHadoopConf, hadoopTaskId)
-    val recordReader = inputFormat.createRecordReader(memoryStoreFileSplit, hadoopTaskContext)
+    var recordReader = inputFormat.createRecordReader(memoryStoreFileSplit, hadoopTaskContext)
     recordReader.initialize(memoryStoreFileSplit, hadoopTaskContext)
 
     val inputMetrics =
@@ -192,16 +192,25 @@ class NewHadoopRDD[K, V](
         } catch  {
           case _: EOFException => finished = true
         }
-        if (!finished) {
+        if (finished) {
+          // Close and release the reader here; close() will also be called when the macrotask
+          // completes, but it helps to close and release the reference to the reader early to
+          // release buffers that are stored by the RecordReader.
+          close()
+          (null.asInstanceOf[K], null.asInstanceOf[V])
+        } else {
           inputMetrics.incRecordsRead(1)
+          (recordReader.getCurrentKey(), recordReader.getCurrentValue())
         }
-
-        (recordReader.getCurrentKey(), recordReader.getCurrentValue())
       }
 
       override def close(): Unit = {
         try {
-          recordReader.close()
+          if (recordReader != null) {
+            // Close reader and release it
+            recordReader.close()
+            recordReader = null
+          }
         } catch {
           case NonFatal(e) => logWarning("Exception in RecordReader.close()", e)
         }
