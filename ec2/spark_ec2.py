@@ -60,8 +60,8 @@ VALID_SPARK_VERSIONS = set([
     "1.3.0",
 ])
 
-DEFAULT_SPARK_VERSION = SPARK_EC2_VERSION
-DEFAULT_SPARK_GITHUB_REPO = "https://github.com/apache/spark"
+DEFAULT_SPARK_VERSION = "master"
+DEFAULT_SPARK_GITHUB_REPO = "https://github.com/NetSys/spark-monotasks"
 MESOS_SPARK_EC2_BRANCH = "branch-1.3"
 
 # A URL prefix from which to fetch AMI information
@@ -125,21 +125,21 @@ def parse_args():
         "-i", "--identity-file",
         help="SSH private key file to use for logging into instances")
     parser.add_option(
-        "-t", "--instance-type", default="m1.large",
+        "-t", "--instance-type", default="m2.4xlarge",
         help="Type of instance to launch (default: %default). " +
              "WARNING: must be 64-bit; small instances won't work")
     parser.add_option(
         "-m", "--master-instance-type", default="",
         help="Master instance type (leave empty for same as instance-type)")
     parser.add_option(
-        "-r", "--region", default="us-east-1",
+        "-r", "--region", default="us-west-2",
         help="EC2 region zone to launch instances in")
     parser.add_option(
         "-z", "--zone", default="",
         help="Availability zone to launch instances in, or 'all' to spread " +
              "slaves across multiple (an additional $0.01/Gb for bandwidth" +
              "between zones applies) (default: a single zone chosen at random)")
-    parser.add_option("-a", "--ami", help="Amazon Machine Image ID to use")
+    parser.add_option("-a", "--ami", default="ami-1b9f912b", help="Amazon Machine Image ID to use")
     parser.add_option(
         "-v", "--spark-version", default=DEFAULT_SPARK_VERSION,
         help="Version of Spark to use: 'X.Y.Z' or a specific git hash (default: %default)")
@@ -261,6 +261,8 @@ def get_validate_spark_version(version, repo):
         if version not in VALID_SPARK_VERSIONS:
             print >> stderr, "Don't know about Spark version: {v}".format(v=version)
             sys.exit(1)
+        return version
+    elif version == "master":
         return version
     else:
         github_commit_url = "{repo}/commit/{commit_hash}".format(repo=repo, commit_hash=version)
@@ -654,7 +656,7 @@ def setup_cluster(conn, master_nodes, slave_nodes, opts, deploy_ssh_key):
         opts=opts,
         command="rm -rf spark-ec2"
         + " && "
-        + "git clone https://github.com/mesos/spark-ec2.git -b {b}".format(b=MESOS_SPARK_EC2_BRANCH)
+        + "git clone https://github.com/kayousterhout/spark-ec2.git -b monotasks"
     )
 
     print "Deploying files to master..."
