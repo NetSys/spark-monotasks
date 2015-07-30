@@ -33,7 +33,7 @@ import org.apache.spark.util.ByteBufferInputStream
  * from the BlockManager. All methods except open() are not supported and throw an
  * UnsupportedOperationException.
  */
-class MemoryStoreFileSystem(blockManager: BlockManager, startPosition: Long)
+class MemoryStoreFileSystem(private val blockManager: BlockManager, private val startPosition: Long)
   extends FileSystem with Logging {
 
   override def append(f: Path, bufferSize: Int, progress: Progressable): FSDataOutputStream =
