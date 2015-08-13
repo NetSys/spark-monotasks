@@ -114,12 +114,14 @@ private[spark] abstract class Monotask(val context: TaskContextImpl) extends Log
    * all dependents have completed, because the dependents rely on this intermediate data.
    */
   protected def cleanupIntermediateData(): Unit = {
+    logDebug(s"Monotask $this (id: $taskId) is being cleaned up...")
     resultBlockId.map { blockId =>
       val tellMaster = blockId match {
         case monotaskResultBlockId: MonotaskResultBlockId => false
         case _ => true
       }
 
+      logDebug(s"Cleaning up result block id: $blockId")
       SparkEnv.get.blockManager.removeBlockFromMemory(blockId, tellMaster)
     }
   }
