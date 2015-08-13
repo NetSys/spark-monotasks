@@ -17,7 +17,6 @@
 
 package org.apache.spark.sql.hive
 
-import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.{Path, PathFilter}
 import org.apache.hadoop.hive.conf.HiveConf
 import org.apache.hadoop.hive.metastore.api.hive_metastoreConstants._
@@ -28,11 +27,14 @@ import org.apache.hadoop.hive.serde2.Deserializer
 import org.apache.hadoop.hive.serde2.objectinspector.StructObjectInspector
 import org.apache.hadoop.hive.serde2.objectinspector.primitive._
 import org.apache.hadoop.io.Writable
-import org.apache.hadoop.mapred.{FileInputFormat, InputFormat, JobConf}
+import org.apache.hadoop.mapred.{FileInputFormat, InputFormat => OldInputFormat, JobConf,
+  SequenceFileInputFormat => OldSequenceFileInputFormat, TextInputFormat => OldTextInputFormat}
+import org.apache.hadoop.mapreduce.{InputFormat => NewInputFormat}
+import org.apache.hadoop.mapreduce.lib.input.{SequenceFileInputFormat => NewSequenceFileInputFormat,
+  TextInputFormat => NewTextInputFormat}
 
 import org.apache.spark.SerializableWritable
-import org.apache.spark.broadcast.Broadcast
-import org.apache.spark.rdd.{EmptyRDD, HadoopRDD, RDD, UnionRDD}
+import org.apache.spark.rdd.{EmptyRDD, RDD, UnionRDD}
 import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.types.DateUtils
 
@@ -80,8 +82,8 @@ class HadoopTableReader(
       filterOpt = None)
 
   /**
-   * Creates a Hadoop RDD to read data from the target table's data directory. Returns a transformed
-   * RDD that contains deserialized rows.
+   * Creates a NewHadoopRDD to read data from the target table's data directory. Returns a
+   * transformed RDD that contains deserialized rows.
    *
    * @param hiveTable Hive metadata for the table being scanned.
    * @param deserializerClass Class of the SerDe used to deserialize Writables read from Hadoop.
@@ -106,8 +108,8 @@ class HadoopTableReader(
 
     // logDebug("Table input: %s".format(tablePath))
     val ifc = hiveTable.getInputFormatClass
-      .asInstanceOf[java.lang.Class[InputFormat[Writable, Writable]]]
-    val hadoopRDD = createHadoopRdd(tableDesc, inputPathStr, ifc)
+      .asInstanceOf[java.lang.Class[OldInputFormat[Writable, Writable]]]
+    val hadoopRDD = createNewHadoopRdd(tableDesc, inputPathStr, ifc)
 
     val attrsWithIndex = attributes.zipWithIndex
     val mutableRow = new SpecificMutableRow(attributes.map(_.dataType))
@@ -129,9 +131,9 @@ class HadoopTableReader(
   }
 
   /**
-   * Create a HadoopRDD for every partition key specified in the query. Note that for on-disk Hive
-   * tables, a data directory is created for each partition corresponding to keys specified using
-   * 'PARTITION BY'.
+   * Create a NewHadoopRDD for every partition key specified in the query. Note that for on-disk
+   * Hive tables, a data directory is created for each partition corresponding to keys specified
+   * using 'PARTITION BY'.
    *
    * @param partitionToDeserializer Mapping from a Hive Partition metadata object to the SerDe
    *     class to use to deserialize input Writables from the corresponding partition.
@@ -147,7 +149,7 @@ class HadoopTableReader(
       val partPath = HiveShim.getDataLocationPath(partition)
       val inputPathStr = applyFilterIfNeeded(partPath, filterOpt)
       val ifc = partDesc.getInputFileFormatClass
-        .asInstanceOf[java.lang.Class[InputFormat[Writable, Writable]]]
+        .asInstanceOf[java.lang.Class[OldInputFormat[Writable, Writable]]]
       // Get partition field info
       val partSpec = partDesc.getPartSpec
       val partProps = partDesc.getProperties
@@ -185,7 +187,7 @@ class HadoopTableReader(
       // Fill all partition keys to the given MutableRow object
       fillPartitionKeys(partValues, mutableRow)
 
-      createHadoopRdd(tableDesc, inputPathStr, ifc).mapPartitions { iter =>
+      createNewHadoopRdd(tableDesc, inputPathStr, ifc).mapPartitions { iter =>
         val hconf = broadcastedHiveConf.value.value
         val deserializer = localDeserializer.newInstance()
         deserializer.initialize(hconf, partProps)
@@ -218,24 +220,41 @@ class HadoopTableReader(
   }
 
   /**
-   * Creates a HadoopRDD based on the broadcasted HiveConf and other job properties that will be
+   * Creates a NewHadoopRDD based on the broadcasted HiveConf and other job properties that will be
    * applied locally on each slave.
    */
-  private def createHadoopRdd(
-    tableDesc: TableDesc,
-    path: String,
-    inputFormatClass: Class[InputFormat[Writable, Writable]]): RDD[Writable] = {
+  private def createNewHadoopRdd(
+      tableDesc: TableDesc,
+      path: String,
+      oldInputFormatClass: Class[OldInputFormat[Writable, Writable]]): RDD[Writable] = {
+    val jobConf = new JobConf(_broadcastedHiveConf.value.value)
+    FileInputFormat.setInputPaths(jobConf, Seq[Path](new Path(path)): _*)
+    if (tableDesc != null) {
+      PlanUtils.configureInputJobPropertiesForStorageHandler(tableDesc)
+      Utilities.copyTableJobPropertiesToConf(tableDesc, jobConf)
+    }
+    jobConf.set("io.file.buffer.size", System.getProperty("spark.buffer.size", "65536"))
 
-    val initializeJobConfFunc = HadoopTableReader.initializeLocalJobConfFunc(path, tableDesc) _
+    val oldInputFormatName = oldInputFormatClass.getName()
+    val oldSequenceFormat = classOf[OldSequenceFileInputFormat[Writable, Writable]].getName()
+    val oldTextFormat = classOf[OldTextInputFormat].getName()
 
-    val rdd = new HadoopRDD(
-      sc.sparkContext,
-      _broadcastedHiveConf.asInstanceOf[Broadcast[SerializableWritable[Configuration]]],
-      Some(initializeJobConfFunc),
-      inputFormatClass,
-      classOf[Writable],
-      classOf[Writable],
-      _minSplitsPerRDD)
+    // Get the new API InputFormat corresponding to the old API InputFormat.
+    val newInputFormatClass = if (oldInputFormatName == oldSequenceFormat) {
+      classOf[NewSequenceFileInputFormat[Writable, Writable]]
+    } else if (oldInputFormatName == oldTextFormat) {
+      classOf[NewTextInputFormat]
+    } else {
+      throw new IllegalArgumentException(s"Unsupported InputFormat: $oldInputFormatName " +
+        s"HadoopTableReader only supports $oldSequenceFormat and $oldTextFormat.")
+    }
+
+    val rdd =
+      sc.sparkContext.newAPIHadoopRDD[Writable, Writable, NewInputFormat[Writable, Writable]](
+        jobConf,
+        newInputFormatClass.asInstanceOf[Class[NewInputFormat[Writable, Writable]]],
+        classOf[Writable],
+        classOf[Writable])
 
     // Only take the value (skip the key) because Hive works only with values.
     rdd.map(_._2)
@@ -243,19 +262,6 @@ class HadoopTableReader(
 }
 
 private[hive] object HadoopTableReader extends HiveInspectors {
-  /**
-   * Curried. After given an argument for 'path', the resulting JobConf => Unit closure is used to
-   * instantiate a HadoopRDD.
-   */
-  def initializeLocalJobConfFunc(path: String, tableDesc: TableDesc)(jobConf: JobConf) {
-    FileInputFormat.setInputPaths(jobConf, Seq[Path](new Path(path)): _*)
-    if (tableDesc != null) {
-      PlanUtils.configureInputJobPropertiesForStorageHandler(tableDesc)
-      Utilities.copyTableJobPropertiesToConf(tableDesc, jobConf)
-    }
-    val bufferSize = System.getProperty("spark.buffer.size", "65536")
-    jobConf.set("io.file.buffer.size", bufferSize)
-  }
 
   /**
    * Transform all given raw `Writable`s into `Row`s.
