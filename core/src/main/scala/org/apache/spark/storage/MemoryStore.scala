@@ -162,13 +162,6 @@ private[spark] class MemoryStore(blockManager: BlockManager, maxMemory: Long)
   }
 
   /**
-   * Return the RDD ID that a given block ID is from, or None if it is not an RDD block.
-   */
-  private def getRddId(blockId: BlockId): Option[Int] = {
-    blockId.asRDDId.map(_.rddId)
-  }
-
-  /**
    * Try to cache a value, if we there is enough free space. The value should either be an Array
    * if `deserialized` is true or a ByteBuffer otherwise. Its (possibly estimated) size must also be
    * passed by the caller. The caller can check if the cache operation was successful by trying to
