@@ -18,8 +18,10 @@ package org.apache.spark.monotasks
 
 import scala.util.control.NonFatal
 
+import org.mockito.Mockito.mock
+
 import org.apache.spark.executor.ExecutorBackend
-import org.apache.spark.storage.BlockFileManager
+import org.apache.spark.storage.{BlockFileManager, MemoryStore}
 
 /**
  * A wrapped version of LocalDagScheduler for use in testing.  This class wraps LocalDagScheduler
@@ -30,6 +32,7 @@ class LocalDagSchedulerWithSynchrony(
   extends LocalDagScheduler(blockFileManager) {
 
   setExecutorBackend(executorBackend)
+  setMemoryStore(mock(classOf[MemoryStore]))
 
   def runEvent(event: LocalDagSchedulerEvent) {
     try {

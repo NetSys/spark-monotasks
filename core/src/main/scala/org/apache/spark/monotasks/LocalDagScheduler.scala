@@ -26,7 +26,7 @@ import org.apache.spark.executor.ExecutorBackend
 import org.apache.spark.monotasks.compute.{ComputeMonotask, ComputeScheduler}
 import org.apache.spark.monotasks.disk.{DiskMonotask, DiskScheduler}
 import org.apache.spark.monotasks.network.{NetworkMonotask, NetworkScheduler}
-import org.apache.spark.storage.BlockFileManager
+import org.apache.spark.storage.{BlockFileManager, MemoryStore}
 import org.apache.spark.util.{EventLoop, SparkUncaughtExceptionHandler}
 
 /**
@@ -86,6 +86,15 @@ private[spark] class LocalDagScheduler(blockFileManager: BlockFileManager)
 
   // Start the event thread.
   start()
+
+  /**
+   * Registers a {@link MemoryStore} to use to determine when there is enough memory to launch
+   * monotasks. The given {@link MemoryStore} is currently only used by the ComputeScheduler
+   * (all other resource schedulers ignore memory usage in determining whether to launch tasks).
+   */
+  def setMemoryStore(memoryStore: MemoryStore): Unit = {
+    computeScheduler.setMemoryStore(memoryStore)
+  }
 
   def setExecutorBackend(executorBackend: ExecutorBackend): Unit = {
     this.executorBackend = Some(executorBackend)

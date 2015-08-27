@@ -45,21 +45,42 @@ private case class MemoryEntry(value: Any, size: Long, deserialized: Boolean)
 /**
  * Stores blocks in memory, either as Arrays of deserialized Java objects or as
  * serialized ByteBuffers.
+ *
+ * @param blockManager BlockManager to use to (de)serialize data.
+ * @param targetMaxMemory Maximum amount of memory intended to be used by the memory store.
+ *                        The MemoryStore does not enforce this maxmimum and is only responsible
+ *                        for tracking the amount of memory currently in use; calling classes are
+ *                        responsible for ensuring that this number is not exceeded.
  */
-private[spark] class MemoryStore(blockManager: BlockManager, maxMemory: Long)
-  extends InMemoryBlockStore(blockManager) {
+private[spark] class MemoryStore(
+    blockManager: BlockManager,
+    private val targetMaxMemory: Long) extends InMemoryBlockStore(blockManager) {
 
   private val entries = new LinkedHashMap[BlockId, MemoryEntry](32, 0.75f, true)
 
   @volatile private var currentMemory = 0L
 
-  // Used to ensure that only one thread is caching blocks at any given time.
-  private val accountingLock = new Object
+  /** Callback to be executed when data is removed from the memory store. */
+  private var blockRemovalCallback: Option[Long => Unit] = None
 
-  logInfo(s"MemoryStore started with capacity ${Utils.bytesToString(maxMemory)}")
+  logInfo(s"MemoryStore started with capacity ${Utils.bytesToString(targetMaxMemory)}")
 
   /** Free memory not occupied by existing blocks. */
-  def freeMemory: Long = maxMemory - currentMemory
+  def freeMemory: Long = targetMaxMemory - currentMemory
+
+  /**
+   * Registers a function to be called with the current amount of free memory anytime a block is
+   * removed from the memory store.
+   */
+  def registerBlockRemovalCallback(callback: Long => Unit): Unit = {
+    if (blockRemovalCallback.isDefined) {
+      throw new IllegalStateException(
+        "At most one callback to be called on block removal can be registered with the " +
+        s"MemoryStore (registerBlockRemovalCallback called with $callback when " +
+        s"$blockRemovalCallback was already registered")
+    }
+    blockRemovalCallback = Some(callback)
+  }
 
   /** For testing only. Returns all of the BlockIds stored by this MemoryStore. */
   def getAllBlockIds(): Seq[BlockId] =
@@ -82,7 +103,7 @@ private[spark] class MemoryStore(blockManager: BlockManager, maxMemory: Long)
       val values = blockManager.dataDeserialize(blockId, bytesCopy)
       cacheIterator(blockId, values, deserialized, true)
     } else {
-      tryToCache(blockId, bytesCopy, bytesCopy.limit, deserialized)
+      doCache(blockId, bytesCopy, bytesCopy.limit, deserialized)
       CacheResult(bytesCopy.limit(), Right(bytesCopy.duplicate()))
     }
   }
@@ -94,11 +115,11 @@ private[spark] class MemoryStore(blockManager: BlockManager, maxMemory: Long)
       returnValues: Boolean): CacheResult = {
     if (deserialized) {
       val sizeEstimate = SizeEstimator.estimate(values.asInstanceOf[AnyRef])
-      tryToCache(blockId, values, sizeEstimate, deserialized)
+      doCache(blockId, values, sizeEstimate, deserialized)
       CacheResult(sizeEstimate, Left(values.iterator))
     } else {
       val bytes = blockManager.dataSerialize(blockId, values.iterator)
-      tryToCache(blockId, bytes, bytes.limit, deserialized)
+      doCache(blockId, bytes, bytes.limit, deserialized)
       CacheResult(bytes.limit(), Right(bytes.duplicate()))
     }
   }
@@ -145,6 +166,7 @@ private[spark] class MemoryStore(blockManager: BlockManager, maxMemory: Long)
         currentMemory -= entry.size
         logInfo(s"Block $blockId of size ${Utils.bytesToString(entry.size)} removed from memory " +
           s"(free: ${Utils.bytesToString(freeMemory)}).")
+        blockRemovalCallback.map(_(freeMemory))
         true
       } else {
         false
@@ -156,58 +178,30 @@ private[spark] class MemoryStore(blockManager: BlockManager, maxMemory: Long)
     entries.synchronized {
       entries.clear()
       currentMemory = 0
+      blockRemovalCallback.map(_(freeMemory))
     }
     logInfo("MemoryStore cleared")
   }
 
   /**
-   * Try to cache a value, if we there is enough free space. The value should either be an Array
-   * if `deserialized` is true or a ByteBuffer otherwise. Its (possibly estimated) size must also be
-   * passed by the caller. The caller can check if the cache operation was successful by trying to
-   * get the block.
-   *
-   * Synchronize on `accountingLock` so that one thread does not use up free space that another
-   * thread intended to use.
-   *
-   * TODO: If there is not enough free space to store the provided block, drop other blocks to disk.
+   * Caches the given value. The value should either be an Array if `deserialized` is true or a
+   * ByteBuffer otherwise. Its (possibly estimated) size must also be passed by the caller.
    */
-  private def tryToCache(
+  private def doCache(
       blockId: BlockId,
       value: Any,
       size: Long,
-      deserialized: Boolean) = {
-    accountingLock.synchronized {
-      val enoughFreeSpace = ensureFreeSpace(blockId, size)
-      if (enoughFreeSpace) {
-        val entry = new MemoryEntry(value, size, deserialized)
-        entries.synchronized {
-          entries.put(blockId, entry)
-          currentMemory += size
-        }
-        val valuesOrBytes = if (deserialized) "values" else "bytes"
-        logInfo(s"Block $blockId stored as $valuesOrBytes in memory (estimated size:  " +
-          s"${Utils.bytesToString(size)}, free: ${Utils.bytesToString(freeMemory)}).")
-      }
-    }
-  }
+      deserialized: Boolean): Unit = {
+    val entry = new MemoryEntry(value, size, deserialized)
+    entries.synchronized {
+      entries.put(blockId, entry)
+      currentMemory += size
 
-  /** Return whether there is enough free space to cache the specified block. */
-  private def ensureFreeSpace(
-      blockIdToAdd: BlockId,
-      space: Long): Boolean = {
-    logInfo(s"ensureFreeSpace(${Utils.bytesToString(space)}) called with " +
-      s"curMem=${Utils.bytesToString(currentMemory)}, maxMem=${Utils.bytesToString(maxMemory)}")
-
-    if (space > maxMemory) {
-      logInfo(s"Will not store $blockIdToAdd because it is larger than our memory limit.")
-      return false
+      val valuesOrBytes = if (deserialized) "values" else "bytes"
+      logInfo(s"Block $blockId stored as $valuesOrBytes in memory (estimated size:  " +
+        s"${Utils.bytesToString(size)}; (${Utils.bytesToString(currentMemory)} stored out of " +
+        s"${Utils.bytesToString(targetMaxMemory)} target maximum)")
     }
-
-    if (freeMemory < space) {
-      logInfo(s"Will not store $blockIdToAdd because it does not fit in the available memory.")
-      return false
-    }
-    true
   }
 
   override def contains(blockId: BlockId): Boolean = {

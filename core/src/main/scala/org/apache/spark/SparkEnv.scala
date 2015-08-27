@@ -342,6 +342,8 @@ object SparkEnv extends Logging {
       blockFileManager,
       localDagScheduler)
 
+    localDagScheduler.setMemoryStore(blockManager.memoryStore)
+
     val broadcastManager = new BroadcastManager(isDriver, conf, securityManager)
 
     val httpFileServer =

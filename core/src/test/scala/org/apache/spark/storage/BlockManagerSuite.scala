@@ -614,15 +614,9 @@ class BlockManagerSuite extends FunSuite with Matchers with BeforeAndAfterEach
     assert(updatedBlocks2.head._1 === TestBlockId("list2"))
     assert(updatedBlocks2.head._2.storageLevel === StorageLevel.MEMORY_ONLY)
 
-    // No updated blocks - bigList is too big to fit in store and nothing is kicked out
-    val updatedBlocks3 =
-      store.cacheIterator("bigList", bigList.iterator, StorageLevel.MEMORY_ONLY, tellMaster = true)
-    assert(updatedBlocks3.size === 0)
-
     // memory store contains all but bigList
     assert(store.memoryStore.contains("list1"), "list1 was not in memory store")
     assert(store.memoryStore.contains("list2"), "list2 was not in memory store")
-    assert(!store.memoryStore.contains("bigList"), "bigList was in memory store")
   }
 
   test("query block statuses") {
@@ -701,19 +695,12 @@ class BlockManagerSuite extends FunSuite with Matchers with BeforeAndAfterEach
     store = makeBlockManager(12000)
     val memoryStore = store.memoryStore
     val smallList = List.fill(40)(new Array[Byte](100))
-    val bigList = List.fill(40)(new Array[Byte](1000))
     def smallIterator = smallList.iterator.asInstanceOf[Iterator[Any]]
-    def bigIterator = bigList.iterator.asInstanceOf[Iterator[Any]]
 
-    val result1 = memoryStore.cacheIterator("b1", smallIterator, true, true)
-    // This should fail because bigIterator is too large.
-    val result2 = memoryStore.cacheIterator("b2", bigIterator, true, true)
-    assert(memoryStore.contains("b1"))
-    assert(!memoryStore.contains("b2"))
-    assert(result1.size > 0)
-    assert(result2.size > 0)
-    assert(result1.data.isLeft)
-    assert(result2.data.isLeft)
+    val result = memoryStore.cacheIterator("b", smallIterator, true, true)
+    assert(memoryStore.contains("b"))
+    assert(result.size > 0)
+    assert(result.data.isLeft)
   }
 
   test("diskIds are not set when writing to memory") {
