@@ -46,6 +46,16 @@ class UtilsSuite extends FunSuite with ResetSystemProperties {
     assert(Utils.bytesToString(5L * 1024L * 1024L * 1024L * 1024L) === "5.0 TB")
   }
 
+  test("bytesToString with negative bytes") {
+    assert(Utils.bytesToString(-10) == "-10.0 B")
+    assert(Utils.bytesToString(-1500) === "-1500.0 B")
+    assert(Utils.bytesToString(-2000000) === "-1953.1 KB")
+    assert(Utils.bytesToString(-2097152) === "-2.0 MB")
+    assert(Utils.bytesToString(-2306867) === "-2.2 MB")
+    assert(Utils.bytesToString(-5368709120L) === "-5.0 GB")
+    assert(Utils.bytesToString(-5L * 1024L * 1024L * 1024L * 1024L) === "-5.0 TB")
+  }
+
   test("copyStream") {
     // input array initialization
     val bytes = Array.ofDim[Byte](9000)

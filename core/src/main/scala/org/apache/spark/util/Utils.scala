@@ -1009,14 +1009,16 @@ private[spark] object Utils extends Logging {
     val MB = 1L << 20
     val KB = 1L << 10
 
+    val absoluteSize = Math.abs(size)
+
     val (value, unit) = {
-      if (size >= 2*TB) {
+      if (absoluteSize >= 2*TB) {
         (size.asInstanceOf[Double] / TB, "TB")
-      } else if (size >= 2*GB) {
+      } else if (absoluteSize >= 2*GB) {
         (size.asInstanceOf[Double] / GB, "GB")
-      } else if (size >= 2*MB) {
+      } else if (absoluteSize >= 2*MB) {
         (size.asInstanceOf[Double] / MB, "MB")
-      } else if (size >= 2*KB) {
+      } else if (absoluteSize >= 2*KB) {
         (size.asInstanceOf[Double] / KB, "KB")
       } else {
         (size.asInstanceOf[Double], "B")
