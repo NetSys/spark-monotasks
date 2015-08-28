@@ -89,6 +89,13 @@ private[spark] class ComputeScheduler(
    * available.
    */
   def submitTask(monotask: ComputeMonotask): Unit = synchronized {
+    // Make sure that a MemoryStore has been registered (otherwise submitting tasks will just
+    // hang, because no threads have been started to run monotasks).
+    if (memoryStore.isEmpty) {
+      throw new IllegalStateException(
+        "ComputeScheduler has not been started yet; initialize() must be called to start the " +
+        "ComputeScheduler before any tasks are launched.")
+    }
     monotaskQueue.put(monotask)
     this.notify()
   }
