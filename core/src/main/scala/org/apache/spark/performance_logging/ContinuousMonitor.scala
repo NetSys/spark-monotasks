@@ -40,7 +40,8 @@ private[spark] class ContinuousMonitor(
     getNumRunningMacrotasks: () => Int,
     getNumMacrotasksInCompute: () => Long,
     getNumMacrotasksInDisk: () => Long,
-    getNumMacrotasksInNetwork: () => Long) {
+    getNumMacrotasksInNetwork: () => Long,
+    getFreeMemoryBytes: () => Long) {
   private val logIntervalMillis = sparkConf.getInt("spark.continuousMonitor.logIntervalMillis", 10)
   val printWriter = new PrintWriter(
     new File(s"/tmp/spark_continuous_monitor_${System.currentTimeMillis}"))
@@ -87,7 +88,8 @@ private[spark] class ContinuousMonitor(
     ("Running Macrotasks" -> getNumRunningMacrotasks()) ~
     ("Macrotasks In Compute" -> getNumMacrotasksInCompute()) ~
     ("Macrotasks In Disk" -> getNumMacrotasksInDisk()) ~
-    ("Macrotasks In Network" -> getNumMacrotasksInNetwork())
+    ("Macrotasks In Network" -> getNumMacrotasksInNetwork()) ~
+    ("Free Memory Bytes" -> getFreeMemoryBytes())
   }
 
   def start(env: SparkEnv) {
