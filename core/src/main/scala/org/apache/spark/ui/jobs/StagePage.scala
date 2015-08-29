@@ -165,6 +165,17 @@ private[ui] class StagePage(parent: StagesTab) extends WebUIPage("stage") {
                   <span class="additional-metric-title">Getting Result Time</span>
                 </span>
               </li>
+              <li>
+                <span data-toggle="tooltip"
+                      title={ToolTips.CPU_UTILIZATION} data-placement="right">
+                  <input type="checkbox" name={TaskDetailsClassNames.CPU_UTILIZATION}/>
+                  <span class="additional-metric-title">CPU Utilization</span>
+                </span>
+              </li>
+              <li>
+                <input type="checkbox" name={TaskDetailsClassNames.NETWORK_UTILIZATION}/>
+                <span class="additional-metric-title">Network Utilization</span>
+              </li>
             </ul>
           </div>
         </div>
@@ -203,6 +214,8 @@ private[ui] class StagePage(parent: StagesTab) extends WebUIPage("stage") {
         } else {
           Nil
         }} ++
+        Seq(("CPU Utilization", TaskDetailsClassNames.CPU_UTILIZATION),
+          ("Network Utilization", TaskDetailsClassNames.NETWORK_UTILIZATION)) ++
         Seq(("Errors", ""))
 
       val unzipped = taskHeadersAndCssClasses.unzip
@@ -514,6 +527,20 @@ private[ui] class StagePage(parent: StagesTab) extends WebUIPage("stage") {
       val diskBytesSpilledSortable = maybeDiskBytesSpilled.map(_.toString).getOrElse("")
       val diskBytesSpilledReadable = maybeDiskBytesSpilled.map(Utils.bytesToString).getOrElse("")
 
+      val maybeCpuUtilization = metrics.flatMap(_.cpuUtilization).map(
+        m => m.totalSystemUtilization + m.totalUserUtilization)
+      val cpuUtilization = maybeCpuUtilization.map(m => f"$m%.2f").getOrElse("")
+
+      val maybeNetworkBytesRead = metrics.flatMap(_.networkUtilization).map(
+        _.bytesReceivedPerSecond)
+      val networkBytesReadReadable = maybeNetworkBytesRead.map(
+        m => s"${Utils.bytesToString(m.toLong)} / sec Read").getOrElse("")
+
+      val maybeNetworkBytesTransmitted = metrics.flatMap(_.networkUtilization).
+        map(_.bytesTransmittedPerSecond)
+      val networkBytesTransmittedReadable = maybeNetworkBytesTransmitted.map(
+        m => s"${Utils.bytesToString(m.toLong)} / sec Transmitted").getOrElse("")
+
       <tr>
         <td>{info.index}</td>
         <td>{info.taskId}</td>
@@ -590,6 +617,12 @@ private[ui] class StagePage(parent: StagesTab) extends WebUIPage("stage") {
             {diskBytesSpilledReadable}
           </td>
         }}
+        <td class={TaskDetailsClassNames.CPU_UTILIZATION}>
+          {cpuUtilization}
+        </td>
+        <td class={TaskDetailsClassNames.NETWORK_UTILIZATION}>
+          {networkBytesReadReadable + " , " + networkBytesTransmittedReadable}
+        </td>
         {errorMessageCell(errorMessage)}
       </tr>
     }
