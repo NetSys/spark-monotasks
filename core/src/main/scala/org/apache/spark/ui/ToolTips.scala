@@ -55,4 +55,6 @@ private[spark] object ToolTips {
   val GC_TIME =
     """Time that the executor spent paused for Java garbage collection while the task was
        running."""
+
+  val CPU_UTILIZATION = "Average number of cores in use"
 }

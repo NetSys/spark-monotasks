@@ -31,4 +31,6 @@ private[spark] object TaskDetailsClassNames {
   val SHUFFLE_READ_REMOTE_SIZE = "shuffle_read_remote"
   val RESULT_SERIALIZATION_TIME = "serialization_time"
   val GETTING_RESULT_TIME = "getting_result_time"
+  val CPU_UTILIZATION = "cpu_utilization"
+  val NETWORK_UTILIZATION = "network_utilization"
 }
