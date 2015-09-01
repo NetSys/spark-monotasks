@@ -20,6 +20,7 @@ import java.io.FileInputStream
 import java.nio.ByteBuffer
 
 import org.apache.spark.{Logging, TaskContextImpl}
+import org.apache.spark.executor.DataReadMethod
 import org.apache.spark.storage.{BlockId, StorageLevel}
 import org.apache.spark.util.Utils
 
@@ -50,6 +51,7 @@ private[spark] class DiskReadMonotask(
 
       buf.flip()
       blockManager.cacheBytes(getResultBlockId(), buf, StorageLevel.MEMORY_ONLY_SER, true)
+      context.taskMetrics.getInputMetricsForReadMethod(DataReadMethod.Disk).incBytesRead(size)
     } finally {
       channel.close()
       stream.close()
