@@ -39,22 +39,22 @@ private[spark] class DiskReadMonotask(
       throw new IllegalStateException(
         s"Could not read block $blockId from disk $diskId because its file could not be found."))
     val stream = new FileInputStream(file)
-    val channel = stream.getChannel
+    val channel = stream.getChannel()
+    val sizeBytes = file.length().toInt
+    val buffer = ByteBuffer.allocate(sizeBytes)
+
     try {
-      val size = file.length().toInt
-      val buf = ByteBuffer.allocate(size)
-
       val startTimeMillis = System.currentTimeMillis()
-      channel.read(buf)
-      logDebug(s"Block $blockId (size: ${Utils.bytesToString(size)}) read from " +
+      channel.read(buffer)
+      logDebug(s"Block $blockId (size: ${Utils.bytesToString(sizeBytes)}) read from " +
         s"disk $diskId in ${System.currentTimeMillis - startTimeMillis} ms.")
-
-      buf.flip()
-      blockManager.cacheBytes(getResultBlockId(), buf, StorageLevel.MEMORY_ONLY_SER, true)
-      context.taskMetrics.getInputMetricsForReadMethod(DataReadMethod.Disk).incBytesRead(size)
     } finally {
       channel.close()
       stream.close()
     }
+
+    buffer.flip()
+    blockManager.cacheBytes(getResultBlockId(), buffer, StorageLevel.MEMORY_ONLY_SER, true)
+    context.taskMetrics.getInputMetricsForReadMethod(DataReadMethod.Disk).incBytesRead(sizeBytes)
   }
 }

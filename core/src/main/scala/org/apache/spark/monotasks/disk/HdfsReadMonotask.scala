@@ -58,18 +58,18 @@ private[spark] class HdfsReadMonotask(
 
   override def execute(): Unit = {
     val stream = path.getFileSystem(hadoopConf).open(path)
-    val numBytes = hadoopSplit.getLength().toInt
-    val buffer = new Array[Byte](numBytes)
+    val sizeBytes = hadoopSplit.getLength().toInt
+    val buffer = new Array[Byte](sizeBytes)
 
     try {
       stream.readFully(hadoopSplit.getStart(), buffer)
-      SparkEnv.get.blockManager.cacheBytes(
-        getResultBlockId(), ByteBuffer.wrap(buffer), StorageLevel.MEMORY_ONLY_SER, false)
     } finally {
       stream.close()
     }
 
-    context.taskMetrics.getInputMetricsForReadMethod(DataReadMethod.Hadoop).incBytesRead(numBytes)
+    SparkEnv.get.blockManager.cacheBytes(
+      getResultBlockId(), ByteBuffer.wrap(buffer), StorageLevel.MEMORY_ONLY_SER, false)
+    context.taskMetrics.getInputMetricsForReadMethod(DataReadMethod.Hadoop).incBytesRead(sizeBytes)
   }
 
   override def chooseLocalDir(sparkLocalDirs: Seq[String]): String = {
