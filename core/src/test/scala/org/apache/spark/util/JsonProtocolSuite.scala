@@ -707,6 +707,7 @@ class JsonProtocolSuite extends FunSuite {
     t.setExecutorDeserializeTime(a)
     t.setExecutorRunTime(b)
     t.incComputationNanos(b + 50)
+    t.incDiskNanos(a + 50)
     t.setResultSize(c)
     t.setJvmGCTime(d)
     t.setResultSerializationTime(a + b)
@@ -963,6 +964,7 @@ class JsonProtocolSuite extends FunSuite {
       |    "Executor Deserialize Time": 300,
       |    "Executor Run Time": 400,
       |    "Computation Nanos": 450,
+      |    "Disk Nanos": 350,
       |    "Result Size": 500,
       |    "JVM GC Time": 600,
       |    "Result Serialization Time": 700,
@@ -1050,6 +1052,7 @@ class JsonProtocolSuite extends FunSuite {
       |    "Executor Deserialize Time": 300,
       |    "Executor Run Time": 400,
       |    "Computation Nanos": 450,
+      |    "Disk Nanos": 350,
       |    "Result Size": 500,
       |    "JVM GC Time": 600,
       |    "Result Serialization Time": 700,
@@ -1134,6 +1137,7 @@ class JsonProtocolSuite extends FunSuite {
       |    "Executor Deserialize Time": 300,
       |    "Executor Run Time": 400,
       |    "Computation Nanos": 450,
+      |    "Disk Nanos": 350,
       |    "Result Size": 500,
       |    "JVM GC Time": 600,
       |    "Result Serialization Time": 700,

@@ -308,6 +308,7 @@ private[spark] object JsonProtocol {
     ("Executor Deserialize Time" -> taskMetrics.executorDeserializeTime) ~
     ("Executor Run Time" -> taskMetrics.executorRunTime) ~
     ("Computation Nanos" -> taskMetrics.computationNanos) ~
+    ("Disk Nanos" -> taskMetrics.diskNanos) ~
     ("Result Size" -> taskMetrics.resultSize) ~
     ("JVM GC Time" -> taskMetrics.jvmGCTime) ~
     ("Result Serialization Time" -> taskMetrics.resultSerializationTime) ~
@@ -728,6 +729,7 @@ private[spark] object JsonProtocol {
     metrics.setExecutorRunTime((json \ "Executor Run Time").extract[Long])
     metrics.incComputationNanos(
       Utils.jsonOption(json \ "Computation Nanos").map(_.extract[Long]).getOrElse(0L))
+    metrics.incDiskNanos(Utils.jsonOption(json \ "Disk Nanos").map(_.extract[Long]).getOrElse(0L))
     metrics.setResultSize((json \ "Result Size").extract[Long])
     metrics.setJvmGCTime((json \ "JVM GC Time").extract[Long])
     metrics.setResultSerializationTime((json \ "Result Serialization Time").extract[Long])

@@ -152,8 +152,10 @@ private[spark] class DiskScheduler(blockFileManager: BlockFileManager) extends L
    * LocalDagScheduler whether the monotask completed successfully or failed.
    */
   private def executeMonotask(monotask: DiskMonotask): Unit = {
+    val startTimeNanos = System.nanoTime
     try {
       monotask.execute()
+      monotask.context.taskMetrics.incDiskNanos(System.nanoTime - startTimeNanos)
 
       logDebug(s"DiskMonotask $monotask (id: ${monotask.taskId}) operating on " +
         s"block ${monotask.blockId} completed successfully.")
@@ -173,6 +175,10 @@ private[spark] class DiskScheduler(blockFileManager: BlockFileManager) extends L
             "interrupted while performing I/O.")
         }
 
+        // Set the disk monotask time, even when a failure occurred. This cannot be done in a
+        // finally clause, because the disk time needs to be set before the LocalDagScheduler is
+        // notified of the task's completion.
+        monotask.context.taskMetrics.incDiskNanos(System.nanoTime - startTimeNanos)
         monotask.handleException(t)
       }
     }
