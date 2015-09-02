@@ -173,6 +173,15 @@ abstract class RDD[T: ClassTag](
    */
   var configForHdfsWrite: Option[(SerializableWritable[Configuration], String)] = None
 
+  /**
+   * Maps a Partition to the BlockId with which that Partition is cached. This is used to make sure
+   * that an RDD partition that is cached with a BlockId other than its RDDBlockId can still be
+   * fetched from memory. Note that entries are only added and updated, but never removed. The
+   * guarantee is that if a partition is cached, then it will be cached with the BlockId in this
+   * map.
+   */
+  private val cachedPartitionBlockIds = new HashMap[Partition, BlockId]()
+
   /** A friendly name for this RDD */
   @transient var name: String = null
 
@@ -273,23 +282,24 @@ abstract class RDD[T: ClassTag](
    */
   final def iterator(split: Partition, context: TaskContext): Iterator[T] = {
     // Check if this RDD is cached in memory.
-    val blockId = new RDDBlockId(id, split.index)
-    val inMemory = SparkEnv.get.blockManager.getStatus(blockId).map { status =>
+    val rddBlockId = new RDDBlockId(id, split.index)
+    val inMemoryBlockId = cachedPartitionBlockIds.get(split).getOrElse(rddBlockId)
+    val isInMemory = SparkEnv.get.blockManager.getStatus(inMemoryBlockId).map { status =>
       val level = status.storageLevel
       level.useMemory || level.useOffHeap
     }.getOrElse(false)
 
-    if (inMemory) {
-      getRdd(blockId, context)
+    if (isInMemory) {
+      getRdd(inMemoryBlockId, context)
     } else {
-      logDebug(s"Computing partition $blockId.")
+      logDebug(s"Computing partition $rddBlockId.")
       // TODO: The logic that guarantees that a node doesn't compute two copies of an RDD has been
       //       removed. It should be reimplemented, and supplemented with logic that makes sure that
       //       two monotasks do not load the same RDD. See
       //       https://github.com/NetSys/spark-monotasks/issues/14
       val computedValues = computeOrReadCheckpoint(split, context)
       if ((storageLevel != StorageLevel.NONE) && !context.isRunningLocally()) {
-        cacheRdd(computedValues, blockId, context, storageLevel)
+        cacheRdd(computedValues, split, rddBlockId, context, storageLevel)
       } else {
         computedValues
       }
@@ -323,32 +333,46 @@ abstract class RDD[T: ClassTag](
    * blocks along the way. Note: Since the BlockManager no longer supports automatically dropping
    * blocks from memory to disk in the event that memory fills up, no other blocks should be
    * modified as a side effect of this method.
+   *
+   * Accepts a boolean parameter `updateMetrics` that specifies whether the block should be added to
+   * TaskMetrics.updatedBlocks.
    */
-  private def cacheRdd(
+  private[spark] def cacheRdd(
       block: Iterator[T],
+      partition: Partition,
       blockId: BlockId,
       context: TaskContext,
-      level: StorageLevel): Iterator[T] = {
-    logDebug(s"Caching partition $blockId at level $level.")
+      level: StorageLevel,
+      updateMetrics: Boolean = true): Iterator[T] = {
     val updatedBlocks = new ArrayBuffer[(BlockId, BlockStatus)]
     val cachedValues = if (level.useMemory || level.useOffHeap) {
+      val description = s"RDD partition ${new RDDBlockId(id, partition.index)} using BlockId " +
+        s"$blockId at level $level."
+      logDebug(s"Attempting to cache $description")
+
       // The RDD is supposed to be cached in memory, so we can pass it directly to the BlockManager.
       val blockManager = SparkEnv.get.blockManager
       updatedBlocks ++= blockManager.cacheIterator(blockId, block, level, true)
-      blockManager.get(blockId).map(_.data.asInstanceOf[Iterator[T]]).getOrElse {
-        val message = s"BlockManager failed to cache block $blockId at level $level."
-        logError(message)
-        throw new BlockException(blockId, message)
+
+      val cachedValues = blockManager.get(blockId).map(_.data.asInstanceOf[Iterator[T]]).getOrElse {
+        throw new BlockException(blockId, s"Failed to cache $description")
       }
+      logDebug(s"Successfully cached $description.")
+
+      if (updateMetrics) {
+        val metrics = context.taskMetrics
+        val lastUpdatedBlocks = metrics.updatedBlocks.getOrElse(Seq.empty)
+        metrics.updatedBlocks = Some(lastUpdatedBlocks ++ updatedBlocks.toSeq)
+      }
+
+      cachedPartitionBlockIds(partition) = blockId
+      cachedValues
     } else {
-      // The RDD is supposed to be cached on disk, but that will be taken care of by a
+      // The RDD is supposed to be stored on disk, but that will be taken care of by a
       // DiskWriteMonotask.
       block
     }
 
-    val metrics = context.taskMetrics
-    val lastUpdatedBlocks = metrics.updatedBlocks.getOrElse(Seq[(BlockId, BlockStatus)]())
-    metrics.updatedBlocks = Some(lastUpdatedBlocks ++ updatedBlocks.toSeq)
     new InterruptibleIterator(context, cachedValues)
   }
 

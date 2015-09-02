@@ -33,9 +33,12 @@
 
 package org.apache.spark.rdd
 
+import java.util.concurrent.atomic.AtomicInteger
+
 import org.scalatest.{BeforeAndAfter, FunSuite}
 
 import org.apache.spark._
+import org.apache.spark.monotasks.compute.RddComputeMonotask
 import org.apache.spark.storage.{BlockManager, RDDBlockId, StorageLevel}
 
 /**
@@ -121,5 +124,28 @@ class RddIteratorSuite extends FunSuite with BeforeAndAfter with LocalSparkConte
   test("iterator: verify task metrics updated correctly for in-memory blocks") {
     rddB.iterator(split, context)
     assert(context.taskMetrics.updatedBlocks.getOrElse(Seq()).size === 2)
+  }
+
+  test("iterator: doesn't recompute an RDD when it was computed by an earlier RddComputeMonotask") {
+    val counter = new AtomicInteger(0)
+    val sourceValues = Array(1, 2, 3, 4)
+    val testRdd = new RDD[Int](sc, Nil) {
+      override def getPartitions: Array[Partition] = Array(split)
+      override val getDependencies = List[Dependency[_]]()
+      override def compute(split: Partition, context: TaskContext) = {
+        counter.incrementAndGet()
+        sourceValues.iterator
+      }
+    }
+
+    // Execute an RddComputeMonotask that will compute testRdd and cache it in memory.
+    new RddComputeMonotask(context, testRdd, split).execute()
+
+    // Since testRdd is already cached in memory, these calls to testRdd.iterator() should not
+    // recompute it. Call iterator() twice to make sure that the RDD is not recomputed if multiple
+    // monotasks need to fetch it.
+    assert(testRdd.iterator(split, context).toArray === sourceValues)
+    assert(testRdd.iterator(split, context).toArray === sourceValues)
+    assert(counter.get() === 1, "RDD should have been computed once.")
   }
 }

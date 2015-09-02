@@ -33,9 +33,15 @@ private[spark] class RddComputeMonotask[T](context: TaskContextImpl, rdd: RDD[T]
   resultBlockId = Some(new MonotaskResultBlockId(taskId, SparkEnv.get.blockManager.compressRdds))
 
   override def execute(): Option[ByteBuffer] = {
-    val iterator = rdd.compute(split, context)
-    SparkEnv.get.blockManager.cacheIterator(
-      getResultBlockId(), iterator, StorageLevel.MEMORY_ONLY, tellMaster = false)
+    // Pass "updateMetrics = false" because blocks cached with MonotaskResultBlockIds are
+    // intermediate data that is deleted by the time that the macrotask completes.
+    rdd.cacheRdd(
+      rdd.compute(split, context),
+      split,
+      getResultBlockId(),
+      context,
+      StorageLevel.MEMORY_ONLY,
+      updateMetrics = false)
     None
   }
 }
