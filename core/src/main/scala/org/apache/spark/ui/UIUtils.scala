@@ -38,6 +38,8 @@ private[spark] object UIUtils extends Logging {
 
   def formatDate(timestamp: Long): String = dateFormat.get.format(new Date(timestamp))
 
+  def formatDurationNanos(nanoseconds: Long): String = formatDuration(nanoseconds / 1000000)
+
   def formatDuration(milliseconds: Long): String = {
     if (milliseconds < 100) {
       return "%d ms".format(milliseconds)
