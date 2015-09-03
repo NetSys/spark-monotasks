@@ -254,7 +254,9 @@ private[spark] class DiskScheduler(blockFileManager: BlockFileManager) extends L
 
       try {
         while (!currentThread.isInterrupted()) {
-          executeMonotask(taskQueue.take())
+          val diskMonotask = taskQueue.take()
+          diskMonotask.context.taskMetrics.incDiskWaitNanos(diskMonotask.getQueueTime())
+          executeMonotask(diskMonotask)
           numRunningAndQueuedDiskMonotasks.decrementAndGet()
         }
       } catch {

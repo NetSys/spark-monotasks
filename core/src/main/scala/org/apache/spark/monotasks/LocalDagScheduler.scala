@@ -184,6 +184,7 @@ private[spark] class LocalDagScheduler(blockFileManager: BlockFileManager)
     val macrotaskId = startedMonotask.context.taskAttemptId
     val currentlyRunning = mapToUpdate.getOrElse(macrotaskId, 0)
     mapToUpdate(macrotaskId) = currentlyRunning + 1
+    startedMonotask.setQueueStartTime()
   }
 
   private[monotasks] def updateMetricsForFinishedMonotask(completedMonotask: Monotask) {

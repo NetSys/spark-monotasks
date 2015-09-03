@@ -62,6 +62,13 @@ private[spark] abstract class Monotask(val context: TaskContextImpl) extends Log
    */
   private var failureHandler: Option[TaskFailedReason => Unit] = None
 
+  private var queueStartTimeNanos: Long = 0
+
+  def setQueueStartTime(): Unit = queueStartTimeNanos = System.nanoTime
+
+  /** Returns the elapsed time since the monotask began queuing. */
+  def getQueueTime(): Long = System.nanoTime - queueStartTimeNanos
+
   /**
    * Registers a monotask that must complete before this monotask can be run (by updating state
    * in both this monotask and in the passed dependency).

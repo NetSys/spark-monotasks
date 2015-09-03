@@ -91,12 +91,26 @@ class TaskMetrics extends Serializable {
   private[spark] def incComputationNanos(value: Long) = _computationNanos += value
 
   /**
+   * Total time that compute monotasks for this macrotask spent queued.
+   */
+  private var _computeWaitNanos: Long = _
+  def computeWaitNanos: Long = _computeWaitNanos
+  private[spark] def incComputeWaitNanos(value: Long) = _computeWaitNanos += value
+
+  /**
    * Total time consumed by disk monotasks for this macrotask. May be larger than executorRunTime
    * if multiple disk monotasks run simultaneously.
    */
   private var _diskNanos: Long = _
   def diskNanos: Long = _diskNanos
   private[spark] def incDiskNanos(value: Long) = _diskNanos += value
+
+  /**
+   * Total time tht disk monotasks for this macrotask spent queued.
+   */
+  private var _diskWaitNanos: Long = _
+  def diskWaitNanos: Long = _diskWaitNanos
+  private[spark] def incDiskWaitNanos(value: Long) = _diskWaitNanos += value
 
   /**
    * The number of bytes this task transmitted back to the driver as the TaskResult
