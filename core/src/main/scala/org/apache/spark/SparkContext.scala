@@ -603,8 +603,11 @@ class SparkContext(config: SparkConf) extends Logging with ExecutorAllocationCli
    */
   def textFile(path: String, minPartitions: Int = defaultMinPartitions): RDD[String] = {
     assertNotStopped()
-    hadoopFile(path, classOf[TextInputFormat], classOf[LongWritable], classOf[Text],
-      minPartitions).map(pair => pair._2.toString).setName(path)
+    newAPIHadoopFile(
+      path,
+      classOf[NewTextInputFormat],
+      classOf[LongWritable],
+      classOf[Text]).map(pair => pair._2.toString).setName(path)
   }
 
   /**
@@ -893,20 +896,6 @@ class SparkContext(config: SparkConf) extends Logging with ExecutorAllocationCli
     val jconf = new JobConf(conf)
     SparkHadoopUtil.get.addCredentials(jconf)
     new NewHadoopRDD(this, fClass, kClass, vClass, jconf)
-  }
-
-  /**
-   * Reads a text file from HDFS, a local file system (available on all nodes), or any
-   * Hadoop-supported file system URI using the org.apache.hadoop.mapreduce API, and returns it as
-   * an RDD of Strings.
-   */
-  def newApiTextFile(path: String, minPartitions: Int = defaultMinPartitions): RDD[String] = {
-    assertNotStopped()
-    newAPIHadoopFile(
-      path,
-      classOf[NewTextInputFormat],
-      classOf[LongWritable],
-      classOf[Text]).map(pair => pair._2.toString).setName(path)
   }
 
   /** Get an RDD for a Hadoop SequenceFile with given key and value types.

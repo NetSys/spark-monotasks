@@ -52,12 +52,13 @@ import org.apache.hadoop.mapreduce.lib.input.{CombineFileInputFormat => NewCombi
 import org.apache.hadoop.mapreduce.lib.output.{TextOutputFormat => NewTextOutputFormat}
 import org.apache.hadoop.mapreduce.{TaskAttemptContext, InputSplit => NewInputSplit,
   RecordReader => NewRecordReader}
+import org.scalatest.Assertions.assertResult
 import org.scalatest.{BeforeAndAfter, FunSuite}
 
 import org.apache.spark.SharedSparkContext
 import org.apache.spark.deploy.SparkHadoopUtil
 import org.apache.spark.scheduler.{SparkListener, SparkListenerTaskEnd}
-import org.apache.spark.storage.{BlockId, BlockStatus, StorageLevel}
+import org.apache.spark.storage.StorageLevel
 import org.apache.spark.util.Utils
 
 class InputOutputMetricsSuite extends FunSuite with SharedSparkContext
@@ -148,8 +149,10 @@ class InputOutputMetricsSuite extends FunSuite with SharedSparkContext
 
     assert(cartRead != 0)
     assert(bytesRead != 0)
-    // We read from the first rdd of the cartesian once per partition.
-    assert(cartRead == bytesRead * numPartitions)
+    assert(bytesRead2 != 0)
+
+    // The second RDD is read from first, so only its metrics are recorded.
+    assertResult(bytesRead2 * numPartitions)(cartRead)
   }
 
   test("input metrics for new Hadoop API with coalesce") {
@@ -166,39 +169,50 @@ class InputOutputMetricsSuite extends FunSuite with SharedSparkContext
     assert(bytesRead >= tmpFile.length())
   }
 
-  test("input metrics when reading text file") {
-    val bytesRead = runAndReturnBytesRead {
-      sc.textFile(tmpFilePath, 2).count()
-    }
-    assert(bytesRead >= tmpFile.length())
+  test("input metrics for a simple read") {
+    var bytesRead = 0L
+    var recordsRead = 0L
+    sc.addSparkListener(new SparkListener() {
+      override def onTaskEnd(taskEnd: SparkListenerTaskEnd) {
+        val metrics = taskEnd.taskMetrics
+        metrics.inputMetrics.foreach(bytesRead += _.bytesRead)
+        metrics.inputMetrics.foreach(recordsRead += _.recordsRead)
+      }
+    })
+
+    sc.textFile(tmpFilePath, 4).count()
+    sc.listenerBus.waitUntilEmpty(500)
+
+    assertResult(tmpFile.length())(bytesRead)
+    assertResult(numRecords)(recordsRead)
   }
 
-  test("input metrics on records read - simple") {
-    val records = runAndReturnRecordsRead {
-      sc.textFile(tmpFilePath, 4).count()
-    }
-    assert(records == numRecords)
+  test("input metrics for a read with more stages") {
+    var bytesRead = 0L
+    var recordsRead = 0L
+    var shuffleBytesRead = 0L
+    sc.addSparkListener(new SparkListener() {
+      override def onTaskEnd(taskEnd: SparkListenerTaskEnd) {
+        val metrics = taskEnd.taskMetrics
+        metrics.inputMetrics.foreach(bytesRead += _.bytesRead)
+        metrics.inputMetrics.foreach(recordsRead += _.recordsRead)
+        metrics.shuffleReadMetrics.foreach(shuffleBytesRead += _.localBytesRead)
+      }
+    })
+
+    sc.textFile(tmpFilePath, 4)
+      .map(key => (key.length, 1))
+      .reduceByKey(_ + _)
+      .count()
+    sc.listenerBus.waitUntilEmpty(500)
+
+    // The total number of bytes that are read is equal to the size of the input file (which is read
+    // by HdfsWriteMonotasks) plus the number of shuffle bytes read by DiskReadMonotasks.
+    assertResult(tmpFile.length() + shuffleBytesRead)(bytesRead)
+    assertResult(numRecords)(recordsRead)
   }
 
-  test("input metrics on records read - more stages") {
-    val records = runAndReturnRecordsRead {
-      sc.textFile(tmpFilePath, 4)
-        .map(key => (key.length, 1))
-        .reduceByKey(_ + _)
-        .count()
-    }
-    assert(records == numRecords)
-  }
-
-  test("input metrics on records - New Hadoop API") {
-    val records = runAndReturnRecordsRead {
-      sc.newAPIHadoopFile(tmpFilePath, classOf[NewTextInputFormat], classOf[LongWritable],
-        classOf[Text]).count()
-    }
-    assert(records == numRecords)
-  }
-
-  test("input metrics on recordsd read with cache") {
+  test("input metrics on records read with cache") {
     // prime the cache manager
     val rdd = sc.textFile(tmpFilePath, 4).cache()
     rdd.collect()
@@ -232,78 +246,82 @@ class InputOutputMetricsSuite extends FunSuite with SharedSparkContext
 
   /**
    * Tests the metrics from end to end.
-   * 1) reading a hadoop file
-   * 2) shuffle and writing to a hadoop file.
-   * 3) writing to hadoop file.
+   * 1) reading from a hadoop file
+   * 2) shuffle
+   * 3) writing to a hadoop file.
    */
   test("input read/write and shuffle read/write metrics all line up") {
-    var inputRead = 0L
-    var outputWritten = 0L
-    var shuffleRead = 0L
-    var shuffleWritten = 0L
+    var recordsRead = 0L
+    var bytesRead = 0L
+    var outputRecordsWritten = 0L
+    var shuffleBytesRead = 0L
+    var shuffleRecordsRead = 0L
+    var shuffleRecordsWritten = 0L
     sc.addSparkListener(new SparkListener() {
       override def onTaskEnd(taskEnd: SparkListenerTaskEnd) {
         val metrics = taskEnd.taskMetrics
-        metrics.inputMetrics.foreach(inputRead += _.recordsRead)
-        metrics.outputMetrics.foreach(outputWritten += _.recordsWritten)
-        metrics.shuffleReadMetrics.foreach(shuffleRead += _.recordsRead)
-        metrics.shuffleWriteMetrics.foreach(shuffleWritten += _.shuffleRecordsWritten)
+        metrics.inputMetrics.foreach(recordsRead += _.recordsRead)
+        metrics.inputMetrics.foreach(bytesRead += _.bytesRead)
+        metrics.outputMetrics.foreach(outputRecordsWritten += _.recordsWritten)
+        metrics.shuffleReadMetrics.foreach(shuffleBytesRead += _.localBytesRead)
+        metrics.shuffleReadMetrics.foreach(shuffleRecordsRead += _.recordsRead)
+        metrics.shuffleWriteMetrics.foreach(shuffleRecordsWritten += _.shuffleRecordsWritten)
       }
     })
 
-    val tmpFile = new File(tmpDir, getClass.getSimpleName)
-
+    val tmpFile2 = new File(tmpDir, s"${getClass().getSimpleName()}_2.txt")
     sc.textFile(tmpFilePath, 4)
       .map(key => (key, 1))
       .reduceByKey(_+_)
-      .saveAsTextFile("file://" + tmpFile.getAbsolutePath)
+      .saveAsNewApiTextFile("file://" + tmpFile2.getAbsolutePath())
 
     sc.listenerBus.waitUntilEmpty(500)
-    assert(inputRead == numRecords)
+
+    // The total number of bytes that are read is equal to the size of the input file (which is read
+    // by HdfsWriteMonotasks) plus the number of shuffle bytes read by DiskReadMonotasks.
+    assertResult(tmpFile.length() + shuffleBytesRead)(bytesRead)
+    assertResult(numRecords)(recordsRead)
 
     // Only supported on newer Hadoop
     if (SparkHadoopUtil.get.getFSBytesWrittenOnThreadCallback().isDefined) {
-      assert(outputWritten == numBuckets)
+      assertResult(numBuckets)(outputRecordsWritten)
     }
-    assert(shuffleRead == shuffleWritten)
+
+    assert(shuffleRecordsRead === shuffleRecordsWritten)
   }
 
   test("input metrics with interleaved reads") {
-    val numPartitions = 2
-    val cartVector = 0 to 9
-    val cartFile = new File(tmpDir, getClass.getSimpleName + "_cart.txt")
-    val cartFilePath = "file://" + cartFile.getAbsolutePath
+    val numWritePartitions1 = 2
+    val numWritePartitions2 = 5
 
-    // write files to disk so we can read them later.
-    sc.parallelize(cartVector).saveAsTextFile(cartFilePath)
-    val aRdd = sc.textFile(cartFilePath, numPartitions)
+    val prefix = s"${getClass().getSimpleName()}_cart_"
+    val cartFilePath1 = s"file://${new File(tmpDir, s"${prefix}_1.txt").getAbsolutePath()}"
+    val cartFilePath2 = s"file://${new File(tmpDir, s"${prefix}_2.txt").getAbsolutePath()}"
 
-    val tmpRdd = sc.textFile(tmpFilePath, numPartitions)
+    // Write files to disk so we can read them later.
+    sc.parallelize(1 to 10, numWritePartitions1).saveAsNewApiTextFile(cartFilePath1)
+    sc.parallelize(1 to 1000, numWritePartitions2).saveAsNewApiTextFile(cartFilePath2)
 
-    val firstSize= runAndReturnBytesRead {
-      aRdd.count()
+    val rdd1 = sc.textFile(cartFilePath1)
+    val rdd2 = sc.textFile(cartFilePath2)
+
+    val size1Bytes = runAndReturnBytesRead {
+      rdd1.count()
     }
-    val secondSize = runAndReturnBytesRead {
-      tmpRdd.count()
+    val size2Bytes = runAndReturnBytesRead {
+      rdd2.count()
     }
-
     val cartesianBytes = runAndReturnBytesRead {
-      aRdd.cartesian(tmpRdd).count()
+      rdd1.cartesian(rdd2).count()
     }
 
-    // Computing the amount of bytes read for a cartesian operation is a little involved.
-    // Cartesian interleaves reads between two partitions eg. p1 and p2.
-    // Here are the steps:
-    //  1) First it creates an iterator for p1
-    //  2) Creates an iterator for p2
-    //  3) Reads the first element of p1 and then all the elements of p2
-    //  4) proceeds to the next element of p1
-    //  5) Creates a new iterator for p2
-    //  6) rinse and repeat.
-    // As a result we read from the second partition n times where n is the number of keys in
-    // p1. Thus the math below for the test.
-    assert(cartesianBytes != 0)
-    assert(cartesianBytes == firstSize * numPartitions + (cartVector.length  * secondSize))
+    // The first file is read once for every partition of the second file, and the second file is
+    // read once for every partition of the first file.
+    //
+    // TODO: When functionality that prevents an Executor from loading the same block multiple times
+    //       simultaneously is implemented, the formula will be: size1Bytes + size2Bytes
+    assertResult(size1Bytes * numWritePartitions2 + size2Bytes * numWritePartitions1)(
+      cartesianBytes)
   }
 
   private def runAndReturnBytesRead(job: => Unit): Long = {

@@ -556,7 +556,7 @@ class PairRDDFunctionsSuite extends FunSuite with SharedSparkContext {
     val outputPath = s"file://$diskId/$filename"
     sc.parallelize(sourceArray, numPartitions).saveAsNewApiTextFile(outputPath)
 
-    val rddArray = sc.newApiTextFile(outputPath).sortBy(_.toInt).collect()
+    val rddArray = sc.textFile(outputPath).sortBy(_.toInt).collect()
     assert(rddArray.size === numInts, "The RDD that was read back is not the correct length.")
     sourceArray.foreach(i => assert(rddArray(i).toInt === i))
   }
