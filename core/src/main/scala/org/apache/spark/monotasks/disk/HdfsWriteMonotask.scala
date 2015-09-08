@@ -83,7 +83,8 @@ private[spark] class HdfsWriteMonotask(
       stream = path.getFileSystem(hadoopConf).create(path, false)
       stream.write(byteArray)
       stream.hsync()
-      logInfo(s"Block $blockId was successfully saved to HDFS at location: ${path.toString()}")
+      logInfo(s"Block $blockId (composed of $numRecords records) was successfully saved to HDFS " +
+        s"at location: ${path.toString()}")
     } catch {
       case NonFatal(e) => {
         if (isSetUp) {
