@@ -25,12 +25,13 @@ import org.apache.spark.storage.BlockId
 
 /**
  * A subclass of Path that makes it possible for Path.getFileSystem() to return a
- * MemoryStoreFileSystem. The blockId is used by MemoryStoreFileSystem to determine which block to
- * read from the MemoryStore.
+ * MemoryStoreFileSystem. If `blockId` is set, then this MemoryStorePath can be used in conjunction
+ * with a MemoryStoreFileSystem to read the block stored using `blockId` from the MemoryStore (see
+ * `MemoryStoreFileSystem.open()`).
  */
 private[spark] class MemoryStorePath(
     underlyingHadoopPath: URI,
-    val blockId: BlockId,
+    val blockId: Option[BlockId],
     private val fileSystem: MemoryStoreFileSystem)
   extends Path(underlyingHadoopPath) {
 

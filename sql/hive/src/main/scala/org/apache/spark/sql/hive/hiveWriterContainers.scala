@@ -31,9 +31,10 @@ import org.apache.hadoop.io.Writable
 import org.apache.hadoop.mapred._
 import org.apache.hadoop.hive.common.FileUtils
 
+import org.apache.spark.{Logging, SerializableWritable, SparkEnv, SparkHadoopWriter}
 import org.apache.spark.mapred.SparkHadoopMapRedUtil
+import org.apache.spark.monotasks.disk.{MemoryStoreFileSystem, MemoryStorePath}
 import org.apache.spark.sql.Row
-import org.apache.spark.{Logging, SerializableWritable, SparkHadoopWriter}
 import org.apache.spark.sql.hive.{ShimFileSinkDesc => FileSinkDesc}
 import org.apache.spark.sql.hive.HiveShim._
 
@@ -64,12 +65,25 @@ private[hive] class SparkHiveWriterContainer(
   private var jID: SerializableWritable[JobID] = null
   private var taID: SerializableWritable[TaskAttemptID] = null
 
+  /**
+   * The path to the file where the RDD will be stored, wrapped in a MemoryStorePath. This is set
+   * by `initWriters()`.
+   */
+  private var memoryStorePath: Option[MemoryStorePath] = None
+
   @transient private var writer: FileSinkOperator.RecordWriter = null
   @transient protected lazy val committer = conf.value.getOutputCommitter
   @transient protected lazy val jobContext = newJobContext(conf.value, jID.value)
   @transient private lazy val taskContext = newTaskAttemptContext(conf.value, taID.value)
   @transient private lazy val outputFormat =
     conf.value.getOutputFormat.asInstanceOf[HiveOutputFormat[AnyRef,Writable]]
+
+  /**
+   * Returns the MemoryStorePath that was used to create the file to which the RDD will be written.
+   */
+  def getMemoryStorePath(): MemoryStorePath =
+    memoryStorePath.getOrElse(throw new UnsupportedOperationException(
+      "The MemoryStorePath has not been set."))
 
   def driverSideSetup() {
     setIDs(0, 0, 0)
@@ -97,7 +111,6 @@ private[hive] class SparkHiveWriterContainer(
   def close() {
     // Seems the boolean value passed into close does not matter.
     writer.close(false)
-    commit()
   }
 
   def commitJob() {
@@ -107,12 +120,28 @@ private[hive] class SparkHiveWriterContainer(
   protected def initWriters() {
     // NOTE this method is executed at the executor side.
     // For Hive tables without partitions or with only static partitions, only 1 writer is needed.
+
+    val hadoopConf = conf.value
+    val originalPath = FileOutputFormat.getTaskOutputPath(hadoopConf, getOutputName)
+
+    // We pass a MemoryStorePath to HiveFileFormatUtils.getHiveRecordWriter() so that the resulting
+    // RecordWriter will be configured to write to an in-memory buffer. This in-memory data will
+    // later be written to HDFS using an HdfsWriteMonotask.
+    val memoryStoreFileSystem =
+      new MemoryStoreFileSystem(
+        SparkEnv.get.blockManager,
+        startPosition = 0L,
+        originalPath.getFileSystem(hadoopConf),
+        hadoopConf)
+    memoryStorePath =
+      Some(new MemoryStorePath(originalPath.toUri(), blockId = None, memoryStoreFileSystem))
+
     writer = HiveFileFormatUtils.getHiveRecordWriter(
-      conf.value,
-      fileSinkConf.getTableInfo,
-      conf.value.getOutputValueClass.asInstanceOf[Class[Writable]],
+      hadoopConf,
+      fileSinkConf.getTableInfo(),
+      hadoopConf.getOutputValueClass().asInstanceOf[Class[Writable]],
       fileSinkConf,
-      FileOutputFormat.getTaskOutputPath(conf.value, getOutputName),
+      getMemoryStorePath(),
       Reporter.NULL)
   }
 

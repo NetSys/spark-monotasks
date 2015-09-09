@@ -74,7 +74,7 @@ private[spark] class HdfsReadMonotask(
 
   override def chooseLocalDir(sparkLocalDirs: Seq[String]): String = {
     val pathString = hdfsPathToString(path)
-    val localPath = path.getFileSystem(hadoopConf) match {
+    val localPathOpt = path.getFileSystem(hadoopConf) match {
       case dfs: DistributedFileSystem =>
         // The path resides in the Hadoop Distributed File System. We need to do extra work to
         // figure out if the file is stored locally. If the file is stored locally, then we will
@@ -82,33 +82,30 @@ private[spark] class HdfsReadMonotask(
         // querying the Hadoop Distributed FileSystem for the storage locations of the file,
         // checking if any of the storage locations are local, and if so using the local storage
         // location's VolumeId to determine which of the HDFS data directories holds the file.
-        //
-        // TODO: Eventually, we may want to remove the restriction that a local data directory must
-        //       be found.
-        findLocalDirectory(path, dfs).getOrElse(
-          throw new SparkException("Unable to determine which HDFS data directory the block " +
-            s"$blockId is stored in."))
+        findLocalDirectory(path, dfs)
 
       case _: FileSystem =>
         // The path resides on the local filesystem.
-        pathString
+        Some(pathString)
     }
 
-    // Find a Spark local directory that is on the same disk as the HDFS data directory.
-    val dataDiskId = BlockFileManager.pathToDiskId(localPath)
-    val chosenLocalDir = {
+    val chosenLocalDirIndex = localPathOpt.flatMap { localPath =>
+      // Find a Spark local directory that is on the same disk as the HDFS data directory.
+      val dataDiskId = BlockFileManager.pathToDiskId(localPath)
       val localDirsDiskIds = sparkLocalDirs.map(BlockFileManager.pathToDiskId)
-      val localDirIndex =
-        localDirsDiskIds.zipWithIndex.find(_._1 == dataDiskId).map(_._2).getOrElse {
-          logWarning(s"Block $blockId (on disk $dataDiskId) is not stored on the same disk as " +
-            "any of the Spark local directories (which are on disks: " +
-            s"${localDirsDiskIds.mkString("[", ", ", "]")}). Falling back to choosing a " +
-            "Spark local directory at random.")
-          Random.nextInt(sparkLocalDirs.size)
-        }
-      sparkLocalDirs(localDirIndex)
-    }
+      val localDirIndexOpt = localDirsDiskIds.zipWithIndex.find(_._1 == dataDiskId).map(_._2)
 
+      if (localDirIndexOpt.isEmpty) {
+        logWarning(s"Block $blockId (on disk $dataDiskId) is not stored on the same disk as " +
+          "any of the Spark local directories (which are on disks: " +
+          s"${localDirsDiskIds.mkString("[", ", ", "]")}). Falling back to choosing a " +
+          "Spark local directory at random.")
+      }
+
+      localDirIndexOpt
+    }.getOrElse(Random.nextInt(sparkLocalDirs.size))
+
+    val chosenLocalDir = sparkLocalDirs(chosenLocalDirIndex)
     logDebug(s"Choosing Spark local directory $chosenLocalDir for HDFS file $pathString " +
       s"(blockId: $blockId).")
     chosenLocalDir
@@ -124,8 +121,8 @@ private[spark] class HdfsReadMonotask(
   /**
    * Queries the provided DistributedFileSystem to determine if the file specified by `path` is
    * stored locally. If it is, then this method returns the path to the HDFS data directory in which
-   * the file is stored. If the file is not stored locally or an error occurs, this method returns
-   * None.
+   * the file is stored. If the file is empty, is not stored locally, or an error occurs, then this
+   * method returns None.
    *
    * @param path The path to an HDFS file.
    * @param dfs The DistributedFileSystem object that is the interface to HDFS.
@@ -140,9 +137,12 @@ private[spark] class HdfsReadMonotask(
     val locationsPerBlock = dfs.getFileBlockLocations(path, 0, sizeBytes).toSeq
     val numBlocks = locationsPerBlock.size
     val pathString = hdfsPathToString(path)
-    if (numBlocks != 1) {
+    if (numBlocks == 0) {
+      logDebug(s"HDFS file $pathString is empty.")
+      return None
+    } else if (numBlocks != 1) {
       throw new SparkException(s"HDFS file $pathString is comprised of $numBlocks blocks. " +
-        "Currently, only HDFS files consisting of one block are supported.")
+        "Currently, only empty HDFS files and HDFS files consisting of one block are supported.")
     }
     val storageLocations = dfs.getFileBlockStorageLocations(locationsPerBlock).head
 

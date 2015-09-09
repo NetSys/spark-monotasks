@@ -17,10 +17,13 @@
 
 package org.apache.spark.sql.hive.execution
 
+import java.text.SimpleDateFormat
 import java.util
+import java.util.Date
 
 import scala.collection.JavaConversions._
 
+import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.hive.conf.HiveConf
 import org.apache.hadoop.hive.conf.HiveConf.ConfVars
 import org.apache.hadoop.hive.metastore.MetaStoreUtils
@@ -30,22 +33,26 @@ import org.apache.hadoop.hive.ql.{Context, ErrorMsg}
 import org.apache.hadoop.hive.serde2.Serializer
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspectorUtils.ObjectInspectorCopyOption
 import org.apache.hadoop.hive.serde2.objectinspector._
-import org.apache.hadoop.mapred.{FileOutputCommitter, FileOutputFormat, JobConf}
+import org.apache.hadoop.mapred.{FileOutputFormat, JobConf}
 
+import org.apache.spark.{SerializableWritable, SparkException, TaskContext}
+import org.apache.spark.mapreduce.SparkHadoopMapReduceUtil
+import org.apache.spark.monotasks.disk.{MemoryStoreFileSystem, MemoryStorePath}
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Row}
 import org.apache.spark.sql.execution.{UnaryNode, SparkPlan}
 import org.apache.spark.sql.hive._
-import org.apache.spark.sql.hive.{ ShimFileSinkDesc => FileSinkDesc}
+import org.apache.spark.sql.hive.{ShimFileSinkDesc => FileSinkDesc}
 import org.apache.spark.sql.hive.HiveShim._
-import org.apache.spark.{SerializableWritable, SparkException, TaskContext}
+import org.apache.spark.storage.RDDBlockId
+import org.apache.spark.util.Utils
 
 private[hive]
 case class InsertIntoHiveTable(
     table: MetastoreRelation,
     partition: Map[String, Option[String]],
     child: SparkPlan,
-    overwrite: Boolean) extends UnaryNode with HiveInspectors {
+    overwrite: Boolean) extends UnaryNode with HiveInspectors with SparkHadoopMapReduceUtil {
 
   @transient val sc: HiveContext = sqlContext.asInstanceOf[HiveContext]
   @transient lazy val outputClass = newSerializer(table.tableDesc).getSerializedClass
@@ -97,7 +104,10 @@ case class InsertIntoHiveTable(
 
       writerContainer.executorSideSetup(context.stageId, context.partitionId, context.attemptNumber)
 
+      var numRecords = 0L
       iterator.foreach { row =>
+        numRecords += 1
+
         var i = 0
         while (i < fieldOIs.length) {
           outputData(i) = if (row.isNullAt(i)) null else wrappers(i)(row(i))
@@ -110,7 +120,47 @@ case class InsertIntoHiveTable(
       }
 
       writerContainer.close()
+      submitHdfsWriteMonotask(
+        conf.value, writerContainer.getMemoryStorePath(), rdd.id, context, numRecords)
     }
+  }
+
+  /**
+   * Creates and submits an HdfsWriteMonotask that outputs to HDFS the file specified by
+   * `memoryStorePath`. The file must have been created using the MemoryStoreFileSystem returned by
+   * `memoryStorePath.getFileSystem()`, meaning that its serialized bytes are already stored in
+   * memory.
+   *
+   * This method retrieves the file's serialized bytes, caches them in the MemoryStore, and then
+   * submits an HdfsWriteMonotask that will write them to disk.
+   */
+  private def submitHdfsWriteMonotask(
+      hadoopConf: Configuration,
+      memoryStorePath: MemoryStorePath,
+      rddId: Int,
+      sparkTaskContext: TaskContext,
+      numRecords: Long): Unit = {
+    // Retrieve the block's serialized bytes.
+    val memoryStoreFileSystem =
+      memoryStorePath.getFileSystem(hadoopConf).asInstanceOf[MemoryStoreFileSystem]
+    val blockId = new RDDBlockId(rddId, sparkTaskContext.partitionId())
+    val buffer = memoryStoreFileSystem.getFileByteBuffer(memoryStorePath)
+
+    logDebug(s"Block $blockId's serialized data has size: ${Utils.bytesToString(buffer.limit())}")
+
+    val jobTrackerId = new SimpleDateFormat("yyyyMMddHHmm").format(new Date())
+    val hadoopTaskObjects =
+      getHadoopTaskObjects(Some(sparkTaskContext), hadoopConf, jobTrackerId, rddId, isMap = false)
+
+    submitHdfsWriteMonotask(
+      sparkTaskContext,
+      blockId,
+      buffer,
+      numRecords,
+      hadoopConf,
+      hadoopTaskObjects.taskContext,
+      hadoopTaskObjects.fileOutputCommitter,
+      hadoopTaskObjects.codec)
   }
 
   /**

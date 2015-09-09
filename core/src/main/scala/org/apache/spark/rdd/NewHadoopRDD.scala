@@ -160,7 +160,7 @@ class NewHadoopRDD[K, V](
         blockId, s"Could not find the serialized data blockId for block $blockId."))
 
     val memoryStorePath =
-      new MemoryStorePath(path.toUri(), serializedDataBlockId, memoryStoreFileSystem)
+      new MemoryStorePath(path.toUri(), Some(serializedDataBlockId), memoryStoreFileSystem)
     val memoryStoreFileSplit =
       new FileSplit(memoryStorePath, startPosition, hadoopSplit.getLength(), null)
 
