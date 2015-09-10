@@ -327,6 +327,8 @@ object SparkEnv extends Logging {
       new BlockManagerMasterActor(isLocal, conf, listenerBus)), conf, isDriver)
 
     val blockFileManager = new BlockFileManager(conf)
+
+    // NB: localDagScheduler is not valid until initialize() is called later.
     val localDagScheduler = new LocalDagScheduler(blockFileManager)
 
     // NB: blockManager is not valid until initialize() is called later.
@@ -341,8 +343,6 @@ object SparkEnv extends Logging {
       blockTransferService,
       blockFileManager,
       localDagScheduler)
-
-    localDagScheduler.setMemoryStore(blockManager.memoryStore)
 
     val broadcastManager = new BroadcastManager(isDriver, conf, securityManager)
 

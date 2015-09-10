@@ -88,17 +88,14 @@ private[spark] class LocalDagScheduler(blockFileManager: BlockFileManager)
   start()
 
   /**
-   * Registers a {@link MemoryStore} to use to determine when there is enough memory to launch
-   * monotasks. The given {@link MemoryStore} is currently only used by the ComputeScheduler
-   * (all other resource schedulers ignore memory usage in determining whether to launch tasks).
+   * Initializes the LocalDagScheduler by registering a {@link ExecutorBackend} and a
+   * {@link MemoryStore}. The {@link MemoryStore} is used to determine when there is enough
+   * memory to launch monotasks. It is currently used only by the {@link ComputeScheduler} (all
+   * other resource schedulers ignore memory usage in determining whether to launch tasks).
    */
-  def setMemoryStore(memoryStore: MemoryStore): Unit = {
-    computeScheduler.setMemoryStore(memoryStore)
-  }
-
-  def setExecutorBackend(executorBackend: ExecutorBackend): Unit = {
+  def initialize(executorBackend: ExecutorBackend, memoryStore: MemoryStore): Unit = {
     this.executorBackend = Some(executorBackend)
-    computeScheduler.setExecutorBackend(executorBackend)
+    computeScheduler.initialize(executorBackend, memoryStore)
   }
 
   def getNumRunningComputeMonotasks(): Int = {

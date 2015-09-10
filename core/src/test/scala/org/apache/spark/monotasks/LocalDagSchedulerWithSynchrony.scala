@@ -31,8 +31,7 @@ class LocalDagSchedulerWithSynchrony(
     executorBackend: ExecutorBackend, blockFileManager: BlockFileManager)
   extends LocalDagScheduler(blockFileManager) {
 
-  setExecutorBackend(executorBackend)
-  setMemoryStore(mock(classOf[MemoryStore]))
+  initialize(executorBackend, mock(classOf[MemoryStore]))
 
   def runEvent(event: LocalDagSchedulerEvent) {
     try {

@@ -35,8 +35,7 @@ class ComputeSchedulerSuite extends FunSuite {
     memoryStore.cacheBytes(blockId, dummyData, false)
 
     val computeScheduler = new ComputeScheduler(threads = 1)
-    computeScheduler.setMemoryStore(memoryStore)
-    computeScheduler.setExecutorBackend(mock(classOf[ExecutorBackend]))
+    computeScheduler.initialize(mock(classOf[ExecutorBackend]), memoryStore)
 
     // Because there is no free memory, submitted monotasks shouldn't be run immediately.
     val mockComputeMonotask = mock(classOf[ComputeMonotask])

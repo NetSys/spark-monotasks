@@ -47,12 +47,8 @@ private[spark] class ComputeScheduler(
   val numRunningTasks = new AtomicInteger(0)
 
   /** This must be called before any tasks are submitted. */
-  def setExecutorBackend(executorBackend: ExecutorBackend): Unit = {
+  def initialize(executorBackend: ExecutorBackend, memoryStore: MemoryStore): Unit = {
     this.executorBackend = Some(executorBackend)
-  }
-
-  /** This must be called before any tasks are submitted. */
-  def setMemoryStore(memoryStore: MemoryStore): Unit = {
     this.memoryStore = Some(memoryStore)
 
     memoryStore.registerBlockRemovalCallback(handleBlockRemovedFromMemoryStore)
