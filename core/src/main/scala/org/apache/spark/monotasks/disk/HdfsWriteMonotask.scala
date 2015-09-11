@@ -17,13 +17,12 @@
 package org.apache.spark.monotasks.disk
 
 import scala.util.control.NonFatal
-import scala.reflect.classTag
 import scala.util.Random
 
 import org.apache.hadoop.conf.{Configurable, Configuration}
 import org.apache.hadoop.fs.{FSDataOutputStream, Path}
 import org.apache.hadoop.io.compress.CompressionCodec
-import org.apache.hadoop.mapreduce.{Job, TaskAttemptContext}
+import org.apache.hadoop.mapreduce.TaskAttemptContext
 import org.apache.hadoop.mapreduce.lib.output.{FileOutputCommitter, FileOutputFormat}
 
 import org.apache.spark.{Logging, SparkEnv, TaskContextImpl}
@@ -33,13 +32,14 @@ import org.apache.spark.storage.BlockId
 
 /**
  * Contains the logic and parameters necessary to write the block specified by
- * `serializedDataBlockId` (which should be stored in the BlockManager) to the Hadoop Distributed
- * File System.
+ * `serializedDataBlockId` (which should be cached in the MemoryStore) to the Hadoop Distributed
+ * File System. Removes the block specified by `serializedDataBlockId` from the MemoryStore after
+ * writing it to HDFS.
  *
- * Accepts a parameter `getNumRecords` that is a function that should return the number of records
- * that this HdfsWriteMonotask will write to disk. Since this monotask only deals with serialized
- * bytes, it has no way to determine the number of records for itself. This is used to update the
- * task metrics after the write operation has completed.
+ * Accepts a parameter `numRecords` that is the number of records that this HdfsWriteMonotask will
+ * write to disk. Since this monotask only deals with serialized bytes, it has no way to determine
+ * the number of records for itself. This is used to update the task metrics after the write
+ * operation has completed.
  */
 private[spark] class HdfsWriteMonotask(
     private val sparkTaskContext: TaskContextImpl,
@@ -47,12 +47,14 @@ private[spark] class HdfsWriteMonotask(
     private val serializedDataBlockId: BlockId,
     private val hadoopConf: Configuration,
     private val hadoopTaskContext: TaskAttemptContext,
+    private val outputCommitter: FileOutputCommitter,
     private val codec: Option[CompressionCodec],
-    private val getNumRecords: () => Long)
+    private val numRecords: Long)
   extends HdfsDiskMonotask(sparkTaskContext, blockId) with Logging {
 
   override def execute(): Unit = {
-    val buffer = SparkEnv.get.blockManager.getLocalBytes(serializedDataBlockId).getOrElse(
+    val blockManager = SparkEnv.get.blockManager
+    val buffer = blockManager.getLocalBytes(serializedDataBlockId).getOrElse(
       throw new IllegalStateException(
         s"Writing block $blockId to HDFS failed because the block's serialized bytes " +
         s"(stored with blockId $serializedDataBlockId) could not be found."))
@@ -71,9 +73,7 @@ private[spark] class HdfsWriteMonotask(
       destByteArray
     }
 
-    val outputCommitter = constructOutputCommitter()
     val path = constructPath(outputCommitter)
-
     var isSetUp = false
     var stream: FSDataOutputStream = null
     try {
@@ -98,26 +98,11 @@ private[spark] class HdfsWriteMonotask(
     }
 
     SparkHadoopMapRedUtil.commitTask(outputCommitter, hadoopTaskContext, sparkTaskContext)
+    blockManager.removeBlockFromMemory(serializedDataBlockId, false)
+
     val outputMetrics = new OutputMetrics(DataWriteMethod.Hadoop)
     sparkTaskContext.taskMetrics.outputMetrics = Some(outputMetrics)
-    outputMetrics.setRecordsWritten(getNumRecords())
-  }
-
-  /** Returns a FileOutputCommitter for the Hadoop task that this HdfsDiskMonotask represents. */
-  private def constructOutputCommitter(): FileOutputCommitter = {
-    val format = new Job(hadoopConf).getOutputFormatClass.newInstance()
-    format match {
-      case configurable: Configurable => configurable.setConf(hadoopConf)
-      case _ =>
-    }
-    format.getOutputCommitter(hadoopTaskContext) match {
-      case fileCommitter: FileOutputCommitter =>
-        fileCommitter
-      case otherCommitter =>
-        throw new UnsupportedOperationException("Unsupported OutputCommitter: " +
-          s"${otherCommitter.getClass().getName()}. HdfsWriteMonotask only supports " +
-          s"OutputCommitters of type ${classTag[FileOutputCommitter]}.")
-    }
+    outputMetrics.setRecordsWritten(numRecords)
   }
 
   /**

@@ -40,11 +40,6 @@ import scala.collection.mutable.{ArrayBuffer, HashMap, HashSet}
 import scala.reflect.ClassTag
 
 import com.esotericsoftware.kryo.KryoException
-import com.google.common.io.Files
-import org.apache.hadoop.io.{NullWritable, Text}
-import org.apache.hadoop.mapred.JobConf
-import org.apache.hadoop.mapreduce.Job
-import org.apache.hadoop.mapreduce.lib.output.{FileOutputFormat, TextOutputFormat}
 import org.mockito.Matchers.{any, eq => meq}
 import org.mockito.Mockito.{mock, never, verify, when}
 import org.scalatest.{BeforeAndAfter, FunSuite}
@@ -52,9 +47,9 @@ import org.scalatest.{BeforeAndAfter, FunSuite}
 import org.apache.spark._
 import org.apache.spark.api.java.{JavaRDD, JavaSparkContext}
 import org.apache.spark.monotasks.Monotask
-import org.apache.spark.monotasks.compute.{DummyComputeMonotask, HdfsSerializationMonotask,
-  RddComputeMonotask, SerializationMonotask}
-import org.apache.spark.monotasks.disk.{DiskReadMonotask, DiskWriteMonotask, HdfsWriteMonotask}
+import org.apache.spark.monotasks.compute.{DummyComputeMonotask, RddComputeMonotask,
+  SerializationMonotask}
+import org.apache.spark.monotasks.disk.{DiskReadMonotask, DiskWriteMonotask}
 import org.apache.spark.rdd.RDDSuiteUtils._
 import org.apache.spark.storage.{BlockManager, RDDBlockId, StorageLevel}
 import org.apache.spark.util.Utils
@@ -1237,57 +1232,6 @@ class RDDSuite extends FunSuite with BeforeAndAfter with SharedSparkContext {
       case monotask: Monotask =>
         assert(false, s"Incorrect type of monotask found: $monotask")
     }
-  }
-
-  /**
-   * Tests the case where the RDD needs to be saved to HDFS. The DAG should look like:
-   *
-   * HdfsSerializationMonotask -> HdfsWriteMonotask
-   *
-   * ResultMonotask
-   */
-  test("buildDag: RDD that needs to be written to HDFS") {
-    initializeBuildDagTestObjects()
-    val pairRdd = rdd3.map(x => (NullWritable.get(), new Text(x.toString())))
-    val hadoopConf = pairRdd.context.hadoopConfiguration
-    val job = new Job(hadoopConf)
-    job.setOutputKeyClass(classOf[NullWritable])
-    job.setOutputValueClass(classOf[Text])
-    job.setOutputFormatClass(classOf[TextOutputFormat[NullWritable, Text]])
-
-    val outputDir = Files.createTempDir()
-    outputDir.deleteOnExit()
-    val outputPath = outputDir.toString() + "/test"
-    FileOutputFormat.setOutputPath(
-      job, SparkHadoopWriter.createPathFromString(outputPath, new JobConf(hadoopConf)))
-    pairRdd.configForHdfsWrite = Some((new SerializableWritable(job.getConfiguration()), "job1"))
-
-    val partition = pairRdd.partitions.head
-    val partitionIndex = partition.index
-    val blockId = new RDDBlockId(pairRdd.id, partitionIndex)
-    val dependencyIdToPartitions = Dependency.getDependencyIdToPartitions(pairRdd, partitionIndex)
-    val monotasks = pairRdd.buildDag(partition, dependencyIdToPartitions, taskContext, nextMonotask)
-
-    assert(monotasks.size === 2)
-    assert(nextMonotask.dependencies.size === 0)
-
-    val hdfsWriteMonotask = monotasks.find(_.isInstanceOf[HdfsWriteMonotask]).getOrElse(
-      fail("Missing an HdfsWriteMonotask."))
-
-    // Verify that the HdfsWriteMonotask is properly formed.
-    assert(hdfsWriteMonotask.dependencies.size === 1)
-    assert(hdfsWriteMonotask.dependents.size === 0)
-
-    val hdfsSerializationMonotask =
-      monotasks.find(_.isInstanceOf[HdfsSerializationMonotask]).getOrElse(
-        fail("Missing an HdfsSerializationMonotask."))
-
-    // Verify that the HdfsSerializationMonotask is properly formed.
-    assert(hdfsSerializationMonotask.dependencies.isEmpty)
-    val dependents = hdfsSerializationMonotask.dependents
-    assert(dependents.size === 1)
-    val filteredDependents = dependents.filter(_.taskId != hdfsWriteMonotask.taskId)
-    assert(filteredDependents.size === 0)
   }
 
   /** A contrived RDD that allows the manual addition of dependencies after creation. */

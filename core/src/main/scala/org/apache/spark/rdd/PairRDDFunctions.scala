@@ -46,13 +46,12 @@ import scala.util.DynamicVariable
 
 import com.clearspring.analytics.stream.cardinality.HyperLogLogPlus
 
-import org.apache.hadoop.conf.{Configurable, Configuration}
+import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.FileSystem
 import org.apache.hadoop.io.compress.CompressionCodec
 import org.apache.hadoop.io.SequenceFile.CompressionType
 import org.apache.hadoop.mapred.{FileOutputCommitter, FileOutputFormat, JobConf, OutputFormat}
-import org.apache.hadoop.mapreduce.{Job => NewHadoopJob, OutputFormat => NewOutputFormat}
-import org.apache.hadoop.mapreduce.lib.output.{FileOutputFormat => NewFileOutputFormat}
+import org.apache.hadoop.mapreduce.{Job, OutputFormat => NewOutputFormat}
 import org.apache.hadoop.mapreduce.JobStatus.State
 
 import org.apache.spark._
@@ -63,9 +62,10 @@ import org.apache.spark.mapreduce.SparkHadoopMapReduceUtil
 import org.apache.spark.partial.{BoundedDouble, PartialResult}
 import org.apache.spark.Partitioner.defaultPartitioner
 import org.apache.spark.serializer.Serializer
+import org.apache.spark.storage.RDDBlockId
 import org.apache.spark.util.collection.CompactBuffer
 import org.apache.spark.util.random.StratifiedSamplingUtils
-import org.apache.spark.util.Utils
+import org.apache.spark.util.{ByteArrayOutputStreamWithZeroCopyByteBuffer, Utils}
 
 /**
  * Extra functions available on RDDs of (key, value) pairs through an implicit conversion.
@@ -913,7 +913,7 @@ class PairRDDFunctions[K, V](self: RDD[(K, V)])
       conf: Configuration = self.context.hadoopConfiguration) {
     // Rename this as hadoopConf internally to avoid shadowing (see SPARK-2038).
     val hadoopConf = conf
-    val job = new NewHadoopJob(hadoopConf)
+    val job = Job.getInstance(hadoopConf)
     job.setOutputKeyClass(keyClass)
     job.setOutputValueClass(valueClass)
     job.setOutputFormatClass(outputFormatClass)
@@ -978,50 +978,72 @@ class PairRDDFunctions[K, V](self: RDD[(K, V)])
    * output paths required (e.g. a table name to write to) in the same way as it would be
    * configured for a Hadoop MapReduce job.
    */
-  def saveAsNewAPIHadoopDataset(conf: Configuration): Unit = {
-    // Rename this internally to avoid shadowing (see SPARK-2038).
-    val renamedHadoopConf = conf
-    saveAsNewAPIHadoopDataset(new NewHadoopJob(renamedHadoopConf))
-  }
+  def saveAsNewAPIHadoopDataset(driverHadoopConf: Configuration): Unit = {
+    val jobTrackerId = new SimpleDateFormat("yyyyMMddHHmm").format(new Date())
+    val driverHadoopTaskObjects = getHadoopTaskObjects(
+      sparkTaskContext = None, driverHadoopConf, jobTrackerId, self.id, isMap = false)
+    val driverHadoopTaskContext = driverHadoopTaskObjects.taskContext
 
-  def saveAsNewAPIHadoopDataset(job: NewHadoopJob) {
-    val hadoopConf = job.getConfiguration()
-    val outputFormat = job.getOutputFormatClass().newInstance()
-    outputFormat match {
-      case configurable: Configurable => configurable.setConf(hadoopConf)
-      case _ =>
-    }
     if (isOutputSpecValidationEnabled) {
       // FileOutputFormat ignores the filesystem parameter
-      outputFormat.checkOutputSpecs(job)
+      driverHadoopTaskObjects.fileOutputFormat.checkOutputSpecs(driverHadoopTaskContext)
     }
 
-    val wrappedHadoopConf = new SerializableWritable(hadoopConf)
-    val jobTrackerId = new SimpleDateFormat("yyyyMMddHHmm").format(new Date())
-    self.configForHdfsWrite = Some((wrappedHadoopConf, jobTrackerId))
+    val wrappedConf = new SerializableWritable(driverHadoopConf)
 
-    val hadoopTaskId = newTaskAttemptID(jobTrackerId, self.id, isMap = false, 0, 0)
-    val hadoopTaskContext = newTaskAttemptContext(hadoopConf, hadoopTaskId)
-    val jobCommitter = outputFormat.getOutputCommitter(hadoopTaskContext)
-    var isSetUp = false
+    // This function serializes an RDD partition and schedules an HdfsWriteMonotask to write the
+    // serialized partition to HDFS.
+    val writeToFile = (context: TaskContext, iterator: Iterator[(K, V)]) => {
+      val executorHadoopConf = wrappedConf.value
+      val executorHadoopTaskObjects = getHadoopTaskObjects(
+        Some(context), executorHadoopConf, jobTrackerId, self.id, isMap = false)
+      val executorHadoopTaskContext = executorHadoopTaskObjects.taskContext
+      val codec = executorHadoopTaskObjects.codec
+
+      val byteStream = new ByteArrayOutputStreamWithZeroCopyByteBuffer()
+      val recordWriter = getRecordWriter(
+        byteStream,
+        executorHadoopConf,
+        executorHadoopTaskContext,
+        executorHadoopTaskObjects.fileOutputFormat,
+        codec)
+
+      // Serialize the RDD partition and store its bytes in byteStream.
+      var numRecords = 0L
+      try {
+        while (iterator.hasNext()) {
+          val keyValuePair = iterator.next()
+          recordWriter.write(keyValuePair._1, keyValuePair._2)
+          numRecords += 1
+        }
+      } finally {
+        // This also closes byteStream.
+        recordWriter.close(executorHadoopTaskContext)
+      }
+
+      submitHdfsWriteMonotask(
+        context,
+        new RDDBlockId(self.id, context.partitionId()),
+        byteStream.getByteBuffer(),
+        numRecords,
+        executorHadoopConf,
+        executorHadoopTaskContext,
+        executorHadoopTaskObjects.fileOutputCommitter,
+        codec)
+    }
+
+    val jobCommitter = driverHadoopTaskObjects.fileOutputCommitter
+    jobCommitter.setupJob(driverHadoopTaskContext)
+
     try {
-      jobCommitter.setupJob(hadoopTaskContext)
-      isSetUp = true
-
-      self.context.runJob(self, (context: TaskContext, iter: Iterator[(K, V)]) => true)
+      self.context.runJob(self, writeToFile)
     } catch {
       case NonFatal(e) =>
-        if (isSetUp) {
-          jobCommitter.abortJob(hadoopTaskContext, State.FAILED)
-        }
+        jobCommitter.abortJob(driverHadoopTaskContext, State.FAILED)
         throw e
-
-    } finally {
-      // Clear configForHdfsWrite so that future jobs that use this RDD do not also save it to HDFS.
-      self.configForHdfsWrite = None
     }
 
-    jobCommitter.commitJob(hadoopTaskContext)
+    jobCommitter.commitJob(driverHadoopTaskContext)
   }
 
   /**

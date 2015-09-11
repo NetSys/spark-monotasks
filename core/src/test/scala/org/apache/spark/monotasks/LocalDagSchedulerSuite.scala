@@ -68,7 +68,7 @@ class LocalDagSchedulerSuite extends FunSuite with BeforeAndAfterEach with Local
     assert(1 === localDagScheduler.runningMonotasks.size)
     assert(localDagScheduler.runningMonotasks.contains(firstMonotask.taskId))
     assert(1 === localDagScheduler.waitingMonotasks.size)
-    assert(localDagScheduler.waitingMonotasks.contains(secondMonotask.taskId))
+    assert(localDagScheduler.waitingMonotasks.contains(secondMonotask))
   }
 
   /**
@@ -208,7 +208,7 @@ class LocalDagSchedulerSuite extends FunSuite with BeforeAndAfterEach with Local
     assert(1 === localDagScheduler.runningMonotasks.size)
     assert(localDagScheduler.runningMonotasks.contains(monotaskC.taskId))
     assert(1 === localDagScheduler.waitingMonotasks.size)
-    assert(localDagScheduler.waitingMonotasks.contains(monotaskE.taskId))
+    assert(localDagScheduler.waitingMonotasks.contains(monotaskE))
 
     // Finally, when C finishes, E can be run.
     localDagScheduler.runEvent(TaskSuccess(monotaskC))
@@ -260,7 +260,7 @@ class LocalDagSchedulerSuite extends FunSuite with BeforeAndAfterEach with Local
     localDagScheduler.runEvent(TaskFailure(monotaskA, Some(ByteBuffer.allocate(12))))
     val waitingErrorMessage = ("The only remaining waiting monotask should be the monotask from " +
       s"task attempt $taskAttemptId2")
-    assert(Set(secondMonotask.taskId) === localDagScheduler.waitingMonotasks, waitingErrorMessage)
+    assert(Set(secondMonotask) === localDagScheduler.waitingMonotasks, waitingErrorMessage)
 
     assert(!localDagScheduler.runningMonotasks.contains(monotaskA.taskId),
       "The failed monotask should have been removed from the running monotasks")
@@ -338,7 +338,7 @@ class LocalDagSchedulerSuite extends FunSuite with BeforeAndAfterEach with Local
 
     // Verify that D removed E from the list of waiting monotask and removed the macrotask from
     // macrotaskRemainingMonotasks.
-    assert(!localDagScheduler.waitingMonotasks.contains(monotaskE.taskId))
+    assert(!localDagScheduler.waitingMonotasks.contains(monotaskE))
     assert(!localDagScheduler.runningMacrotaskAttemptIds.contains(taskAttemptId))
 
     // Suppose that A completed normally, uneffected by D's failure.

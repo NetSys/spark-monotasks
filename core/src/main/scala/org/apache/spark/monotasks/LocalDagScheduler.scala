@@ -23,7 +23,8 @@ import scala.collection.mutable.{HashMap, HashSet}
 import org.apache.spark.{Logging, TaskContextImpl, TaskState}
 import org.apache.spark.TaskState.TaskState
 import org.apache.spark.executor.ExecutorBackend
-import org.apache.spark.monotasks.compute.{ComputeMonotask, ComputeScheduler}
+import org.apache.spark.monotasks.compute.{ComputeMonotask, ComputeScheduler,
+  ResultSerializationMonotask}
 import org.apache.spark.monotasks.disk.{DiskMonotask, DiskScheduler}
 import org.apache.spark.monotasks.network.{NetworkMonotask, NetworkScheduler}
 import org.apache.spark.storage.{BlockFileManager, MemoryStore}
@@ -58,11 +59,8 @@ private[spark] class LocalDagScheduler(blockFileManager: BlockFileManager)
   private val networkScheduler = new NetworkScheduler
   private val diskScheduler = new DiskScheduler(blockFileManager)
 
-  /**
-   * IDs of monotasks that are waiting for dependencies to be satisfied. This exists solely for
-   * debugging/testing and is not needed for maintaining correctness.
-   */
-  private[monotasks] val waitingMonotasks = new HashSet[Long]()
+  /** Monotasks that are waiting for their dependencies to be satisfied. */
+  private[monotasks] val waitingMonotasks = new HashSet[Monotask]()
 
   /**
    * IDs of monotasks that have been submitted to a scheduler to be run. This exists solely for
@@ -146,6 +144,9 @@ private[spark] class LocalDagScheduler(blockFileManager: BlockFileManager)
 
     case TaskFailure(failedMonotask, serializedFailureReason) =>
       handleTaskFailure(failedMonotask, serializedFailureReason)
+
+    case AddToMacrotask(monotask) =>
+      addToMacrotask(monotask)
   }
 
   /** Called when an exception is thrown in the event loop. */
@@ -158,7 +159,7 @@ private[spark] class LocalDagScheduler(blockFileManager: BlockFileManager)
     if (monotask.dependenciesSatisfied()) {
       scheduleMonotask(monotask)
     } else {
-      waitingMonotasks += monotask.taskId
+      waitingMonotasks += monotask
     }
     val taskAttemptId = monotask.context.taskAttemptId
     logDebug(s"Submitting monotask $monotask (id: ${monotask.taskId}) for macrotask $taskAttemptId")
@@ -225,7 +226,7 @@ private[spark] class LocalDagScheduler(blockFileManager: BlockFileManager)
       // If the macrotask has not failed, schedule any newly-ready monotasks.
       completedMonotask.dependents.foreach { monotask =>
         if (monotask.dependenciesSatisfied()) {
-          if (waitingMonotasks.contains(monotask.taskId)) {
+          if (waitingMonotasks.contains(monotask)) {
             scheduleMonotask(monotask)
           } else {
             logWarning(s"Monotask $monotask (id ${monotask.taskId}) is no longer in " +
@@ -296,7 +297,7 @@ private[spark] class LocalDagScheduler(blockFileManager: BlockFileManager)
 
     monotask.dependents.foreach { dependentMonotask =>
       logDebug(s"Failing monotask ${dependentMonotask.taskId} because $message.")
-      waitingMonotasks -= dependentMonotask.taskId
+      waitingMonotasks -= dependentMonotask
       failDependentMonotasks(dependentMonotask, originalFailedTaskId)
     }
   }
@@ -317,7 +318,37 @@ private[spark] class LocalDagScheduler(blockFileManager: BlockFileManager)
     /* Add the monotask to runningMonotasks before removing it from waitingMonotasks to avoid
      * a race condition in waitUntilAllTasksComplete where both sets are empty. */
     runningMonotasks += monotask.taskId
-    waitingMonotasks.remove(monotask.taskId)
+    waitingMonotasks.remove(monotask)
+  }
+
+  /**
+   * Adds the provided monotask to the DAG of monotasks for the macrotask to which it belongs. In
+   * order to make sure that the macrotask is not allowed to complete until all of its monotasks
+   * have finished, the new monotask is added as a dependency of the macrotask's
+   * ResultSerializationMonotask. This means that the macrotask's ResultSerializationMonotask must
+   * have already been submitted but cannot have started executing yet. The best way to ensure this
+   * is to only use this functionality from within the macrotask to which monotask belongs, and not
+   * from within a PrepareMonotask or a ResultSerializationMonotask.
+   */
+  def addToMacrotask(monotask: Monotask): Unit = {
+    val monotaskId = monotask.taskId
+    val macrotaskId = monotask.context.taskAttemptId
+
+    val monotasksFromSameMacrotask = waitingMonotasks.filter(_.context.taskAttemptId == macrotaskId)
+    if (monotasksFromSameMacrotask.isEmpty) {
+      throw new IllegalArgumentException(s"The macrotask (id: $macrotaskId) to which monotask " +
+        s"$monotask (id: $monotaskId) belongs could not be found.")
+    }
+
+    val resultSerializationMonotask = monotasksFromSameMacrotask.find(
+      _.isInstanceOf[ResultSerializationMonotask]).getOrElse(
+          throw new IllegalArgumentException(
+            s"The ResultSerializationMonotask for the macrotask (id: $macrotaskId) to which " +
+            s"monotask $monotask (id: $monotaskId) belongs has either not been submitted or has " +
+            s"already completed."))
+
+    resultSerializationMonotask.addDependency(monotask)
+    submitMonotask(monotask)
   }
 
   /**

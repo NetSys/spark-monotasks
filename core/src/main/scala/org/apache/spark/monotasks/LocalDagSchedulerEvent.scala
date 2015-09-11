@@ -25,6 +25,8 @@ private[spark] case class SubmitMonotask(monotask: Monotask) extends LocalDagSch
 private[spark] case class SubmitMonotasks(monotasks: Seq[Monotask])
   extends LocalDagSchedulerEvent
 
+private[spark] case class AddToMacrotask(monotask: Monotask) extends LocalDagSchedulerEvent
+
 private[monotasks] case class TaskSuccess(
     completedMonotask: Monotask, serializedTaskResult: Option[ByteBuffer] = None)
   extends LocalDagSchedulerEvent
