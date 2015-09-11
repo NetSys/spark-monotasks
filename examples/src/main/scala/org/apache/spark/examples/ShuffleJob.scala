@@ -38,24 +38,28 @@ object ShuffleJob {
       Array.fill(itemsPerPartition)((random.nextLong, Array.fill(longsPerValue)(random.nextLong)))
     }
 
-    val shuffledRdd: RDD[(Long, Array[Long])] = if (sortByKey) {
-      rdd.sortByKey(true, numReduceTasks)
-    } else {
-      // The goal here is just to shuffle the data with minimal computation, so this doesn't sort
-      // the shuffled data. The reduceByKey should result in very few keys being combined, because
-      // the number of items generated is small relative to the space of all longs.
-      rdd.reduceByKey((a, b) => b, numReduceTasks)
-    }
+    try {
+      val shuffledRdd: RDD[(Long, Array[Long])] = if (sortByKey) {
+        rdd.sortByKey(true, numReduceTasks)
+      } else {
+        // The goal here is just to shuffle the data with minimal computation, so this doesn't sort
+        // the shuffled data. The reduceByKey should result in very few keys being combined, because
+        // the number of items generated is small relative to the space of all longs.
+        rdd.reduceByKey((a, b) => b, numReduceTasks)
+      }
 
-    // Count the shuffled RDD to trigger the map stage (which can then be re-used by future
-    // shuffles). This also runs a single shuffle, which serves as a warmup so the shuffle read code
-    // will get JITed.
-    shuffledRdd.count
-
-    (1 to numShuffles).foreach { _ =>
+      // Count the shuffled RDD to trigger the map stage (which can then be re-used by future
+      // shuffles). This also runs a single shuffle, which serves as a warmup so the shuffle read
+      // code will get JITed.
       shuffledRdd.count
-    }
 
-    spark.stop()
+      (1 to numShuffles).foreach { _ =>
+        shuffledRdd.count
+      }
+    } finally {
+      // Be sure to always stop the SparkContext, even when an exception is thrown; otherwise,
+      // the event logs are more difficult to access.
+      spark.stop()
+    }
   }
 }
