@@ -102,6 +102,7 @@ private[spark] class HdfsWriteMonotask(
 
     val outputMetrics = new OutputMetrics(DataWriteMethod.Hadoop)
     sparkTaskContext.taskMetrics.outputMetrics = Some(outputMetrics)
+    outputMetrics.setBytesWritten(buffer.limit())
     outputMetrics.setRecordsWritten(numRecords)
   }
 
