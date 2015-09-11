@@ -54,11 +54,10 @@ import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.Path
 import org.apache.hadoop.io.{ArrayWritable, BooleanWritable, BytesWritable, DoubleWritable,
   FloatWritable, IntWritable, LongWritable, NullWritable, Text, Writable}
-import org.apache.hadoop.mapred.{FileInputFormat, InputFormat, JobConf, SequenceFileInputFormat,
-  TextInputFormat}
-import org.apache.hadoop.mapreduce.{InputFormat => NewInputFormat, Job => NewHadoopJob}
+import org.apache.hadoop.mapred.{FileInputFormat, InputFormat, JobConf, TextInputFormat}
+import org.apache.hadoop.mapreduce.{InputFormat => NewInputFormat, Job}
 import org.apache.hadoop.mapreduce.lib.input.{FileInputFormat => NewFileInputFormat,
-  TextInputFormat => NewTextInputFormat}
+  SequenceFileInputFormat, TextInputFormat => NewTextInputFormat}
 
 import org.apache.mesos.MesosNativeLibrary
 
@@ -640,7 +639,7 @@ class SparkContext(config: SparkConf) extends Logging with ExecutorAllocationCli
   def wholeTextFiles(path: String, minPartitions: Int = defaultMinPartitions):
   RDD[(String, String)] = {
     assertNotStopped()
-    val job = NewHadoopJob.getInstance(hadoopConfiguration)
+    val job = Job.getInstance(hadoopConfiguration)
     NewFileInputFormat.addInputPath(job, new Path(path))
     val updateConf = job.getConfiguration
     new WholeTextFileRDD(
@@ -686,7 +685,7 @@ class SparkContext(config: SparkConf) extends Logging with ExecutorAllocationCli
   def binaryFiles(path: String, minPartitions: Int = defaultMinPartitions):
       RDD[(String, PortableDataStream)] = {
     assertNotStopped()
-    val job = NewHadoopJob.getInstance(hadoopConfiguration)
+    val job = Job.getInstance(hadoopConfiguration)
     NewFileInputFormat.addInputPath(job, new Path(path))
     val updateConf = job.getConfiguration
     new BinaryFileRDD(
@@ -860,9 +859,9 @@ class SparkContext(config: SparkConf) extends Logging with ExecutorAllocationCli
       vClass: Class[V],
       conf: Configuration = hadoopConfiguration): RDD[(K, V)] = {
     assertNotStopped()
-    // The call to new NewHadoopJob automatically adds security credentials to conf,
+    // The call to create a new Job automatically adds security credentials to conf,
     // so we don't need to explicitly add them ourselves
-    val job = NewHadoopJob.getInstance(conf)
+    val job = Job.getInstance(conf)
     NewFileInputFormat.addInputPath(job, new Path(path))
     val updatedConf = job.getConfiguration
     new NewHadoopRDD(this, fClass, kClass, vClass, updatedConf).setName(path)
@@ -900,6 +899,8 @@ class SparkContext(config: SparkConf) extends Logging with ExecutorAllocationCli
 
   /** Get an RDD for a Hadoop SequenceFile with given key and value types.
     *
+    * The `minPartitions` parameter is ignored.
+    *
     * '''Note:''' Because Hadoop's RecordReader class re-uses the same Writable object for each
     * record, directly caching the returned RDD or directly passing it to an aggregation or shuffle
     * operation will create many references to the same object.
@@ -912,8 +913,13 @@ class SparkContext(config: SparkConf) extends Logging with ExecutorAllocationCli
       minPartitions: Int
       ): RDD[(K, V)] = {
     assertNotStopped()
-    val inputFormatClass = classOf[SequenceFileInputFormat[K, V]]
-    hadoopFile(path, inputFormatClass, keyClass, valueClass, minPartitions)
+    newAPIHadoopFile(
+      path,
+      classOf[SequenceFileInputFormat[K, V]],
+      keyClass,
+      valueClass,
+      Job.getInstance().getConfiguration())
+
   }
 
   /** Get an RDD for a Hadoop SequenceFile with given key and value types.
@@ -960,9 +966,12 @@ class SparkContext(config: SparkConf) extends Logging with ExecutorAllocationCli
     val kc = kcf()
     val vc = vcf()
     val format = classOf[SequenceFileInputFormat[Writable, Writable]]
-    val writables = hadoopFile(path, format,
+    val writables = newAPIHadoopFile(
+        path,
+        format,
         kc.writableClass(km).asInstanceOf[Class[Writable]],
-        vc.writableClass(vm).asInstanceOf[Class[Writable]], minPartitions)
+        vc.writableClass(vm).asInstanceOf[Class[Writable]],
+        Job.getInstance().getConfiguration())
     writables.map { case (k, v) => (kc.convert(k), vc.convert(v)) }
   }
 

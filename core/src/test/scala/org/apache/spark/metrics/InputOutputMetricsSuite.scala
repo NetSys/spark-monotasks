@@ -428,9 +428,8 @@ class InputOutputMetricsSuite extends FunSuite with SharedSparkContext
   }
 
   /**
-   * TODO: This test case is ignored because the new monotasks-based interface with HDFS only
-   *       supports TextInputFormat. When the interface also supports CombineFileInputFormat,
-   *       this test case should be re-enabled.
+   * TODO: This test case is ignored because the new monotasks-based interface with HDFS does not
+   *       support CombineFileInputFormat.
    */
   ignore("input metrics with new CombineFileInputFormat") {
     val bytesRead = runAndReturnBytesRead {

@@ -39,11 +39,15 @@ import java.nio.ByteBuffer
 import java.util.UUID
 
 import org.apache.hadoop.conf.{Configurable, Configuration}
+import org.apache.hadoop.fs.{FSDataOutputStream, FileSystem}
+import org.apache.hadoop.fs.FileSystem.Statistics
 import org.apache.hadoop.io.compress.{CompressionCodec, GzipCodec}
+import org.apache.hadoop.io.SequenceFile
+import org.apache.hadoop.io.SequenceFile.{CompressionType, Writer}
 import org.apache.hadoop.mapreduce.{Job, JobContext, JobID, RecordWriter, TaskAttemptContext,
   TaskAttemptID}
 import org.apache.hadoop.mapreduce.lib.output.{FileOutputCommitter, FileOutputFormat,
-  TextOutputFormat}
+  SequenceFileOutputFormat, TextOutputFormat}
 import org.apache.hadoop.util.ReflectionUtils
 
 import org.apache.spark.{SparkEnv, TaskContext, TaskContextImpl}
@@ -178,6 +182,9 @@ trait SparkHadoopMapReduceUtil {
       hadoopOutputFormat: FileOutputFormat[_, _],
       codec: Option[CompressionCodec]): RecordWriter[Any, Any] = {
     hadoopOutputFormat match {
+      case _: SequenceFileOutputFormat[_, _] =>
+        getSequenceFileRecordWriter(byteStream, hadoopConf, hadoopTaskContext, codec)
+
       case _: TextOutputFormat[_, _] =>
         getTextFileRecordWriter(byteStream, hadoopConf, codec)
 
@@ -185,6 +192,42 @@ trait SparkHadoopMapReduceUtil {
         throw new UnsupportedOperationException("Unsupported FileOutputFormat: " +
           s"${hadoopOutputFormat.getClass().getName()}. HdfsSerializationMonotask only supports " +
           s"${classOf[TextOutputFormat[_, _]].getName()}.")
+    }
+  }
+
+  /**
+   * This method was written to replicate the functionality in
+   * SequenceFileOutputFormat.getRecordWriter(). We cannot directly use the Hadoop
+   * SequenceFileOutputFormat methods because those methods tie together serialization and writing
+   * the data to disk, which we need to separate.
+   */
+  private def getSequenceFileRecordWriter(
+      byteStream: ByteArrayOutputStreamWithZeroCopyByteBuffer,
+      hadoopConf: Configuration,
+      hadoopTaskContext: TaskAttemptContext,
+      codec: Option[CompressionCodec]): RecordWriter[Any, Any] = {
+    val statistics = new Statistics(FileSystem.get(hadoopConf).getScheme())
+    val outputStream = new FSDataOutputStream(byteStream, statistics)
+
+    val keyClass = hadoopTaskContext.getOutputKeyClass()
+    val valueClass = hadoopTaskContext.getOutputValueClass()
+    val compressionType = codec.map { _ =>
+      SequenceFileOutputFormat.getOutputCompressionType(hadoopTaskContext)
+    }.getOrElse(CompressionType.NONE)
+
+    val sequenceFileWriter = SequenceFile.createWriter(
+      hadoopConf,
+      Writer.stream(outputStream),
+      Writer.keyClass(keyClass),
+      Writer.valueClass(valueClass),
+      Writer.compression(compressionType, codec.orNull))
+
+    new RecordWriter[Any, Any]() {
+      override def write(key: Any, value: Any): Unit =
+        sequenceFileWriter.append(key, value)
+
+      override def close(hadoopTaskContext: TaskAttemptContext): Unit =
+        sequenceFileWriter.close()
     }
   }
 

@@ -1037,9 +1037,8 @@ public class JavaAPISuite implements Serializable {
   }
 
   /**
-   * TODO: This test case is ignored because the new monotasks-based interface with HDFS only
-   *       supports TextInputFormat. When the interface also supports WholeTextFileInputFormat,
-   *       this test case should be re-enabled.
+   * TODO: This test case is ignored because the new monotasks-based interface with HDFS does not
+   *       support WholeTextFileInputFormat.
    */
   @Ignore
   public void wholeTextFiles() throws Exception {
@@ -1079,14 +1078,9 @@ public class JavaAPISuite implements Serializable {
     Assert.assertEquals(expected, readRDD.collect());
   }
 
-  /**
-   * TODO: This test case is ignored because the org.apache.hadoop.mapred library is no longer
-   *       supported. This test should be re-enabled once support for the org.apache.hadoop.mapred
-   *       library has been refactored to use monotasks.
-   */
   @SuppressWarnings("unchecked")
-  @Ignore
-  public void sequenceFile() {
+  @Test
+  public void sequenceFile() throws IOException {
     String outputDir = new File(tempDir, "output").getAbsolutePath();
     List<Tuple2<Integer, String>> pairs = Arrays.asList(
       new Tuple2<Integer, String>(1, "a"),
@@ -1100,7 +1094,11 @@ public class JavaAPISuite implements Serializable {
       public Tuple2<IntWritable, Text> call(Tuple2<Integer, String> pair) {
         return new Tuple2<IntWritable, Text>(new IntWritable(pair._1()), new Text(pair._2()));
       }
-    }).saveAsHadoopFile(outputDir, IntWritable.class, Text.class, SequenceFileOutputFormat.class);
+    }).saveAsNewAPIHadoopFile(
+      outputDir,
+      IntWritable.class,
+      Text.class,
+      org.apache.hadoop.mapreduce.lib.output.SequenceFileOutputFormat.class);
 
     // Try reading the output back as an object file
     JavaPairRDD<Integer, String> readRDD = sc.sequenceFile(outputDir, IntWritable.class,
@@ -1190,13 +1188,13 @@ public class JavaAPISuite implements Serializable {
   }
 
   /**
-   * TODO: This test case is ignored because the new monotasks-based interface with HDFS only
-   *       supports TextOutputFormat. When the interface also supports SequenceFileOutputFormat,
-   *       this test case should be re-enabled.
+   * TODO: This test case is ignored because the org.apache.hadoop.mapred library is no longer
+   *       supported. This test should be re-enabled once support for the org.apache.hadoop.mapred
+   *       library has been refactored to use monotasks.
    */
   @SuppressWarnings("unchecked")
   @Ignore
-  public void writeWithNewAPIHadoopFile() {
+  public void writeWithNewHadoopApiReadWithOldHadoopApi() {
     String outputDir = new File(tempDir, "output").getAbsolutePath();
     List<Tuple2<Integer, String>> pairs = Arrays.asList(
       new Tuple2<Integer, String>(1, "a"),
@@ -1213,8 +1211,8 @@ public class JavaAPISuite implements Serializable {
     }).saveAsNewAPIHadoopFile(outputDir, IntWritable.class, Text.class,
       org.apache.hadoop.mapreduce.lib.output.SequenceFileOutputFormat.class);
 
-    JavaPairRDD<IntWritable, Text> output = sc.sequenceFile(outputDir, IntWritable.class,
-      Text.class);
+    JavaPairRDD<IntWritable, Text> output =
+      sc.hadoopFile(outputDir, SequenceFileInputFormat.class, IntWritable.class, Text.class);
     Assert.assertEquals(pairs.toString(), output.map(new Function<Tuple2<IntWritable, Text>,
       String>() {
       @Override
@@ -1225,13 +1223,13 @@ public class JavaAPISuite implements Serializable {
   }
 
   /**
-   * TODO: This test case is ignored because the new monotasks-based interface with HDFS only
-   *       supports TextInputFormat. When the interface also supports SequenceFileInputFormat,
-   *       this test case should be re-enabled.
+   * TODO: This test case is ignored because the org.apache.hadoop.mapred library is no longer
+   *       supported. This test should be re-enabled once support for the org.apache.hadoop.mapred
+   *       library has been refactored to use monotasks.
    */
   @SuppressWarnings("unchecked")
   @Ignore
-  public void readWithNewAPIHadoopFile() throws IOException {
+  public void writeWithOldHadoopApiReadWithNewHadoopApi() throws IOException {
     String outputDir = new File(tempDir, "output").getAbsolutePath();
     List<Tuple2<Integer, String>> pairs = Arrays.asList(
       new Tuple2<Integer, String>(1, "a"),
@@ -1247,9 +1245,8 @@ public class JavaAPISuite implements Serializable {
       }
     }).saveAsHadoopFile(outputDir, IntWritable.class, Text.class, SequenceFileOutputFormat.class);
 
-    JavaPairRDD<IntWritable, Text> output = sc.newAPIHadoopFile(outputDir,
-      org.apache.hadoop.mapreduce.lib.input.SequenceFileInputFormat.class, IntWritable.class,
-      Text.class, Job.getInstance().getConfiguration());
+    JavaPairRDD<IntWritable, Text> output =
+      sc.sequenceFile(outputDir,  IntWritable.class, Text.class);
     Assert.assertEquals(pairs.toString(), output.map(new Function<Tuple2<IntWritable, Text>,
       String>() {
       @Override

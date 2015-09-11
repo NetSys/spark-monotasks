@@ -100,9 +100,8 @@ class WholeTextFileRecordReaderSuite extends FunSuite with BeforeAndAfterAll {
    *   2) Whether paths are read correctly;
    *   3) Does the contents be the same.
    *
-   * TODO: This test case is ignored because the new monotasks-based interface with HDFS only
-   *       supports TextInputFormat. When the interface also supports WholeTextFileInputFormat,
-   *       this test case should be re-enabled.
+   * TODO: This test case is ignored because the new monotasks-based interface with HDFS does
+   *       not support WholeTextFileInputFormat.
    */
   ignore("Correctness of WholeTextFileRecordReader.") {
     val dir = Utils.createTempDir()

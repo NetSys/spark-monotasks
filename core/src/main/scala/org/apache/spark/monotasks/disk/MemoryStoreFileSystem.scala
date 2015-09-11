@@ -20,6 +20,7 @@ import java.io.EOFException
 import java.net.URI
 import java.nio.ByteBuffer
 
+import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs._
 import org.apache.hadoop.fs.permission.FsPermission
 import org.apache.hadoop.util.Progressable
@@ -30,11 +31,21 @@ import org.apache.spark.util.ByteBufferInputStream
 
 /**
  * This is a Hadoop FileSystem that only supports one operation: opening files by fetching blocks
- * from the BlockManager. All methods except open() are not supported and throw an
- * UnsupportedOperationException.
+ * from the BlockManager. All methods that read large amounts of data from disk are not supported,
+ * except for `open()`, which retrieves data from the BlockManager.
+ *
+ * Methods that fetch file metadata or system information delegate to `underlyingFileSystem`. Note
+ * that some such methods (`getFileStatus()` and `listStatus()` in particular) may fetch a small
+ * amount of data from disk.
  */
-class MemoryStoreFileSystem(private val blockManager: BlockManager, private val startPosition: Long)
+class MemoryStoreFileSystem(
+    private val blockManager: BlockManager,
+    private val startPosition: Long,
+    private val underlyingFileSystem: FileSystem,
+    hadoopConf: Configuration)
   extends FileSystem with Logging {
+
+  setConf(hadoopConf)
 
   override def append(f: Path, bufferSize: Int, progress: Progressable): FSDataOutputStream =
     throwError()
@@ -56,16 +67,16 @@ class MemoryStoreFileSystem(private val blockManager: BlockManager, private val 
     throwError()
 
   override def getFileStatus(f: Path): FileStatus =
-    throwError()
+    underlyingFileSystem.getFileStatus(f)
 
   override def getUri(): URI =
-    throwError()
+    underlyingFileSystem.getUri()
 
   override def getWorkingDirectory(): Path =
-    throwError()
+    underlyingFileSystem.getWorkingDirectory()
 
   override def listStatus(f: Path): Array[FileStatus] =
-    throwError()
+    underlyingFileSystem.listStatus(f)
 
   override def mkdirs(f: Path, permission: FsPermission): Boolean =
     throwError()
@@ -91,7 +102,7 @@ class MemoryStoreFileSystem(private val blockManager: BlockManager, private val 
     throwError()
 
   override def setWorkingDirectory(new_dir: Path): Unit =
-    throwError()
+    underlyingFileSystem.setWorkingDirectory(new_dir)
 
   private def throwError() =
     throw new UnsupportedOperationException(

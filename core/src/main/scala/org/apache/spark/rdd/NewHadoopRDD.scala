@@ -146,17 +146,21 @@ class NewHadoopRDD[K, V](
     }
 
     val startPosition = hadoopSplit.getStart()
-    val memoryStoreFileSystem = new MemoryStoreFileSystem(SparkEnv.get.blockManager, startPosition)
+    val path = hadoopSplit.getPath()
     val localHadoopConf = confBroadcast.value.value
-    memoryStoreFileSystem.setConf(localHadoopConf)
+    val memoryStoreFileSystem = new MemoryStoreFileSystem(
+      SparkEnv.get.blockManager,
+      startPosition,
+      path.getFileSystem(localHadoopConf),
+      localHadoopConf)
 
     val blockId = new RDDBlockId(id, sparkPartition.index)
     val serializedDataBlockId = memoryStoreHadoopPartition.serializedDataBlockId.getOrElse(
       throw new BlockException(
         blockId, s"Could not find the serialized data blockId for block $blockId."))
 
-    val memoryStorePath = new MemoryStorePath(
-      hadoopSplit.getPath().toUri(), serializedDataBlockId, memoryStoreFileSystem)
+    val memoryStorePath =
+      new MemoryStorePath(path.toUri(), serializedDataBlockId, memoryStoreFileSystem)
     val memoryStoreFileSplit =
       new FileSplit(memoryStorePath, startPosition, hadoopSplit.getLength(), null)
 

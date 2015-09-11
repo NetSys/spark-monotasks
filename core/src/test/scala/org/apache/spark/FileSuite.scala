@@ -40,8 +40,8 @@ import scala.io.Source
 import org.apache.hadoop.fs.{FileAlreadyExistsException => NewFileAlreadyExistsException}
 import org.apache.hadoop.io._
 import org.apache.hadoop.io.compress.DefaultCodec
-import org.apache.hadoop.mapred.{FileAlreadyExistsException, FileSplit, JobConf, TextInputFormat,
-  TextOutputFormat}
+import org.apache.hadoop.mapred.{FileAlreadyExistsException, FileSplit, JobConf,
+  SequenceFileInputFormat, TextInputFormat, TextOutputFormat}
 import org.apache.hadoop.mapreduce.Job
 import org.apache.hadoop.mapreduce.lib.input.{FileSplit => NewFileSplit,
   TextInputFormat => NewTextInputFormat}
@@ -279,41 +279,52 @@ class FileSuite extends FunSuite with LocalSparkContext {
   }
 
   /**
-   * TODO: This test case is ignored because the new monotasks-based interface with HDFS only
-   *       supports TextOutputFormat. When the interface also supports SequenceFileOutputFormat,
-   *       this test case should be re-enabled.
+   * TODO: This test case is ignored because the org.apache.hadoop.mapred library is no longer
+   *       supported. This test should be re-enabled once support for the org.apache.hadoop.mapred
+   *       library has been refactored to use monotasks.
    */
-  ignore("write SequenceFile using new Hadoop API") {
+  ignore("write a SequenceFile using the new Hadoop API, and read it using old Hadoop API") {
     import org.apache.hadoop.mapreduce.lib.output.SequenceFileOutputFormat
     sc = new SparkContext("local", "test")
     val outputDir = new File(tempDir, "output").getAbsolutePath
     val nums = sc.makeRDD(1 to 3).map(x => (new IntWritable(x), new Text("a" * x)))
     nums.saveAsNewAPIHadoopFile[SequenceFileOutputFormat[IntWritable, Text]](
         outputDir)
-    val output = sc.sequenceFile[IntWritable, Text](outputDir)
+    val output = sc.hadoopFile(
+      outputDir,
+      classOf[SequenceFileInputFormat[Writable, Text]],
+      classOf[IntWritable].asInstanceOf[Class[Writable]],
+      classOf[Text])
     assert(output.map(_.toString).collect().toList === List("(1,a)", "(2,aa)", "(3,aaa)"))
   }
 
   /**
-   * TODO: This test case is ignored because the new monotasks-based interface with HDFS only
-   *       supports TextInputFormat. When the interface also supports SequenceFileInputFormat,
-   *       this test case should be re-enabled.
+   * TODO: This test case is ignored because the org.apache.hadoop.mapred library is no longer
+   *       supported. This test should be re-enabled once support for the org.apache.hadoop.mapred
+   *       library has been refactored to use monotasks.
    */
-  ignore("read SequenceFile using new Hadoop API") {
-    import org.apache.hadoop.mapreduce.lib.input.SequenceFileInputFormat
+  ignore("write a SequenceFile using the old Hadoop API, and read it using new Hadoop API") {
     sc = new SparkContext("local", "test")
     val outputDir = new File(tempDir, "output").getAbsolutePath
     val nums = sc.makeRDD(1 to 3).map(x => (new IntWritable(x), new Text("a" * x)))
     nums.saveAsSequenceFile(outputDir)
-    val output =
-        sc.newAPIHadoopFile[IntWritable, Text, SequenceFileInputFormat[IntWritable, Text]](outputDir)
+    val output = sc.sequenceFile(outputDir, classOf[IntWritable], classOf[Text])
+    assert(output.map(_.toString).collect().toList === List("(1,a)", "(2,aa)", "(3,aaa)"))
+  }
+
+  test("write and read a SequenceFile using the new Hadoop API") {
+    import org.apache.hadoop.mapreduce.lib.output.SequenceFileOutputFormat
+    sc = new SparkContext("local", "test")
+    val outputDir = new File(tempDir, "output").getAbsolutePath
+    val nums = sc.makeRDD(1 to 3).map(x => (new IntWritable(x), new Text("a" * x)))
+    nums.saveAsNewAPIHadoopFile[SequenceFileOutputFormat[IntWritable, Text]](outputDir)
+    val output = sc.sequenceFile(outputDir, classOf[IntWritable], classOf[Text])
     assert(output.map(_.toString).collect().toList === List("(1,a)", "(2,aa)", "(3,aaa)"))
   }
 
   /**
-   * TODO: This test case is ignored because the new monotasks-based interface with HDFS only
-   *       supports TextInputFormat. When the interface also supports CombineFileInputFormat,
-   *       this test case should be re-enabled.
+   * TODO: This test case is ignored because the new monotasks-based interface with HDFS does not
+   *       support CombineFileInputFormat.
    */
   ignore("binary file input as byte array") {
     sc = new SparkContext("local", "test")
@@ -339,9 +350,8 @@ class FileSuite extends FunSuite with LocalSparkContext {
   }
 
   /**
-   * TODO: This test case is ignored because the new monotasks-based interface with HDFS only
-   *       supports TextInputFormat. When the interface also supports CombineFileInputFormat,
-   *       this test case should be re-enabled.
+   * TODO: This test case is ignored because the new monotasks-based interface with HDFS does not
+   *       support CombineFileInputFormat.
    */
   ignore("portabledatastream caching tests") {
     sc = new SparkContext("local", "test")
@@ -375,9 +385,8 @@ class FileSuite extends FunSuite with LocalSparkContext {
   }
 
   /**
-   * TODO: This test case is ignored because the new monotasks-based interface with HDFS only
-   *       supports TextInputFormat. When the interface also supports CombineFileInputFormat,
-   *       this test case should be re-enabled.
+   * TODO: This test case is ignored because the new monotasks-based interface with HDFS does not
+   *       support CombineFileInputFormat.
    */
   ignore("portabledatastream persist disk storage") {
     sc = new SparkContext("local", "test")
@@ -411,9 +420,8 @@ class FileSuite extends FunSuite with LocalSparkContext {
   }
 
   /**
-   * TODO: This test case is ignored because the new monotasks-based interface with HDFS only
-   *       supports TextInputFormat. When the interface also supports CombineFileInputFormat,
-   *       this test case should be re-enabled.
+   * TODO: This test case is ignored because the new monotasks-based interface with HDFS does not
+   *       support CombineFileInputFormat.
    */
   ignore("portabledatastream flatmap tests") {
     sc = new SparkContext("local", "test")
