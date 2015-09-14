@@ -284,12 +284,10 @@ class FileSuite extends FunSuite with LocalSparkContext {
    *       library has been refactored to use monotasks.
    */
   ignore("write a SequenceFile using the new Hadoop API, and read it using old Hadoop API") {
-    import org.apache.hadoop.mapreduce.lib.output.SequenceFileOutputFormat
     sc = new SparkContext("local", "test")
     val outputDir = new File(tempDir, "output").getAbsolutePath
     val nums = sc.makeRDD(1 to 3).map(x => (new IntWritable(x), new Text("a" * x)))
-    nums.saveAsNewAPIHadoopFile[SequenceFileOutputFormat[IntWritable, Text]](
-        outputDir)
+    nums.saveAsNewApiSequenceFile(outputDir)
     val output = sc.hadoopFile(
       outputDir,
       classOf[SequenceFileInputFormat[Writable, Text]],
@@ -313,11 +311,10 @@ class FileSuite extends FunSuite with LocalSparkContext {
   }
 
   test("write and read a SequenceFile using the new Hadoop API") {
-    import org.apache.hadoop.mapreduce.lib.output.SequenceFileOutputFormat
     sc = new SparkContext("local", "test")
     val outputDir = new File(tempDir, "output").getAbsolutePath
     val nums = sc.makeRDD(1 to 3).map(x => (new IntWritable(x), new Text("a" * x)))
-    nums.saveAsNewAPIHadoopFile[SequenceFileOutputFormat[IntWritable, Text]](outputDir)
+    nums.saveAsNewApiSequenceFile(outputDir)
     val output = sc.sequenceFile(outputDir, classOf[IntWritable], classOf[Text])
     assert(output.map(_.toString).collect().toList === List("(1,a)", "(2,aa)", "(3,aaa)"))
   }

@@ -22,6 +22,8 @@ import org.apache.hadoop.io.Writable
 import org.apache.hadoop.io.compress.CompressionCodec
 import org.apache.hadoop.mapred.JobConf
 import org.apache.hadoop.mapred.SequenceFileOutputFormat
+import org.apache.hadoop.mapreduce.lib.output.{
+  SequenceFileOutputFormat => NewSequenceFileOutputFormat}
 
 import org.apache.spark.Logging
 
@@ -77,7 +79,6 @@ class SequenceFileRDDFunctions[K <% Writable: ClassTag, V <% Writable : ClassTag
     c.asInstanceOf[Class[_ <: Writable]]
   }
 
-
   /**
    * Output the RDD as a Hadoop SequenceFile using the Writable types we infer from the RDD's key
    * and value types. If the key or value are Writable, then we use their classes directly;
@@ -110,6 +111,44 @@ class SequenceFileRDDFunctions[K <% Writable: ClassTag, V <% Writable : ClassTag
     } else if (convertKey && convertValue) {
       self.map(x => (anyToWritable(x._1),anyToWritable(x._2))).saveAsHadoopFile(
         path, keyWritableClass, valueWritableClass, format, jobConf, codec)
+    }
+  }
+
+  /**
+   * Output the RDD as a new API Hadoop SequenceFile using the Writable types we infer from the
+   * RDD's key and value types. If the key or value are Writable, then we use their classes
+   * directly; otherwise we map primitive types such as Int and Double to IntWritable,
+   * DoubleWritable, etc, byte arrays to BytesWritable, and Strings to Text. The `path` can be on
+   * any Hadoop-supported file system.
+   */
+  def saveAsNewApiSequenceFile(path: String): Unit = {
+    def anyToWritable[U <% Writable](u: U): Writable = u
+
+    // TODO: We cannot force the return type of `anyToWritable` be that same as keyWritableClass and
+    //       valueWritableClass at compile time. To implement that, we need to add type parameters
+    //       to SequenceFileRDDFunctions. However, SequenceFileRDDFunctions is a public class so
+    //       that would be a breaking change.
+    val convertKey = (self.keyClass != keyWritableClass)
+    val convertValue = (self.valueClass != valueWritableClass)
+
+    logInfo(s"Saving as new API sequence file of type (${keyWritableClass.getSimpleName()}, " +
+      s"${valueWritableClass.getSimpleName()})")
+    val format = classOf[NewSequenceFileOutputFormat[Writable, Writable]]
+
+    if (!convertKey && !convertValue) {
+      self.saveAsNewAPIHadoopFile(path, keyWritableClass, valueWritableClass, format)
+    } else if (!convertKey && convertValue) {
+      self.map { pair =>
+        (pair._1, anyToWritable(pair._2))
+      }.saveAsNewAPIHadoopFile(path, keyWritableClass, valueWritableClass, format)
+    } else if (convertKey && !convertValue) {
+      self.map { pair =>
+        (anyToWritable(pair._1), pair._2)
+      }.saveAsNewAPIHadoopFile(path, keyWritableClass, valueWritableClass, format)
+    } else if (convertKey && convertValue) {
+      self.map { pair =>
+        (anyToWritable(pair._1), anyToWritable(pair._2))
+      }.saveAsNewAPIHadoopFile(path, keyWritableClass, valueWritableClass, format)
     }
   }
 }
