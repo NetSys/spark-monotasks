@@ -127,14 +127,6 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
           }
         }
 
-      case UpdateFreeCores(executorId, cores) =>
-        val oldFreeCores = executorDataMap(executorId).freeCores
-        if (oldFreeCores < cores && oldFreeCores < scheduler.CPUS_PER_TASK) {
-          // Now a task can be scheduled, where it couldn't have been before.
-          makeOffers(executorId)
-        }
-        executorDataMap(executorId).freeCores = cores
-
       case ReviveOffers =>
         makeOffers()
 

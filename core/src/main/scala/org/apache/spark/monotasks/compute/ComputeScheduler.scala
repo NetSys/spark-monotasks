@@ -20,7 +20,6 @@ import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.atomic.AtomicInteger
 
 import org.apache.spark.Logging
-import org.apache.spark.executor.ExecutorBackend
 import org.apache.spark.storage.MemoryStore
 
 private[spark] sealed trait RunningTasksUpdate
@@ -29,7 +28,6 @@ private[spark] object TaskCompleted extends RunningTasksUpdate
 
 private[spark] class ComputeScheduler(
     private val threads: Int = Runtime.getRuntime.availableProcessors()) extends Logging {
-  private var executorBackend: Option[ExecutorBackend] = None
   private var memoryStore: Option[MemoryStore] = None
 
   /**
@@ -47,8 +45,7 @@ private[spark] class ComputeScheduler(
   val numRunningTasks = new AtomicInteger(0)
 
   /** This must be called before any tasks are submitted. */
-  def initialize(executorBackend: ExecutorBackend, memoryStore: MemoryStore): Unit = {
-    this.executorBackend = Some(executorBackend)
+  def initialize(memoryStore: MemoryStore): Unit = {
     this.memoryStore = Some(memoryStore)
 
     memoryStore.registerBlockRemovalCallback(handleBlockRemovedFromMemoryStore)
@@ -65,23 +62,6 @@ private[spark] class ComputeScheduler(
     }
 
     logDebug(s"Started ComputeScheduler with $threads parallel threads")
-  }
-
-  private def updateRunningTasksAndNotifyBackend(updateType: RunningTasksUpdate) {
-    val currentlyRunningTasks = updateType match {
-      case TaskStarted =>
-        numRunningTasks.incrementAndGet()
-      case TaskCompleted =>
-        numRunningTasks.decrementAndGet()
-    }
-    val freeCores =
-      threads - currentlyRunningTasks - monotaskQueue.size() - quarantineQueue.size()
-    // TODO: We may want to consider updating the driver less frequently, otherwise these messages
-    //       to the driver may become a bottleneck.
-    executorBackend.getOrElse {
-      throw new IllegalStateException(
-        "An ExecutorBackend must be set in ComputeScheduler before tasks are launched")
-    }.updateFreeCores(freeCores)
   }
 
   /**
@@ -159,9 +139,9 @@ private[spark] class ComputeScheduler(
     def run(): Unit = {
       while (true) {
         val monotask = takeMonotask()
-        updateRunningTasksAndNotifyBackend(TaskStarted)
+        numRunningTasks.incrementAndGet()
         monotask.executeAndHandleExceptions()
-        updateRunningTasksAndNotifyBackend(TaskCompleted)
+        numRunningTasks.decrementAndGet()
       }
     }
   }

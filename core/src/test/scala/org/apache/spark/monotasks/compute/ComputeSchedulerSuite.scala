@@ -22,7 +22,6 @@ import org.mockito.Mockito.{mock, never, timeout, verify}
 
 import org.scalatest.FunSuite
 
-import org.apache.spark.executor.ExecutorBackend
 import org.apache.spark.storage.{BlockManager, MemoryStore, TestBlockId}
 
 class ComputeSchedulerSuite extends FunSuite {
@@ -35,7 +34,7 @@ class ComputeSchedulerSuite extends FunSuite {
     memoryStore.cacheBytes(blockId, dummyData, false)
 
     val computeScheduler = new ComputeScheduler(threads = 1)
-    computeScheduler.initialize(mock(classOf[ExecutorBackend]), memoryStore)
+    computeScheduler.initialize(memoryStore)
 
     // Because there is no free memory, submitted monotasks shouldn't be run immediately.
     val mockComputeMonotask = mock(classOf[ComputeMonotask])

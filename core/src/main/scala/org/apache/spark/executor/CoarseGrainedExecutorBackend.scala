@@ -126,10 +126,6 @@ private[spark] class CoarseGrainedExecutorBackend(
   override def statusUpdate(taskId: Long, state: TaskState, data: ByteBuffer) {
     driver ! StatusUpdate(executorId, taskId, state, data)
   }
-
-  override def updateFreeCores(cores: Int): Unit = {
-    driver ! UpdateFreeCores(executorId, cores)
-  }
 }
 
 private[spark] object CoarseGrainedExecutorBackend extends Logging {

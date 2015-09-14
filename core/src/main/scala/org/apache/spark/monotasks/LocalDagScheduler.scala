@@ -93,7 +93,7 @@ private[spark] class LocalDagScheduler(blockFileManager: BlockFileManager)
    */
   def initialize(executorBackend: ExecutorBackend, memoryStore: MemoryStore): Unit = {
     this.executorBackend = Some(executorBackend)
-    computeScheduler.initialize(executorBackend, memoryStore)
+    computeScheduler.initialize(memoryStore)
   }
 
   def getNumRunningComputeMonotasks(): Int = {
