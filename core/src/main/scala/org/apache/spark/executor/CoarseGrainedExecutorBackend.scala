@@ -68,7 +68,12 @@ private[spark] class CoarseGrainedExecutorBackend(
   override def preStart() {
     logInfo("Connecting to driver: " + driverUrl)
     driver = context.actorSelection(driverUrl)
-    driver ! RegisterExecutor(executorId, hostPort, cores, extractLogUrls)
+    driver ! RegisterExecutor(
+      executorId,
+      hostPort,
+      cores,
+      env.localDagScheduler.getNumDisks(),
+      extractLogUrls)
     context.system.eventStream.subscribe(self, classOf[RemotingLifecycleEvent])
   }
 

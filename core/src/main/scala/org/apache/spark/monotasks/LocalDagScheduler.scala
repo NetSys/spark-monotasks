@@ -96,6 +96,11 @@ private[spark] class LocalDagScheduler(blockFileManager: BlockFileManager)
     computeScheduler.initialize(memoryStore)
   }
 
+  /** Returns the number of disks on the worker. */
+  def getNumDisks(): Int = {
+    diskScheduler.diskIds.size
+  }
+
   def getNumRunningComputeMonotasks(): Int = {
     computeScheduler.numRunningTasks.get()
   }
