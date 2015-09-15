@@ -166,7 +166,11 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
     // Make fake resource offers on all executors
     def makeOffers() {
       launchTasks(scheduler.resourceOffers(executorDataMap.map { case (id, executorData) =>
-        new WorkerOffer(id, executorData.executorHost, executorData.freeSlots)
+        new WorkerOffer(
+          id,
+          executorData.executorHost,
+          executorData.freeSlots,
+          executorData.totalDisks)
       }.toSeq))
     }
 
@@ -174,7 +178,11 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
     def makeOffers(executorId: String) {
       val executorData = executorDataMap(executorId)
       launchTasks(scheduler.resourceOffers(
-        Seq(new WorkerOffer(executorId, executorData.executorHost, executorData.freeSlots))))
+        Seq(new WorkerOffer(
+          executorId,
+          executorData.executorHost,
+          executorData.freeSlots,
+          executorData.totalDisks))))
     }
 
     // Launch tasks returned by a set of resource offers

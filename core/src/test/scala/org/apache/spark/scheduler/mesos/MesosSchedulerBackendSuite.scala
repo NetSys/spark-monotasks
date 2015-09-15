@@ -115,12 +115,14 @@ class MesosSchedulerBackendSuite extends FunSuite with LocalSparkContext with Mo
     expectedWorkerOffers.append(new WorkerOffer(
       mesosOffers.get(0).getSlaveId.getValue,
       mesosOffers.get(0).getHostname,
-      2
+      freeSlots = 2,
+      totalDisks = 0
     ))
     expectedWorkerOffers.append(new WorkerOffer(
       mesosOffers.get(2).getSlaveId.getValue,
       mesosOffers.get(2).getHostname,
-      2
+      freeSlots = 2,
+      totalDisks = 0
     ))
     val taskDesc = new TaskDescription(1L, 0, "s1", "n1", 0, ByteBuffer.wrap(new Array[Byte](0)))
     when(taskScheduler.resourceOffers(expectedWorkerOffers)).thenReturn(Seq(Seq(taskDesc)))

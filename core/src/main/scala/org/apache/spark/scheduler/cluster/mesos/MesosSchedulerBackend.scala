@@ -256,7 +256,8 @@ private[spark] class MesosSchedulerBackend(
         new WorkerOffer(
           o.getSlaveId.getValue,
           o.getHostname,
-          cpus)
+          cpus,
+          totalDisks = 0)
       }
 
       val slaveIdToOffer = usableOffers.map(o => o.getSlaveId.getValue -> o).toMap

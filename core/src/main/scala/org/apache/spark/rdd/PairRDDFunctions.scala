@@ -1035,6 +1035,8 @@ class PairRDDFunctions[K, V](self: RDD[(K, V)])
     val jobCommitter = driverHadoopTaskObjects.fileOutputCommitter
     jobCommitter.setupJob(driverHadoopTaskContext)
 
+    self.markToBeSavedToHdfs()
+
     try {
       self.context.runJob(self, writeToFile)
     } catch {
@@ -1043,6 +1045,7 @@ class PairRDDFunctions[K, V](self: RDD[(K, V)])
         throw e
     }
 
+    self.clearHdfsMark()
     jobCommitter.commitJob(driverHadoopTaskContext)
   }
 
@@ -1116,7 +1119,9 @@ class PairRDDFunctions[K, V](self: RDD[(K, V)])
       outputMetrics.setRecordsWritten(recordsWritten)
     }
 
+    self.markToBeSavedToHdfs()
     self.context.runJob(self, writeToFile)
+    self.clearHdfsMark()
     writer.commitJob()
   }
 

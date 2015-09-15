@@ -44,7 +44,9 @@ private[spark] class TaskSet(
     val stageId: Int,
     val attempt: Int,
     val priority: Int,
-    val properties: Properties) {
+    val properties: Properties,
+    val usesDisk: Boolean = true,
+    val usesNetwork: Boolean = true) {
     val id: String = stageId + "." + attempt
 
   override def toString: String = "TaskSet " + id

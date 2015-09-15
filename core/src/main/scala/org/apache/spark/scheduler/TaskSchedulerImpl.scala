@@ -229,7 +229,19 @@ private[spark] class TaskSchedulerImpl(
     for (i <- 0 until shuffledOffers.size) {
       val execId = shuffledOffers(i).executorId
       val host = shuffledOffers(i).host
-      if (availableSlots(i) >= CPUS_PER_TASK) {
+
+      // Compute how many of the available slots can be used. This code assumes only a single task
+      // set is scheduled at a time.  The idea here is that the number of available slots assumes
+      // that a macrotask is going to use all resources on the machine; if the macrotasks for the
+      // job don't use some resources, then the machine should be assigned fewer tasks (because it
+      // can run fewer monotasks concrrently).
+      val usableSlots = {
+        val unusableDiskSlots = if (taskSet.taskSet.usesDisk) 0 else shuffledOffers(i).totalDisks
+        val unusableNetworkSlots = if (taskSet.taskSet.usesNetwork) 0 else 1
+        availableSlots(i) - unusableDiskSlots - unusableNetworkSlots
+      }
+
+      if (usableSlots >= CPUS_PER_TASK) {
         try {
           for (task <- taskSet.resourceOffer(execId, host, maxLocality)) {
             tasks(i) += task

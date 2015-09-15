@@ -86,7 +86,9 @@ case class InsertIntoHiveTable(
     log.debug("Saving as hadoop file of type " + valueClass.getSimpleName)
 
     writerContainer.driverSideSetup()
+    rdd.markToBeSavedToHdfs()
     sc.sparkContext.runJob(rdd, writeToFile _)
+    rdd.clearHdfsMark()
     writerContainer.commitJob()
 
     // Note that this function is executed on executor side

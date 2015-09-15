@@ -170,6 +170,21 @@ abstract class RDD[T: ClassTag](
    */
   private val cachedPartitionBlockIds = new HashMap[Partition, BlockId]()
 
+  /**
+   * Whether the RDD is going to be saved to HDFS in the next job that runs. Used by the scheduler
+   * to determine whether the job that computes this RDD will use disk.
+   */
+  protected var willBeSavedToHdfs = false
+
+  /** Marks that this RDD will be saved to HDFS in the next job to be run. */
+  private[spark] def markToBeSavedToHdfs(): Unit = willBeSavedToHdfs = true
+
+  /** Clears the mark saying that this RDD will be saved to HDFS in the next job. */
+  private[spark] def clearHdfsMark(): Unit = willBeSavedToHdfs = false
+
+  /** Returns whether this RDD will be saved to HDFS in the next job. */
+  private[spark] def getWillBeSavedToHdfs: Boolean = willBeSavedToHdfs
+
   /** A friendly name for this RDD */
   @transient var name: String = null
 
