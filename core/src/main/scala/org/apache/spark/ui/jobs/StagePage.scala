@@ -173,6 +173,10 @@ private[ui] class StagePage(parent: StagesTab) extends WebUIPage("stage") {
                 </span>
               </li>
               <li>
+                <input type="checkbox" name={TaskDetailsClassNames.DISK_UTILIZATION}/>
+                <span class="additional-metric-title">Disk Utilization</span>
+              </li>
+              <li>
                 <input type="checkbox" name={TaskDetailsClassNames.NETWORK_UTILIZATION}/>
                 <span class="additional-metric-title">Network Utilization</span>
               </li>
@@ -216,6 +220,7 @@ private[ui] class StagePage(parent: StagesTab) extends WebUIPage("stage") {
           Nil
         }} ++
         Seq(("CPU Utilization", TaskDetailsClassNames.CPU_UTILIZATION),
+          ("Disk Utilization", TaskDetailsClassNames.DISK_UTILIZATION),
           ("Network Utilization", TaskDetailsClassNames.NETWORK_UTILIZATION)) ++
         Seq(("Errors", ""))
 
@@ -534,6 +539,15 @@ private[ui] class StagePage(parent: StagesTab) extends WebUIPage("stage") {
         m => m.totalSystemUtilization + m.totalUserUtilization)
       val cpuUtilization = maybeCpuUtilization.map(m => f"$m%.2f").getOrElse("")
 
+      val diskUtilization = metrics.flatMap(
+        _.diskUtilization).map(_.deviceNameToUtilization).getOrElse(List())
+      val diskUtilizationReadable = diskUtilization.map {
+        case (deviceName, blockDeviceUtilization) => f"${deviceName}%s: " +
+          f"${blockDeviceUtilization.diskUtilization * 100}%.1f%% " +
+          f"(R: ${Utils.bytesToString(blockDeviceUtilization.readThroughput.toLong)}/s, " +
+          f"W: ${Utils.bytesToString(blockDeviceUtilization.writeThroughput.toLong)}/s)"
+      }.mkString("<br/>")
+
       val maybeNetworkBytesRead = metrics.flatMap(_.networkUtilization).map(
         _.bytesReceivedPerSecond)
       val networkBytesReadReadable = maybeNetworkBytesRead.map(
@@ -628,6 +642,9 @@ private[ui] class StagePage(parent: StagesTab) extends WebUIPage("stage") {
         }}
         <td class={TaskDetailsClassNames.CPU_UTILIZATION}>
           {cpuUtilization}
+        </td>
+        <td class={TaskDetailsClassNames.DISK_UTILIZATION}>
+          {Unparsed(diskUtilizationReadable)}
         </td>
         <td class={TaskDetailsClassNames.NETWORK_UTILIZATION}>
           {networkBytesReadReadable + " , " + networkBytesTransmittedReadable}

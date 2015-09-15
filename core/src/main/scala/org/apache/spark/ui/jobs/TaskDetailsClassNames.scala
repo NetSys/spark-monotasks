@@ -32,5 +32,6 @@ private[spark] object TaskDetailsClassNames {
   val RESULT_SERIALIZATION_TIME = "serialization_time"
   val GETTING_RESULT_TIME = "getting_result_time"
   val CPU_UTILIZATION = "cpu_utilization"
+  val DISK_UTILIZATION = "disk_utilization"
   val NETWORK_UTILIZATION = "network_utilization"
 }
