@@ -25,7 +25,7 @@ import org.scalatest.{BeforeAndAfter, FunSuite}
 import org.apache.spark.{LocalSparkContext, SparkConf, SparkContext, SparkEnv, TaskContextImpl}
 import org.apache.spark.executor.ExecutorBackend
 import org.apache.spark.monotasks.disk.{DiskReadMonotask, DiskRemoveMonotask,
-  DiskWriteMonotask}
+  SingleBlockDiskWriteMonotask}
 import org.apache.spark.rdd.RDD
 import org.apache.spark.serializer.JavaSerializer
 import org.apache.spark.storage._
@@ -86,7 +86,8 @@ class LocalDagSchedulerIntegrationSuite extends FunSuite with BeforeAndAfter
       blockManager.cacheBytes(
         serializedDataBlockId, dataBuffer, StorageLevel.MEMORY_ONLY_SER, false)
       val blockId = new TestBlockId(i.toString)
-      val diskWriteMonotask = new DiskWriteMonotask(taskContext, blockId, serializedDataBlockId)
+      val diskWriteMonotask =
+        new SingleBlockDiskWriteMonotask(taskContext, blockId, serializedDataBlockId)
       writeResultMonotask.addDependency(diskWriteMonotask)
       diskWriteMonotask
     }

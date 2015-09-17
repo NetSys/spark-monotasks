@@ -17,6 +17,7 @@
 package org.apache.spark.shuffle.memory
 
 import java.io.OutputStream
+import java.nio.ByteBuffer
 
 import org.apache.spark.{ShuffleDependency, SparkEnv, TaskContext}
 import org.apache.spark.executor.ShuffleWriteMetrics
@@ -126,6 +127,15 @@ private[spark] class SerializedObjectWriter(
           tellMaster = false)
         return result.map(_._2.memSize).sum
       }
+    } else if (saveToBlockManager) {
+      // Put an empty ByteBuffer in the block manager so that the existence of the block is still
+      // tracked in the BlockManager.
+      // TODO: Avoid putting empty blocks in the MemoryStore.
+      blockManager.cacheBytes(
+        blockId,
+        ByteBuffer.allocate(0),
+        StorageLevel.MEMORY_ONLY_SER,
+        tellMaster = false)
     }
     return 0
   }

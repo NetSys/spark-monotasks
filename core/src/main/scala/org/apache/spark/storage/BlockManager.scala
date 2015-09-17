@@ -914,7 +914,11 @@ private[spark] class BlockManager(
    * Updates the specified block's BlockInfo object to reflect that the block is now stored on a
    * particular disk.
    */
-  def updateBlockInfoOnWrite(blockId: BlockId, diskId: String, size: Long): Unit = {
+  def updateBlockInfoOnWrite(
+      blockId: BlockId,
+      diskId: String,
+      size: Long,
+      tellMaster: Boolean = true): Unit = {
     blockInfo.get(blockId) match {
       case Some(info) => {
         // Prevent another thread from accessing info until the master has been updated.
@@ -928,7 +932,7 @@ private[spark] class BlockManager(
       }
 
       case None => {
-        val newInfo = new BlockInfo(false, true, Some(diskId))
+        val newInfo = new BlockInfo(deserialized = false, tellMaster, Some(diskId))
         // Prevent another thread from accessing newInfo until the master has been updated.
         newInfo.synchronized {
           newInfo.markReady(size)

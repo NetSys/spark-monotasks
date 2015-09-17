@@ -31,7 +31,7 @@ import org.apache.spark.storage.{BlockFileManager, BlockId, BlockManager, BlockS
   MonotaskResultBlockId, TestBlockId}
 import org.apache.spark.util.Utils
 
-class DiskWriteMonotaskSuite extends FunSuite with BeforeAndAfter {
+class SingleBlockDiskWriteMonotaskSuite extends FunSuite with BeforeAndAfter {
 
   private var blockManager: BlockManager = _
   private var taskContext: TaskContextImpl = _
@@ -78,27 +78,30 @@ class DiskWriteMonotaskSuite extends FunSuite with BeforeAndAfter {
   }
 
   test("execute: throws an exception if diskId is empty") {
-    verifyIllegalStateException(new DiskWriteMonotask(
+    verifyIllegalStateException(new SingleBlockDiskWriteMonotask(
       taskContext, mock(classOf[BlockId]), serializedDataBlockId))
   }
 
   test("execute: throws an exception if the BlockFileManager cannot provide the correct file") {
     when(blockFileManager.getBlockFile(any(), any())).thenReturn(None)
-    val monotask = new DiskWriteMonotask(taskContext, mock(classOf[BlockId]), serializedDataBlockId)
+    val monotask =
+      new SingleBlockDiskWriteMonotask(taskContext, mock(classOf[BlockId]), serializedDataBlockId)
     monotask.diskId = Some("diskId")
     verifyIllegalStateException(monotask)
   }
 
   test("execute: throws an exception if the serialized data cannot be found in the BlockManager") {
     when(blockManager.getLocalBytes(any())).thenReturn(None)
-    val monotask = new DiskWriteMonotask(taskContext, mock(classOf[BlockId]), serializedDataBlockId)
+    val monotask =
+      new SingleBlockDiskWriteMonotask(taskContext, mock(classOf[BlockId]), serializedDataBlockId)
     monotask.diskId = Some("diskId")
     verifyIllegalStateException(monotask)
   }
 
   test("execute: writes correct data") {
     val blockId = new TestBlockId("0")
-    val monotask = new DiskWriteMonotask(taskContext, blockId, serializedDataBlockId)
+    val monotask =
+      new SingleBlockDiskWriteMonotask(taskContext, blockId, serializedDataBlockId)
     val diskId = "diskId"
     monotask.diskId = Some(diskId)
 
@@ -128,7 +131,7 @@ class DiskWriteMonotaskSuite extends FunSuite with BeforeAndAfter {
     when(blockFileManager.getBlockFile(any(), any())).thenReturn(Some(createTestFile()))
 
     val blockId = new TestBlockId("0")
-    val monotask = new DiskWriteMonotask(taskContext, blockId, serializedDataBlockId)
+    val monotask = new SingleBlockDiskWriteMonotask(taskContext, blockId, serializedDataBlockId)
     val diskId = "diskId"
     monotask.diskId = Some(diskId)
 
@@ -140,7 +143,8 @@ class DiskWriteMonotaskSuite extends FunSuite with BeforeAndAfter {
     // Do this here instead of in before() so that every block is given a different file.
     when(blockFileManager.getBlockFile(any(), any())).thenReturn(Some(createTestFile()))
 
-    val monotask = new DiskWriteMonotask(taskContext, new TestBlockId("0"), serializedDataBlockId)
+    val monotask =
+      new SingleBlockDiskWriteMonotask(taskContext, new TestBlockId("0"), serializedDataBlockId)
     monotask.diskId = Some("diskId")
 
     monotask.execute()

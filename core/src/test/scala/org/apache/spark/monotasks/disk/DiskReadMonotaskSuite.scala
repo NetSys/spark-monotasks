@@ -80,7 +80,7 @@ class DiskReadMonotaskSuite extends FunSuite with BeforeAndAfter {
     val blockId = new TestBlockId("0")
     // Write a block to verify that it can be read back correctly.
     val writeMonotask =
-      new DiskWriteMonotask(taskContext, blockId, serializedDataBlockId)
+      new SingleBlockDiskWriteMonotask(taskContext, blockId, serializedDataBlockId)
     val diskId = "diskId"
     writeMonotask.diskId = Some(diskId)
 

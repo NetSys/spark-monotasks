@@ -53,7 +53,7 @@ import org.apache.spark.annotation.{DeveloperApi, Experimental}
 import org.apache.spark.api.java.JavaRDD
 import org.apache.spark.monotasks.Monotask
 import org.apache.spark.monotasks.compute.{RddComputeMonotask, SerializationMonotask}
-import org.apache.spark.monotasks.disk.DiskWriteMonotask
+import org.apache.spark.monotasks.disk.SingleBlockDiskWriteMonotask
 import org.apache.spark.partial.BoundedDouble
 import org.apache.spark.partial.CountEvaluator
 import org.apache.spark.partial.GroupedCountEvaluator
@@ -428,7 +428,7 @@ abstract class RDD[T: ClassTag](
       val serializationMonotask =
         new SerializationMonotask(context, rddComputeMonotask.getResultBlockId())
       serializationMonotask.addDependency(rddComputeMonotask)
-      val diskWriteMonotask = new DiskWriteMonotask(
+      val diskWriteMonotask = new SingleBlockDiskWriteMonotask(
         context, blockId, serializationMonotask.getResultBlockId())
       diskWriteMonotask.addDependency(serializationMonotask)
 

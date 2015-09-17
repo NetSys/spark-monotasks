@@ -25,13 +25,13 @@ import org.apache.spark.{Partition, ShuffleDependency, SparkEnv, TaskContextImpl
 import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.monotasks.Monotask
 import org.apache.spark.monotasks.compute.ShuffleMapMonotask
-import org.apache.spark.monotasks.disk.DiskWriteMonotask
+import org.apache.spark.monotasks.disk.MultipleBlockDiskWriteMonotask
 import org.apache.spark.rdd.RDD
+import org.apache.spark.storage.ShuffleBlockId
 
 /**
- * Describes a group of monotasks that will divides the elements of an RDD into multiple buckets
- * (based on a partitioner specified in the ShuffleDependency) and stores the result in the
- * BlockManager.
+ * Describes a group of monotasks that will divide the elements of an RDD into multiple buckets
+ * (based on a partitioner specified in the ShuffleDependency) and stores the result on disk.
  */
 private[spark] class ShuffleMapMacrotask(
     stageId: Int,
@@ -56,21 +56,18 @@ private[spark] class ShuffleMapMacrotask(
       ByteBuffer.wrap(taskBinary.value), SparkEnv.get.dependencyManager.replClassLoader)
     val shuffleMapMonotask = new ShuffleMapMonotask(context, rdd, partition, dep)
 
-    // Create one disk write monotask to write each shuffle block.
-    val diskWriteMonotasks = shuffleMapMonotask.getResultBlockIds().map { shuffleBlockId =>
-      // Use the same block id for the in-memory as on-disk data! Because later, we may actually
-      // want to just leave some of the data in-memory.
-      val diskWriteMonotask = new DiskWriteMonotask(context, shuffleBlockId, shuffleBlockId)
-      diskWriteMonotask.addDependency(shuffleMapMonotask)
-      diskWriteMonotask
-    }
+    // Create one disk write monotask that will write all of the shuffle blocks.
+    val blockId = ShuffleBlockId(dep.shuffleId, partition.index, 0)
+    val diskWriteMonotask =
+      new MultipleBlockDiskWriteMonotask(context, blockId, shuffleMapMonotask.getResultBlockIds())
+    diskWriteMonotask.addDependency(shuffleMapMonotask)
 
     // Create the monotasks that will generate the RDD to be shuffled.
     val rddMonotasks = rdd.buildDag(
       partition, dependencyIdToPartitions, context, shuffleMapMonotask)
 
     // Create a monotask to serialize the result and return all of the monotasks we've created.
-    val allMonotasks = Seq(shuffleMapMonotask) ++ rddMonotasks ++ diskWriteMonotasks
+    val allMonotasks = Seq(shuffleMapMonotask, diskWriteMonotask) ++ rddMonotasks
     addResultSerializationMonotask(context, shuffleMapMonotask.getResultBlockId(), allMonotasks)
   }
 }

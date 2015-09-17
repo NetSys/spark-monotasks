@@ -16,31 +16,15 @@
 
 package org.apache.spark.monotasks.disk
 
-import java.io.{File, FileOutputStream}
-import java.nio.ByteBuffer
+import java.io.FileOutputStream
+import java.nio.channels.FileChannel
 
-import org.apache.spark.{Logging, TaskContextImpl}
+import org.apache.spark.TaskContextImpl
 import org.apache.spark.storage.{BlockId, ShuffleBlockId}
-import org.apache.spark.util.Utils
 
-/**
- * Contains the logic and parameters necessary to write a single block to a single disk.
- *
- * A DiskWriteMonotask retrieves the block specified by serializedDataBlockId from the BlockManager
- * and writes it to disk. If the write was successful, the DiskWriteMonotask updates the
- * BlockManager's metadata using the blockId parameter. This separation of functionality between
- * the two provided BlockIds allows a DiskWriteMonotask to fetch the serialized version of a block
- * that was stored in the BlockManager by a SerializationMonotask using a MonotaskResultBlockId and
- * then write that block to disk and update the BlockManager using the block's true BlockId.
- *
- * After the block has been written to disk, the DiskWriteMonotask will delete the block specified
- * by serializedDataBlockId from the MemoryStore.
- */
-private[spark] class DiskWriteMonotask(
-    context: TaskContextImpl,
-    blockId: BlockId,
-    val serializedDataBlockId: BlockId)
-  extends DiskMonotask(context, blockId) with Logging {
+/** Handles writing one or more blocks of data to a single disk. */
+private[spark] abstract class DiskWriteMonotask(context: TaskContextImpl, blockId: BlockId)
+  extends DiskMonotask(context, blockId) {
 
   // Identifies the disk on which this DiskWriteMonotask will operate. Set by the DiskScheduler.
   var diskId: Option[String] = None
@@ -53,50 +37,36 @@ private[spark] class DiskWriteMonotask(
     val file = blockFileManager.getBlockFile(blockId, rawDiskId).getOrElse(
       throw new IllegalStateException(s"Writing block $blockId to disk $rawDiskId failed " +
         "because the BlockFileManager could not provide the appropriate file."))
-    val data = blockManager.getLocalBytes(serializedDataBlockId).getOrElse(
-      throw new IllegalStateException(s"Writing block $blockId to disk $rawDiskId failed " +
-        s"because the block's serialized bytes (block $serializedDataBlockId) could not be found " +
-        "in memory."))
-    putBytes(file, data)
-    blockManager.updateBlockInfoOnWrite(blockId, rawDiskId, data.limit())
 
-    // Add the block that was written to TaskMetrics.updatedBlocks if it wasn't a shuffle block
-    // (the driver doesn't need to know about shuffle blocks written to disk).
-    blockId match {
-      case _: ShuffleBlockId =>
-        // Do nothing.
-
-      case _ =>
-        val metrics = context.taskMetrics
-        val oldUpdatedBlocks = metrics.updatedBlocks.getOrElse(Seq.empty)
-        val status = blockManager.getStatus(blockId).getOrElse(
-          throw new IllegalStateException(
-            s"The BlockManager does not know about block $blockId after it was written to disk."))
-        metrics.updatedBlocks = Some(oldUpdatedBlocks ++ Seq((blockId, status)))
-    }
-  }
-
-  private def putBytes(file: File, data: ByteBuffer): Unit = {
-    logDebug(s"Attempting to write block $blockId to disk $diskId")
-    // Copy the ByteBuffer that we are given so that the code that created the ByteBuffer can
-    // continue using it. This only copies the metadata, not the buffer contents.
-    val dataCopy = data.duplicate()
     val stream = new FileOutputStream(file)
     val channel = stream.getChannel()
     try {
-      val startTimeMillis = System.currentTimeMillis()
-
-      while (dataCopy.hasRemaining()) {
-        channel.write(dataCopy)
-      }
+      writeData(rawDiskId, channel)
       channel.force(true)
-
-      val endTimeMillis = System.currentTimeMillis()
-      logDebug(s"Block ${file.getName()} stored as ${Utils.bytesToString(dataCopy.limit)} file " +
-        s"(${file.getAbsolutePath()}) on disk $diskId in ${endTimeMillis - startTimeMillis} ms.")
     } finally {
       channel.close()
       stream.close()
     }
+
+    // Add the block that was written to TaskMetrics.updatedBlocks if it wasn't a shuffle block
+    // (the driver doesn't need to know about shuffle blocks written to disk).
+    if (!blockId.isInstanceOf[ShuffleBlockId]) {
+      recordUpdatedBlocksInTaskMetrics(blockId)
+    }
   }
+
+  private def recordUpdatedBlocksInTaskMetrics(blockId: BlockId): Unit = {
+    val metrics = context.taskMetrics
+    val oldUpdatedBlocks = metrics.updatedBlocks.getOrElse(Seq.empty)
+    val status = blockManager.getStatus(blockId).getOrElse(
+      throw new IllegalStateException(
+        s"The BlockManager does not know about block $blockId after it was written to disk."))
+    metrics.updatedBlocks = Some(oldUpdatedBlocks ++ Seq((blockId, status)))
+  }
+
+  /**
+   * Writes the data described by this monotask to the given file on the given disk. This method
+   * is not responsible for closing the channel or forcing it to disk.
+   */
+  def writeData(diskId: String, channel: FileChannel): Unit
 }

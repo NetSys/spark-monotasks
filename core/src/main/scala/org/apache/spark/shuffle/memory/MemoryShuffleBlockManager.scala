@@ -24,7 +24,7 @@ import scala.collection.JavaConversions._
 import org.apache.spark.{Logging, SparkConf, SparkEnv}
 import org.apache.spark.network.buffer.{ManagedBuffer, NioManagedBuffer}
 import org.apache.spark.shuffle.ShuffleBlockManager
-import org.apache.spark.storage.{BlockNotFoundException, ShuffleBlockId}
+import org.apache.spark.storage.{BlockNotFoundException, ShuffleBlockId, ShuffleIndexBlockId}
 import org.apache.spark.util.{MetadataCleaner, MetadataCleanerType, TimeStampedHashMap}
 
 /**
@@ -75,9 +75,10 @@ private[spark] class MemoryShuffleBlockManager(conf: SparkConf)
   private def removeShuffleBlocks(shuffleId: ShuffleId): Boolean = {
     shuffleIdToState.get(shuffleId) match {
       case Some(state) =>
-        for (mapId <- state.completedMapTasks; reduceId <- 0 until state.numBuckets) {
-          val blockId = ShuffleBlockId(shuffleId, mapId, reduceId)
-          blockManager.removeBlock(blockId, tellMaster = false)
+        for (mapId <- state.completedMapTasks) {
+          // Remove both the data block and the index file.
+          blockManager.removeBlock(ShuffleBlockId(shuffleId, mapId, 0), tellMaster = false)
+          blockManager.removeBlock(ShuffleIndexBlockId(shuffleId, mapId, 0), tellMaster = false)
         }
         logInfo(s"Deleted all files for shuffle $shuffleId")
         true

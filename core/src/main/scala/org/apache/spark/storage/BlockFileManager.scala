@@ -45,13 +45,16 @@ import org.apache.spark.executor.ExecutorExitCode
 import org.apache.spark.util.Utils
 
 /**
- * Creates and maintains the mapping between logical blocks and physical on-disk locations. One
- * block is mapped to one file with a name given by its BlockId. Block files are divided among the
- * directories listed in spark.local.dir (or in SPARK_LOCAL_DIRS, if it is set), which will be
- * referred to as top-level directories. We assume that each top-level directory resides on a
- * separate physical disk; violating this assumption will hurt performance. While the
- * BlockFileManager keeps track of the top-level directories, it does not actually decide which
- * top-level directory a block maps to. That task is the responsibility of whoever uses the
+ * Creates and maintains the mapping between logical blocks and physical on-disk locations
+ *
+ * Typically, one block is mapped to one file with a name given by its BlockId. For shuffle blocks,
+ * all blocks for the same shuffle and for the same map task are saved to a single file.
+ *
+ * Block files are divided among the directories listed in spark.local.dir (or in SPARK_LOCAL_DIRS,
+ * if it is set), which will be referred to as top-level directories. We assume that each top-level
+ * directory resides on a separate physical disk; violating this assumption will hurt performance.
+ * While the BlockFileManager keeps track of the top-level directories, it does not actually decide
+ * which top-level directory a block maps to. That task is the responsibility of whoever uses the
  * BlockFileManager. In order to avoid creating large inodes, the BlockFileManager creates a number
  * of sub-directories in each top-level directory and, given a top-level directory, has the
  * responsibility of managing where a block is located its sub-directory structure.
@@ -104,7 +107,17 @@ private[spark] class BlockFileManager(conf: SparkConf) extends Logging {
     Some(new File(subDir, filename))
   }
 
-  def getBlockFile(blockId: BlockId, diskId: String): Option[File] = getFile(blockId.name, diskId)
+  def getBlockFile(blockId: BlockId, diskId: String): Option[File] = {
+    val filename = blockId match {
+      case ShuffleBlockId(shuffleId, mapId, reduceId) =>
+        // All shuffle blocks for a map task in a given shuffle are stored in the same file.
+        ShuffleBlockId(shuffleId, mapId, 0).name
+
+      case _ =>
+        blockId.name
+    }
+    getFile(filename, diskId)
+  }
 
   /** Checks if a file for the specified block exists on the specified disk. */
   def contains(blockId: BlockId, diskId: Option[String]): Boolean =

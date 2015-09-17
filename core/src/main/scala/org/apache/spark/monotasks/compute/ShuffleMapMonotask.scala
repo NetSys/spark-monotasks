@@ -16,10 +16,7 @@
 
 package org.apache.spark.monotasks.compute
 
-import scala.collection.mutable.HashSet
-
 import org.apache.spark.{Partition, ShuffleDependency, SparkEnv, TaskContextImpl}
-import org.apache.spark.monotasks.disk.DiskWriteMonotask
 import org.apache.spark.rdd.RDD
 import org.apache.spark.scheduler.MapStatus
 import org.apache.spark.storage.BlockId
@@ -57,39 +54,7 @@ private[spark] class ShuffleMapMonotask[T](
         }
         throw e
     }
-    removeDiskWriteMonotasksForEmptyBlocks(mapStatus)
     mapStatus
-  }
-
-    /**
-     * Remove any DiskWriteMonotasks that correspond to empty shuffle blocks (these empty blocks
-     * will not have been stored in the block manager, since they are empty).
-     */
-  private def removeDiskWriteMonotasksForEmptyBlocks(mapStatus: MapStatus): Unit = {
-    val zeroSizedBlockIds = new HashSet[BlockId]
-    resultBlockIds = resultBlockIds.zipWithIndex.flatMap { pair =>
-      val blockId = pair._1
-      if (mapStatus.getSizeForBlock(pair._2) > 0) {
-        Some(blockId)
-      } else {
-        zeroSizedBlockIds += blockId
-        None
-      }
-    }
-
-    // Eliminate the disk monotasks corresponding to zero-sized blocks from dependents.
-    val monotasksToRemove = dependents.filter { dependent =>
-      dependent match {
-        case diskWriteMonotask: DiskWriteMonotask =>
-          zeroSizedBlockIds.contains(diskWriteMonotask.serializedDataBlockId)
-        case _ =>
-          false
-      }
-    }
-    monotasksToRemove.foreach { monotaskToRemove =>
-      monotaskToRemove.dependencies.foreach(_.dependents -= monotaskToRemove)
-      monotaskToRemove.dependents.foreach(_.dependencies -= monotaskToRemove)
-    }
   }
 
   /**
