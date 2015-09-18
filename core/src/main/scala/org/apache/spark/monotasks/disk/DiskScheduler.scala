@@ -21,9 +21,10 @@ import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.atomic.AtomicInteger
 
 import scala.collection.mutable.HashMap
+import scala.util.control.NonFatal
 
 import org.apache.spark.{Logging, SparkEnv, SparkException}
-import org.apache.spark.monotasks.TaskSuccess
+import org.apache.spark.monotasks.{SubmitMonotask, TaskSuccess}
 import org.apache.spark.storage.BlockFileManager
 import org.apache.spark.util.{SparkUncaughtExceptionHandler, Utils}
 
@@ -44,9 +45,16 @@ private[spark] class DiskScheduler(blockFileManager: BlockFileManager) extends L
   val diskIds = blockFileManager.localDirs.keySet.toArray
   // An index into diskIds indicating which disk to use for the next write task.
   private var nextDisk = 0
+  /**
+   * Queue of HdfsWriteMonotasks that have been submitted to the scheduler but haven't yet been
+   * submitted to a disk thread, because we first need to determine which disk the monotask will
+   * access.
+   */
+  private val hdfsWriteMonotaskQueue = new LinkedBlockingQueue[HdfsWriteMonotask]()
 
   addShutdownHook()
   buildDiskAccessors()
+  launchHdfsWriteMonotaskSubmitterThread()
 
   /**
    * Builds a DiskAccessor object for each disk identifier, and starts a thread for each new
@@ -65,6 +73,36 @@ private[spark] class DiskScheduler(blockFileManager: BlockFileManager) extends L
   }
 
   /**
+   * Launches a daemon thread responsible for determining which disk HdfsWriteMonotasks should run
+   * on. This is done in a separate thread, rather than in the scheduler's main thread, because it
+   * requires writing a small amount of data to disk, so it takes a non-trivial amount of time.
+   *
+   * This small write may interfere with disk monotasks that are currently running; we can't avoid
+   * this because we don't know what disk these monotasks will run on until we've written a small
+   * amount of data.  To mitigate the effect of this, we don't sync these writes to disk, so they
+   * should typically remain in the buffer cache.
+   */
+  private def launchHdfsWriteMonotaskSubmitterThread(): Unit = {
+    val submitter = new Thread(new Runnable() {
+      override def run(): Unit = {
+        while (true) {
+          val hdfsWriteMonotask = hdfsWriteMonotaskQueue.take()
+
+          try {
+            hdfsWriteMonotask.initialize()
+            addToDiskQueue(hdfsWriteMonotask, hdfsWriteMonotask.chooseLocalDir(diskIds))
+          } catch {
+            case NonFatal(e) => hdfsWriteMonotask.handleException(e)
+          }
+        }
+      }
+    })
+    submitter.setDaemon(true)
+    submitter.setName("HdfsWriteMonotask submitter")
+    submitter.start()
+  }
+
+  /**
    * Returns a mapping of disk identifier to the number of running and queued disk monotasks on
    * that disk.
    */
@@ -79,7 +117,7 @@ private[spark] class DiskScheduler(blockFileManager: BlockFileManager) extends L
    * Looks up the disk on which the provided DiskMonotask will operate, and adds it to that disk's
    * task queue.
    */
-  def submitTask(task: DiskMonotask) {
+  def submitTask(task: DiskMonotask): Unit = {
     // Extract the identifier of the disk on which this task will operate.
     val diskId = task match {
       case write: DiskWriteMonotask =>
@@ -94,6 +132,10 @@ private[spark] class DiskScheduler(blockFileManager: BlockFileManager) extends L
       case remove: DiskRemoveMonotask =>
         remove.diskId
 
+      case hdfsWrite: HdfsWriteMonotask =>
+        hdfsWriteMonotaskQueue.put(hdfsWrite)
+        return
+
       case hdfs: HdfsDiskMonotask =>
         hdfs.chooseLocalDir(diskIds)
 
@@ -103,13 +145,16 @@ private[spark] class DiskScheduler(blockFileManager: BlockFileManager) extends L
         task.handleException(exception)
         return
     }
+    addToDiskQueue(task, diskId)
+  }
+
+  private def addToDiskQueue(monotask: DiskMonotask, diskId: String): Unit = {
     if (diskIds.contains(diskId)) {
-      diskAccessors(diskId).submitMonotask(task)
+      diskAccessors(diskId).submitMonotask(monotask)
     } else {
-      val exception = new SparkException(s"DiskMonotask $task (id: ${task.taskId}) has an " +
-        s"invalid diskId: $diskId. Valid diskIds are: ${diskIds.mkString(", ")}")
-      task.handleException(exception)
-      return
+      val exception = new SparkException(s"DiskMonotask $monotask (id: ${monotask.taskId}) has " +
+        s"an invalid diskId: $diskId. Valid diskIds are: ${diskIds.mkString(", ")}")
+      monotask.handleException(exception)
     }
   }
 

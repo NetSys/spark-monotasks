@@ -16,10 +16,9 @@
 
 package org.apache.spark.monotasks.disk
 
-import scala.util.control.NonFatal
-import scala.util.Random
+import java.nio.ByteBuffer
 
-import org.apache.hadoop.conf.{Configurable, Configuration}
+import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.{FSDataOutputStream, Path}
 import org.apache.hadoop.io.compress.CompressionCodec
 import org.apache.hadoop.mapreduce.TaskAttemptContext
@@ -45,61 +44,104 @@ private[spark] class HdfsWriteMonotask(
     private val sparkTaskContext: TaskContextImpl,
     blockId: BlockId,
     private val serializedDataBlockId: BlockId,
-    private val hadoopConf: Configuration,
+    hadoopConf: Configuration,
     private val hadoopTaskContext: TaskAttemptContext,
     private val outputCommitter: FileOutputCommitter,
     private val codec: Option[CompressionCodec],
     private val numRecords: Long)
-  extends HdfsDiskMonotask(sparkTaskContext, blockId) with Logging {
+  extends HdfsDiskMonotask(sparkTaskContext, blockId, hadoopConf) with Logging {
 
-  override def execute(): Unit = {
-    val blockManager = SparkEnv.get.blockManager
-    val buffer = blockManager.getLocalBytes(serializedDataBlockId).getOrElse(
+  pathOpt = Some(constructPath(outputCommitter))
+
+  /**
+   * The buffer holding the data that this monotask will write to HDFS. Used to keep track of the
+   * current position in the buffer from when it is first used in `initialize()`, which writes some
+   * data to disk, to when the rest of the data is written in `execute()`.
+   */
+  private var bufferOpt: Option[ByteBuffer] = None
+
+  /**
+   * The stream used to write to an HDFS file. Used to pass the stream from `initialize()`, where it
+   * is created, to `execute()`, where all but the first byte of data is written.
+   */
+  private var streamOpt: Option[FSDataOutputStream] = None
+
+  /**
+   * Used during a failure to determine whether the HDFS task corresponding to this monotask needs
+   * to be aborted. This is set to `true` between when the HDFS task is setup and when it is
+   * committed.
+   */
+  private var hadoopTaskInProgress = false
+
+  /**
+   * Initializes this HdfsWriteMonotask so that we can determine which disk its data will be
+   * written to.  This requires writing a small amount (1 byte) of data to the file, so that the
+   * file is created and we can query HDFS to see what disk the file is stored on. This must be
+   * called before `execute()`.
+   */
+  def initialize(): Unit = {
+    val buffer = SparkEnv.get.blockManager.getLocalBytes(serializedDataBlockId).getOrElse(
       throw new IllegalStateException(
         s"Writing block $blockId to HDFS failed because the block's serialized bytes " +
-        s"(stored with blockId $serializedDataBlockId) could not be found."))
+        s"(stored with blockId $serializedDataBlockId) could not be found.")).duplicate()
+    buffer.rewind()
+    bufferOpt = Some(buffer)
 
+    outputCommitter.setupTask(hadoopTaskContext)
+    hadoopTaskInProgress = true
+
+    val path = getPath()
+    val stream = path.getFileSystem(hadoopConf).create(path, false)
+    streamOpt = Some(stream)
+
+    if (buffer.hasRemaining()) {
+      stream.writeByte(buffer.get())
+
+      // We call stream.hflush() instead of stream.hsync() so that the one byte will (hopefully)
+      // just be written to the OS buffer cache instead of the physical disk. The reason for this is
+      // because we call this method from outside of a DiskMonotask and don't want to interfere with
+      // any running DiskMonotasks.
+      stream.hflush()
+      logDebug(s"Created the HDFS file for block $blockId at location: ${path.toString()}")
+    } else {
+      // It is possible that this HdfsWriteMonotask is trying to write an empty file. This is
+      // normal, but if this is the case, then we obviously cannot write the first byte of data to
+      // force the file to be created. This is okay, since it does not matter which disk queue this
+      // monotask ends up in, since the file is empty.
+    }
+  }
+
+  override def execute(): Unit = {
+    val buffer = bufferOpt.getOrElse(throw new IllegalStateException(
+      "This HdfsWriteMonotask's's buffer has not been set. Make sure that the \"initialize()\" " +
+      "method has been called."))
     val byteArray = if (buffer.hasArray()) {
       // The ByteBuffer has a backing array that can be accessed without copying the bytes. However,
       // the backing array might be larger than the number of bytes that are stored in the
       // ByteBuffer, so we need to use the ByteBuffer's metadata to select only the relevant portion
       // of the array.
-      buffer.array().take(buffer.duplicate().position(0).remaining())
+      //
+      // The initialize() method already wrote the first byte of the file, so we skip it.
+      buffer.array().slice(1, buffer.limit())
     } else {
-      val bufferCopy = buffer.duplicate()
-      bufferCopy.rewind()
-      val destByteArray = new Array[Byte](bufferCopy.remaining())
-      bufferCopy.get(destByteArray)
+      val destByteArray = new Array[Byte](buffer.remaining())
+      buffer.get(destByteArray)
       destByteArray
     }
 
-    val path = constructPath(outputCommitter)
-    var isSetUp = false
-    var stream: FSDataOutputStream = null
-    try {
-      outputCommitter.setupTask(hadoopTaskContext)
-      isSetUp = true
+    val stream = streamOpt.getOrElse(throw new IllegalStateException(
+      "This HdfsWriteMonotask's's stream has not been set. Make sure that the \"initialize()\" " +
+      "method has been called."))
+    stream.write(byteArray)
+    stream.hsync()
+    logInfo(s"Block $blockId (composed of $numRecords records) was successfully written to HDFS " +
+      s"at location: ${getPath().toString()}")
 
-      stream = path.getFileSystem(hadoopConf).create(path, false)
-      stream.write(byteArray)
-      stream.hsync()
-      logInfo(s"Block $blockId (composed of $numRecords records) was successfully saved to HDFS " +
-        s"at location: ${path.toString()}")
-    } catch {
-      case NonFatal(e) => {
-        if (isSetUp) {
-          outputCommitter.abortTask(hadoopTaskContext)
-        }
-        throw e
-      }
-    } finally {
-      if (stream != null) {
-        stream.close()
-      }
-    }
-
+    // The stream must be closed before the task is committed.
+    stream.close()
+    streamOpt = None
     SparkHadoopMapRedUtil.commitTask(outputCommitter, hadoopTaskContext, sparkTaskContext)
-    blockManager.removeBlockFromMemory(serializedDataBlockId, false)
+    hadoopTaskInProgress = false
 
     val outputMetrics = new OutputMetrics(DataWriteMethod.Hadoop)
     sparkTaskContext.taskMetrics.outputMetrics = Some(outputMetrics)
@@ -125,11 +167,19 @@ private[spark] class HdfsWriteMonotask(
   }
 
   /**
-   * TODO: We cannot use the HDFS API to determine which disk a file is stored on (and therefore
-   *       which local directory to choose) until after the file has been written. This means that
-   *       for HdfsWriteMonotasks, we currently have no way to choose a local directory. We need to
-   *       find a way around this. For now, we will just return a random local directory.
+   * Removes the block specified by `serializedDataBlockId` from the MemoryStore, closes
+   * `streamOpt` if necessary, and aborts the HDFS task if this HdfsWriteMonotask failed.
    */
-  override def chooseLocalDir(sparkLocalDirs: Seq[String]): String =
-    sparkLocalDirs(Random.nextInt(sparkLocalDirs.size))
+  override protected def cleanupIntermediateData(): Unit = {
+    super.cleanupIntermediateData()
+    blockManager.removeBlockFromMemory(serializedDataBlockId, false)
+
+    streamOpt.foreach { stream =>
+      stream.close()
+      streamOpt = None
+    }
+    if (hadoopTaskInProgress) {
+      outputCommitter.abortTask(hadoopTaskContext)
+    }
+  }
 }
