@@ -28,10 +28,11 @@ import org.apache.spark.storage.BlockId
 private[spark] class DummyDiskWriteMonotask(
     taskContext: TaskContextImpl,
     blockId: BlockId,
-    val taskTime: Long)
+    val taskTime: Long,
+    maxTasksPerDisk: Int = 1)
   extends DiskWriteMonotask(taskContext, blockId, null) {
 
   override def execute(): Unit = {
-    DiskMonotaskTestHelper.executeTaskOnDisk(taskId, diskId.get, taskTime)
+    DiskMonotaskTestHelper.executeTaskOnDisk(taskId, diskId.get, taskTime, maxTasksPerDisk)
   }
 }

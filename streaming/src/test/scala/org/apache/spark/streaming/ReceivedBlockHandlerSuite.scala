@@ -73,7 +73,7 @@ class ReceivedBlockHandlerSuite extends FunSuite with BeforeAndAfter with Matche
   val manualClock = new ManualClock
   val blockManagerSize = 10000000
   val blockFileManager = new BlockFileManager(conf)
-  val localDagScheduler = new LocalDagScheduler(blockFileManager)
+  val localDagScheduler = new LocalDagScheduler(blockFileManager, conf)
 
   var actorSystem: ActorSystem = null
   var blockManagerMaster: BlockManagerMaster = null

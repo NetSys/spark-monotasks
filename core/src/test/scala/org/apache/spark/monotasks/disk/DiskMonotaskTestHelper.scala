@@ -18,26 +18,58 @@ package org.apache.spark.monotasks.disk
 
 import java.util.concurrent.ConcurrentHashMap
 
-import scala.collection.mutable.HashSet
+import scala.collection.mutable.HashMap
 
-/** Singleton object used to track metadata about diskMonotasks, used only for testing. */
+/**
+ * Singleton object used to track metadata about DiskMonotasks, used only for testing. reset() must
+ * be called between test cases.
+ */
 object DiskMonotaskTestHelper {
-  // The disks where monotasks are currently executing (set when executeTaskOnDisk is called to
-  // execute a monotask, and used to ensure only one task is using each disk at a time).
-  val disksInUse = new HashSet[String]()
-  // Maps taskId to end time.
-  val taskTimes = new ConcurrentHashMap[Long, Long]()
+  // A mapping from disk ID to the number of tasks that are currently executing on that disk.
+  // Updated when executeTaskOnDisk is called to execute a monotask. Used to calculate the values in
+  // maxTasksPerDisk and to provide immediate feedback if too many tasks are executed concurrently.
+  private val tasksPerDisk = new HashMap[String, Int]()
+  // A mapping from disk ID to the maximum number of tasks that have executed concurrently on that
+  // disk. Used to ensure that multiple tasks for the same disk are actually being executed
+  // concurrently.
+  val maxTasksPerDisk = new HashMap[String, Int]()
+  // Maps taskId to start time. Entries are added as DiskMonotasks finish so that this can be used
+  // to determine whether all of the DiskMonotasks in a test case have finished executing.
+  val finishedTaskIdToStartTimeMillis = new ConcurrentHashMap[Long, Long]()
 
-  def clearTimes() = taskTimes.clear()
+  /**
+   * Clears all internal metadata so that this object can be used again.
+   */
+  def reset(): Unit = {
+    tasksPerDisk.clear()
+    maxTasksPerDisk.clear()
+    finishedTaskIdToStartTimeMillis.clear()
+  }
 
-  def executeTaskOnDisk(taskId: Long, diskId: String, taskTime: Long): Unit = {
-    disksInUse.synchronized {
-      assert(!disksInUse.contains(diskId))
-      disksInUse += diskId
+  def executeTaskOnDisk(
+      taskId: Long,
+      diskId: String,
+      taskTimeMillis: Long,
+      maxAllowedTasksPerDisk: Int = 1): Unit = {
+    val startTimeMillis = System.currentTimeMillis()
+    tasksPerDisk.synchronized {
+      val numTasksOnDisk = tasksPerDisk.getOrElse(diskId, 0) + 1
+      assert(
+        numTasksOnDisk <= maxAllowedTasksPerDisk,
+        s"Too many tasks running on disk $diskId!" +
+          s"actual: $numTasksOnDisk; allowed: $maxAllowedTasksPerDisk")
+      tasksPerDisk(diskId) = numTasksOnDisk
+
+      if (numTasksOnDisk > maxTasksPerDisk.getOrElse(diskId, 0)) {
+        maxTasksPerDisk(diskId) = numTasksOnDisk
+      }
     }
 
-    Thread.sleep(taskTime)
-    disksInUse.synchronized(disksInUse.remove(diskId))
-    taskTimes.put(taskId, System.currentTimeMillis())
+    Thread.sleep(taskTimeMillis)
+
+    tasksPerDisk.synchronized {
+      tasksPerDisk(diskId) = tasksPerDisk(diskId) - 1
+    }
+    finishedTaskIdToStartTimeMillis.put(taskId, startTimeMillis)
   }
 }

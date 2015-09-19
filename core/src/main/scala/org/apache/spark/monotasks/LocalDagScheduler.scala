@@ -20,7 +20,7 @@ import java.nio.ByteBuffer
 
 import scala.collection.mutable.{HashMap, HashSet}
 
-import org.apache.spark.{Logging, TaskContextImpl, TaskState}
+import org.apache.spark.{Logging, SparkConf, TaskContextImpl, TaskState}
 import org.apache.spark.TaskState.TaskState
 import org.apache.spark.executor.ExecutorBackend
 import org.apache.spark.monotasks.compute.{ComputeMonotask, ComputeScheduler,
@@ -40,7 +40,7 @@ import org.apache.spark.util.{EventLoop, SparkUncaughtExceptionHandler}
  * loop.  The only exception to this is monitoring functions (to get the number of running tasks,
  * for example), which are not processed by the event loop.
  */
-private[spark] class LocalDagScheduler(blockFileManager: BlockFileManager)
+private[spark] class LocalDagScheduler(blockFileManager: BlockFileManager, conf: SparkConf)
   extends EventLoop[LocalDagSchedulerEvent]("local-dag-scheduler-event-loop") with Logging {
 
   /**
@@ -57,7 +57,7 @@ private[spark] class LocalDagScheduler(blockFileManager: BlockFileManager)
 
   private val computeScheduler = new ComputeScheduler
   private val networkScheduler = new NetworkScheduler
-  private val diskScheduler = new DiskScheduler(blockFileManager)
+  private val diskScheduler = new DiskScheduler(blockFileManager, conf)
 
   /** Monotasks that are waiting for their dependencies to be satisfied. */
   private[monotasks] val waitingMonotasks = new HashSet[Monotask]()

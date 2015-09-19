@@ -20,6 +20,7 @@ import scala.util.control.NonFatal
 
 import org.mockito.Mockito.mock
 
+import org.apache.spark.SparkEnv
 import org.apache.spark.executor.ExecutorBackend
 import org.apache.spark.storage.{BlockFileManager, MemoryStore}
 
@@ -29,7 +30,7 @@ import org.apache.spark.storage.{BlockFileManager, MemoryStore}
  */
 class LocalDagSchedulerWithSynchrony(
     executorBackend: ExecutorBackend, blockFileManager: BlockFileManager)
-  extends LocalDagScheduler(blockFileManager) {
+  extends LocalDagScheduler(blockFileManager, SparkEnv.get.conf) {
 
   initialize(executorBackend, mock(classOf[MemoryStore]))
 

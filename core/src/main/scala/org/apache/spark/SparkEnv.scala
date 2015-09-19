@@ -329,7 +329,7 @@ object SparkEnv extends Logging {
     val blockFileManager = new BlockFileManager(conf)
 
     // NB: localDagScheduler is not valid until initialize() is called later.
-    val localDagScheduler = new LocalDagScheduler(blockFileManager)
+    val localDagScheduler = new LocalDagScheduler(blockFileManager, conf)
 
     // NB: blockManager is not valid until initialize() is called later.
     val blockManager = new BlockManager(

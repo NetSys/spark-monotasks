@@ -23,50 +23,51 @@ import java.util.concurrent.atomic.AtomicInteger
 import scala.collection.mutable.HashMap
 import scala.util.control.NonFatal
 
-import org.apache.spark.{Logging, SparkEnv, SparkException}
+import org.apache.spark.{Logging, SparkConf, SparkEnv, SparkException}
 import org.apache.spark.monotasks.TaskSuccess
 import org.apache.spark.storage.BlockFileManager
 import org.apache.spark.util.{SparkUncaughtExceptionHandler, Utils}
 
 /**
  * Schedules DiskMonotasks for execution on the appropriate disk. If the DiskMonotask is writing a
- * block, then the DiskScheduler determines which disk that block should be written to.
- * Maintains a set of threads, one for each disk, that execute DiskMonotasks.
+ * block, then the DiskScheduler determines which disk that block should be written to. The
+ * configuration parameter "spark.monotasks.threadsPerDisk" determines the maximum number of
+ * DiskMonotasks that will execute concurrently on each disk.
  */
-private[spark] class DiskScheduler(blockFileManager: BlockFileManager) extends Logging {
+private[spark] class DiskScheduler(
+    blockFileManager: BlockFileManager,
+    conf: SparkConf) extends Logging {
 
   // Mapping from disk identifier to the corresponding DiskAccessor object.
   private val diskAccessors = new HashMap[String, DiskAccessor]()
-  // Mapping from disk identifier to the corresponding DiskAccessor's thread.
-  private val diskAccessorThreads = new HashMap[String, Thread]()
   /* A list of unique identifiers for all of this worker's physical disks. Assumes that each path in
    * the user-defined list of Spark local directories (spark.local.dirs or SPARK_LOCAL_DIRS, if it
    * is set) describes a separate physical disk. */
   val diskIds = blockFileManager.localDirs.keySet.toArray
   /**
    * Queue of HdfsWriteMonotasks that have been submitted to the scheduler but haven't yet been
-   * submitted to a disk thread, because we first need to determine which disk the monotask will
+   * submitted to a DiskAccessor, because we first need to determine which disk the monotask will
    * access.
    */
   private val hdfsWriteMonotaskQueue = new LinkedBlockingQueue[HdfsWriteMonotask]()
 
   addShutdownHook()
-  buildDiskAccessors()
+  buildDiskAccessors(conf)
   launchHdfsWriteMonotaskSubmitterThread()
 
   /**
-   * Builds a DiskAccessor object for each disk identifier, and starts a thread for each new
-   * DiskAccessor object.
+   * Builds a DiskAccessor object with a user-defined concurrency for each disk identifier.
+   *
+   * TODO: Currently, all DiskAccessors are created with the same degree of concurrency. It may be
+   *       interesting to implement a more advanced design that allows the user to specify a
+   *       different concurrency for each disk. This would be useful for systems that use both SSDs
+   *       and HDDs.
    */
-  private def buildDiskAccessors() {
+  private def buildDiskAccessors(conf: SparkConf) {
+    val numThreadsPerDisk = conf.getInt("spark.monotasks.threadsPerDisk", 1)
     diskIds.foreach { diskId =>
-      val diskAccessor = new DiskAccessor(diskId)
-      diskAccessors(diskId) = diskAccessor
-      val diskAccessorThread = new Thread(diskAccessor)
-      diskAccessorThread.setDaemon(true)
-      diskAccessorThread.setName(s"DiskAccessor thread for disk $diskId")
-      diskAccessorThread.start()
-      diskAccessorThreads(diskId) = diskAccessorThread
+      logInfo(s"Creating $numThreadsPerDisk threads for disk $diskId")
+      diskAccessors(diskId) = new DiskAccessor(diskId, numThreadsPerDisk)
     }
   }
 
@@ -155,25 +156,14 @@ private[spark] class DiskScheduler(blockFileManager: BlockFileManager) extends L
   }
 
   private def addShutdownHook() {
-    Runtime.getRuntime.addShutdownHook(new Thread("Stop DiskAccessor threads") {
+    Runtime.getRuntime.addShutdownHook(new Thread("Stop DiskAccessors") {
       override def run() = Utils.logUncaughtExceptions(DiskScheduler.this.stop())
     })
   }
 
-  /**
-   * Interrupts all of the DiskAccessor threads, causing them to stop executing tasks and expire.
-   * During normal operation, this method will be called once all tasks have been executed and the
-   * DiskScheduler is ready to shut down. In that case, all of the DiskAccessor threads will be
-   * interrupted while waiting for more tasks to be added to the task queue. This is harmless.
-   * However, if any DiskAccessor threads are still executing tasks, this will interrupt them
-   * before they finish.
-   */
-  def stop() {
-    diskAccessorThreads.values.foreach { diskAccessorThread =>
-      val threadName = diskAccessorThread.getName()
-      logDebug(s"Attempting to stop thread: $threadName")
-      diskAccessorThread.interrupt()
-    }
+  /** Triggers all DiskAccessors to stop executing, interrupting any in-progress DiskMonotasks. */
+  def stop(): Unit = {
+    diskAccessors.values.foreach(_.stop())
   }
 
   /**
@@ -214,10 +204,12 @@ private[spark] class DiskScheduler(blockFileManager: BlockFileManager) extends L
   }
 
   /**
-   * Stores a single disk's task queue. When used to create a thread, a DiskAccessor object will
-   * execute the DiskMonotasks in its task queue.
+   * Stores and services the DiskMonotask queue for the specified disk.
+   *
+   * @param concurrency The maximum number of DiskMonotasks that will be executed concurrently on
+   *                    each disk.
    */
-  private class DiskAccessor(diskId: String) extends Runnable {
+  private class DiskAccessor(diskId: String, concurrency: Int) extends Runnable {
 
     // The name of the physical disk on which this DiskAccessor will operate.
     val diskName = BlockFileManager.getDiskNameFromPath(diskId)
@@ -226,6 +218,17 @@ private[spark] class DiskScheduler(blockFileManager: BlockFileManager) extends L
     private val taskQueue = new LinkedBlockingQueue[DiskMonotask]()
 
     private val numRunningAndQueuedDiskMonotasks = new AtomicInteger(0)
+
+    // An array of threads that are concurrently executing DiskMonotasks from this DiskAccessor's
+    // task queue.
+    private val diskAccessorThreads = (1 to concurrency).map { threadIndex =>
+      val diskAccessorThread = new Thread(this)
+      diskAccessorThread.setDaemon(true)
+      diskAccessorThread.setName(
+        s"DiskAccessor thread $threadIndex of $concurrency for disk $diskId")
+      diskAccessorThread.start()
+      diskAccessorThread
+    }
 
     def submitMonotask(monotask: DiskMonotask): Unit = {
       taskQueue.put(monotask)
@@ -270,6 +273,21 @@ private[spark] class DiskScheduler(blockFileManager: BlockFileManager) extends L
           logDebug(s"Thread '$threadName' interrupted while waiting for more DiskMonotasks.")
           currentThread.interrupt()
         }
+      }
+    }
+
+    /**
+     * Interrupts all of this DiskAccessor's threads, causing them to stop executing DiskMonotasks
+     * and expire. During normal operation, this method will be called once all DiskMonotasks have
+     * been executed and the DiskScheduler is ready to shut down. In that case, all of the threads
+     * will be interrupted while waiting for more tasks to be added to the task queue. This is
+     * harmless. However, if any threads are still executing tasks, this will interrupt them before
+     * they finish.
+     */
+    def stop(): Unit = {
+      diskAccessorThreads.foreach { diskAccessorThread =>
+        logDebug(s"Attempting to stop thread: ${diskAccessorThread.getName()}")
+        diskAccessorThread.interrupt()
       }
     }
   }

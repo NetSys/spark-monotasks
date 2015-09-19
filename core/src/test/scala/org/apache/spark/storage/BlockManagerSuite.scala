@@ -114,7 +114,7 @@ class BlockManagerSuite extends FunSuite with Matchers with BeforeAndAfterEach
 
   override def beforeEach(): Unit = {
     blockFileManager = spy(new BlockFileManager(conf))
-    localDagScheduler = new LocalDagScheduler(blockFileManager)
+    localDagScheduler = new LocalDagScheduler(blockFileManager, conf)
 
     val (actorSystem, boundPort) = AkkaUtils.createActorSystem(
       "test", "localhost", 0, conf = conf, securityManager = securityMgr)
