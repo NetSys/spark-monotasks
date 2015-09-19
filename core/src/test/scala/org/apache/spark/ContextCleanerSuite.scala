@@ -391,9 +391,10 @@ class CleanerTester(
         "Shuffle " + shuffleId + " was not deregistered from map output tracker"
       )
 
+      val shuffleBlocks = getShuffleBlocks(shuffleId)
       assert(
-        getShuffleBlocks(shuffleId).isEmpty,
-        "Blocks of shuffle " + shuffleId + " were not cleared from block manager"
+        shuffleBlocks.isEmpty,
+        s"Blocks of shuffle $shuffleId were not cleared from block manager: $shuffleBlocks remain"
       )
     }
 

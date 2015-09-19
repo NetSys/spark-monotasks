@@ -810,8 +810,20 @@ private[spark] class BlockManager(
         val removedFromTachyon = if (tachyonInitialized) tachyonStore.remove(blockId) else false
         val diskRemovalStarted = initiateBlockRemovalFromDisk(blockId, info)
         if (!removedFromMemory && !removedFromTachyon && !diskRemovalStarted) {
-          logWarning(s"Block $blockId could not be removed as it was not found in " +
-            "the memory store, the tachyon store, or on disk")
+          val blockShouldHaveBeenFound = blockId match {
+            case ShuffleBlockId(_, _, reduceId) =>
+              // Shuffle Blocks with reduce ID > 0 won't be found in any of the block stores,
+              // because they are stored on disk in a file with the identifier
+              // ShuffleBlockId(mapId, reduceId, 0).
+              reduceId == 0
+
+            case _ =>
+              true
+          }
+          if (blockShouldHaveBeenFound) {
+            logWarning(s"Block $blockId could not be removed as it was not found in " +
+              "the memory store, the tachyon store, or on disk")
+          }
         }
         blockInfo.remove(blockId)
         if (tellMaster && info.tellMaster) {

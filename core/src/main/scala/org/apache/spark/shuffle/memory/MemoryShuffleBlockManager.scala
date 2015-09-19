@@ -75,10 +75,11 @@ private[spark] class MemoryShuffleBlockManager(conf: SparkConf)
   private def removeShuffleBlocks(shuffleId: ShuffleId): Boolean = {
     shuffleIdToState.get(shuffleId) match {
       case Some(state) =>
-        for (mapId <- state.completedMapTasks) {
+        for (mapId <- state.completedMapTasks; reduceId <- 0 until state.numBuckets) {
           // Remove both the data block and the index file.
-          blockManager.removeBlock(ShuffleBlockId(shuffleId, mapId, 0), tellMaster = false)
-          blockManager.removeBlock(ShuffleIndexBlockId(shuffleId, mapId, 0), tellMaster = false)
+          blockManager.removeBlock(ShuffleBlockId(shuffleId, mapId, reduceId), tellMaster = false)
+          blockManager.removeBlock(
+            ShuffleIndexBlockId(shuffleId, mapId, reduceId), tellMaster = false)
         }
         logInfo(s"Deleted all files for shuffle $shuffleId")
         true
