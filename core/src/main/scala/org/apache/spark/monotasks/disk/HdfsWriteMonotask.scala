@@ -115,24 +115,23 @@ private[spark] class HdfsWriteMonotask(
     val buffer = bufferOpt.getOrElse(throw new IllegalStateException(
       "This HdfsWriteMonotask's's buffer has not been set. Make sure that the \"initialize()\" " +
       "method has been called."))
-    val byteArray = if (buffer.hasArray()) {
+    val stream = streamOpt.getOrElse(throw new IllegalStateException(
+      "This HdfsWriteMonotask's's stream has not been set. Make sure that the \"initialize()\" " +
+        "method has been called."))
+    if (buffer.hasArray()) {
       // The ByteBuffer has a backing array that can be accessed without copying the bytes. However,
       // the backing array might be larger than the number of bytes that are stored in the
       // ByteBuffer, so we need to use the ByteBuffer's metadata to select only the relevant portion
       // of the array.
       //
       // The initialize() method already wrote the first byte of the file, so we skip it.
-      buffer.array().slice(1, buffer.limit())
+      stream.write(buffer.array(), 1, buffer.limit())
     } else {
       val destByteArray = new Array[Byte](buffer.remaining())
       buffer.get(destByteArray)
-      destByteArray
+      stream.write(destByteArray)
     }
 
-    val stream = streamOpt.getOrElse(throw new IllegalStateException(
-      "This HdfsWriteMonotask's's stream has not been set. Make sure that the \"initialize()\" " +
-      "method has been called."))
-    stream.write(byteArray)
     stream.hsync()
     logInfo(s"Block $blockId (composed of $numRecords records) was successfully written to HDFS " +
       s"at location: ${getPath().toString()}")
