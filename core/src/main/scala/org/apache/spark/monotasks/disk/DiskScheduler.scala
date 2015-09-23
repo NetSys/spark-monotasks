@@ -185,10 +185,8 @@ private[spark] class DiskScheduler(blockFileManager: BlockFileManager) extends L
   def stop() {
     diskAccessorThreads.values.foreach { diskAccessorThread =>
       val threadName = diskAccessorThread.getName()
-      logDebug(s"Attempting to join thread: $threadName")
+      logDebug(s"Attempting to stop thread: $threadName")
       diskAccessorThread.interrupt()
-      diskAccessorThread.join()
-      logDebug(s"Successfully joined thread: $threadName")
     }
   }
 
