@@ -118,18 +118,21 @@ private[spark] class HdfsWriteMonotask(
     val stream = streamOpt.getOrElse(throw new IllegalStateException(
       "This HdfsWriteMonotask's's stream has not been set. Make sure that the \"initialize()\" " +
         "method has been called."))
-    if (buffer.hasArray()) {
-      // The ByteBuffer has a backing array that can be accessed without copying the bytes. However,
-      // the backing array might be larger than the number of bytes that are stored in the
-      // ByteBuffer, so we need to use the ByteBuffer's metadata to select only the relevant portion
-      // of the array.
-      //
-      // The initialize() method already wrote the first byte of the file, so we skip it.
-      stream.write(buffer.array(), 1, buffer.limit())
-    } else {
-      val destByteArray = new Array[Byte](buffer.remaining())
-      buffer.get(destByteArray)
-      stream.write(destByteArray)
+
+    if (buffer.hasRemaining()) {
+      if (buffer.hasArray()) {
+        // The ByteBuffer has a backing array that can be accessed without copying the bytes.
+        // However, the backing array might be larger than the number of bytes that are stored in
+        // the ByteBuffer, so we need to use the ByteBuffer's metadata to select only the relevant
+        // portion of the array.
+        //
+        // The initialize() method already wrote the first byte of the file, so we skip it.
+        stream.write(buffer.array(), 1, buffer.remaining())
+      } else {
+        val destByteArray = new Array[Byte](buffer.remaining())
+        buffer.get(destByteArray)
+        stream.write(destByteArray)
+      }
     }
 
     stream.hsync()
