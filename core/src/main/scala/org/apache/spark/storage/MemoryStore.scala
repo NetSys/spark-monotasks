@@ -164,7 +164,7 @@ private[spark] class MemoryStore(
       val entry = entries.remove(blockId)
       if (entry != null) {
         currentMemory -= entry.size
-        logInfo(s"Block $blockId of size ${Utils.bytesToString(entry.size)} removed from memory " +
+        logDebug(s"Block $blockId of size ${Utils.bytesToString(entry.size)} removed from memory " +
           s"(free: ${Utils.bytesToString(freeMemory)}).")
         blockRemovalCallback.map(_(freeMemory))
         true
@@ -198,7 +198,7 @@ private[spark] class MemoryStore(
       currentMemory += size
 
       val valuesOrBytes = if (deserialized) "values" else "bytes"
-      logInfo(s"Block $blockId stored as $valuesOrBytes in memory (estimated size:  " +
+      logDebug(s"Block $blockId stored as $valuesOrBytes in memory (estimated size:  " +
         s"${Utils.bytesToString(size)}; (${Utils.bytesToString(currentMemory)} stored out of " +
         s"${Utils.bytesToString(targetMaxMemory)} target maximum)")
     }
