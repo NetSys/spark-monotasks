@@ -34,7 +34,6 @@
 package org.apache.spark.shuffle
 
 import org.apache.spark.scheduler.MapStatus
-import org.apache.spark.storage.ShuffleBlockId
 
 /**
  * Obtained inside a map task to write out records to the shuffle system.
@@ -50,7 +49,4 @@ private[spark] trait ShuffleWriter[K, V] {
    *                data should be saved or discarded).
    */
   def stop(success: Boolean): Option[MapStatus]
-
-  /** Returns the list of block IDs used to store shuffle data. */
-  def shuffleBlockIds: Seq[ShuffleBlockId]
 }

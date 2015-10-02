@@ -64,8 +64,7 @@ class DiskRemoveMonotaskSuite extends FunSuite with BeforeAndAfter {
   test("execute: actually deletes block") {
     val blockId = new TestBlockId("0")
     // Write a block to verify that it can be deleted correctly.
-    val writeMonotask =
-      new SingleBlockDiskWriteMonotask(taskContext, blockId, serializedDataBlockId)
+    val writeMonotask = new DiskWriteMonotask(taskContext, blockId, serializedDataBlockId)
     val diskId = "diskId"
     writeMonotask.diskId = Some(diskId)
 

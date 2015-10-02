@@ -21,7 +21,7 @@ import java.util.concurrent.ConcurrentLinkedQueue
 import scala.collection.JavaConversions._
 
 import org.apache.spark.{Logging, SparkConf, SparkEnv}
-import org.apache.spark.storage.{ShuffleBlockId, ShuffleIndexBlockId}
+import org.apache.spark.storage.MultipleShuffleBlocksId
 import org.apache.spark.util.{MetadataCleaner, MetadataCleanerType, TimeStampedHashMap}
 
 /**
@@ -63,11 +63,8 @@ private[spark] class MemoryShuffleBlockManager(conf: SparkConf) extends Logging 
   private def removeShuffleBlocks(shuffleId: ShuffleId): Boolean = {
     shuffleIdToState.get(shuffleId) match {
       case Some(state) =>
-        for (mapId <- state.completedMapTasks; reduceId <- 0 until state.numBuckets) {
-          // Remove both the data block and the index file.
-          blockManager.removeBlock(ShuffleBlockId(shuffleId, mapId, reduceId), tellMaster = false)
-          blockManager.removeBlock(
-            ShuffleIndexBlockId(shuffleId, mapId, reduceId), tellMaster = false)
+        for (mapId <- state.completedMapTasks) {
+          blockManager.removeBlock(MultipleShuffleBlocksId(shuffleId, mapId), tellMaster = false)
         }
         logInfo(s"Deleted all files for shuffle $shuffleId")
         true

@@ -111,7 +111,7 @@ private[spark] class BlockFileManager(conf: SparkConf) extends Logging {
     val filename = blockId match {
       case ShuffleBlockId(shuffleId, mapId, reduceId) =>
         // All shuffle blocks for a map task in a given shuffle are stored in the same file.
-        ShuffleBlockId(shuffleId, mapId, 0).name
+        MultipleShuffleBlocksId(shuffleId, mapId).name
 
       case _ =>
         blockId.name

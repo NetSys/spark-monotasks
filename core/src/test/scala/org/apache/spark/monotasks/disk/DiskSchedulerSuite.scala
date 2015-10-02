@@ -117,7 +117,7 @@ class DiskSchedulerSuite extends FunSuite with BeforeAndAfter with Timeouts {
   test("the LocalDagScheduler is notified when a DiskMonotask fails") {
     initializeDiskScheduler(1)
 
-    val monotask = new SingleBlockDiskWriteMonotask(
+    val monotask = new DiskWriteMonotask(
       taskContext, mock(classOf[BlockId]), mock(classOf[BlockId])) {
         override def execute() { throw new Exception("Error!") }
     }
@@ -133,7 +133,7 @@ class DiskSchedulerSuite extends FunSuite with BeforeAndAfter with Timeouts {
     val idsOfStartedMonotasks = new HashSet[Long]()
     var diskAccessorThreadId = 0L
     // This monotask will interrupt the DiskAccessor thread that is executing it.
-    val firstMonotask = new SingleBlockDiskWriteMonotask(
+    val firstMonotask = new DiskWriteMonotask(
       taskContext, mock(classOf[BlockId]), mock(classOf[BlockId])) {
         override def execute() {
           idsOfStartedMonotasks += taskId
@@ -146,10 +146,7 @@ class DiskSchedulerSuite extends FunSuite with BeforeAndAfter with Timeouts {
     // These monotasks will be queued in the DiskAccessor when it is interrupted, so they should not
     // be executed.
     val otherMonotasks = (1 to 10).map { i =>
-      new SingleBlockDiskWriteMonotask(
-          taskContext,
-          mock(classOf[BlockId]),
-          mock(classOf[BlockId])) {
+      new DiskWriteMonotask(taskContext, mock(classOf[BlockId]), mock(classOf[BlockId])) {
         override def execute() { idsOfStartedMonotasks += taskId }
       }
     }

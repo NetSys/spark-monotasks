@@ -39,7 +39,7 @@ import org.scalatest.Matchers
 import org.apache.spark.ShuffleSuite.NonJavaSerializableClass
 import org.apache.spark.rdd.{CoGroupedRDD, OrderedRDDFunctions, RDD, ShuffledRDD, SubtractedRDD}
 import org.apache.spark.serializer.KryoSerializer
-import org.apache.spark.storage.ShuffleBlockId
+import org.apache.spark.storage.MultipleShuffleBlocksId
 import org.apache.spark.util.MutablePair
 
 abstract class ShuffleSuite extends FunSuite with Matchers with LocalSparkContext {
@@ -284,7 +284,7 @@ abstract class ShuffleSuite extends FunSuite with Matchers with LocalSparkContex
     rdd.count()
 
     // Delete one of the local shuffle blocks.
-    val shuffleBlockId = new ShuffleBlockId(0, 0, 0)
+    val shuffleBlockId = new MultipleShuffleBlocksId(0, 0)
     val blockStatus = sc.env.blockManager.getStatus(shuffleBlockId).getOrElse(
       fail(s"Expected shuffle block $shuffleBlockId to be stored in the blockManager"))
     val diskId = blockStatus.diskId.getOrElse(

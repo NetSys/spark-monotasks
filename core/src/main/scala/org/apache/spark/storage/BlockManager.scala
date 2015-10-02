@@ -810,20 +810,8 @@ private[spark] class BlockManager(
         val removedFromTachyon = if (tachyonInitialized) tachyonStore.remove(blockId) else false
         val diskRemovalStarted = initiateBlockRemovalFromDisk(blockId, info)
         if (!removedFromMemory && !removedFromTachyon && !diskRemovalStarted) {
-          val blockShouldHaveBeenFound = blockId match {
-            case ShuffleBlockId(_, _, reduceId) =>
-              // Shuffle Blocks with reduce ID > 0 won't be found in any of the block stores,
-              // because they are stored on disk in a file with the identifier
-              // ShuffleBlockId(mapId, reduceId, 0).
-              reduceId == 0
-
-            case _ =>
-              true
-          }
-          if (blockShouldHaveBeenFound) {
-            logWarning(s"Block $blockId could not be removed as it was not found in " +
-              "the memory store, the tachyon store, or on disk")
-          }
+          logWarning(s"Block $blockId could not be removed as it was not found in " +
+            "the memory store, the tachyon store, or on disk")
         }
         blockInfo.remove(blockId)
         if (tellMaster && info.tellMaster) {
@@ -967,12 +955,26 @@ private[spark] class BlockManager(
    * block is already in the MemoryStore or is not stored by this BlockManager.
    */
   def getBlockLoadMonotask(blockId: BlockId, context: TaskContextImpl): Option[Monotask] = {
-    blockInfo.get(blockId).foreach { info =>
+    // If the block is in memory, it doesn't need to be loaded from disk.
+    if (memoryStore.contains(blockId)) {
+      return None
+    }
+
+    val blockIdUsedForMetadata = blockId match {
+      case ShuffleBlockId(shuffleId, mapId, reduceId) =>
+        // All shuffle blocks for a map task in a given shuffle are stored in a single file, so we
+        // need to use that file's BlockId when looking up the metadata for the shuffle block,
+        // instead of its individual BlockId.
+        MultipleShuffleBlocksId(shuffleId, mapId)
+
+      case _ =>
+        blockId
+    }
+
+    blockInfo.get(blockIdUsedForMetadata).foreach { info =>
       info.synchronized {
         val diskId = info.diskId
-        if (memoryStore.contains(blockId)) {
-          return None
-        } else if (blockFileManager.contains(blockId, diskId)) {
+        if (blockFileManager.contains(blockId, diskId)) {
           return Some(new DiskReadMonotask(context, blockId, diskId.get))
         }
       }

@@ -23,7 +23,7 @@ import com.google.common.io.ByteStreams
 
 import org.apache.spark.{Logging, TaskContextImpl}
 import org.apache.spark.executor.DataReadMethod
-import org.apache.spark.storage.{BlockId, ShuffleBlockId, ShuffleIndexBlockId, StorageLevel}
+import org.apache.spark.storage.{BlockId, ShuffleBlockId, StorageLevel}
 import org.apache.spark.util.Utils
 
 /**
@@ -37,54 +37,53 @@ private[spark] class DiskReadMonotask(
   resultBlockId = Some(blockId)
 
   override def execute(): Unit = {
+    val file = blockManager.blockFileManager.getBlockFile(blockId, diskId).getOrElse(
+      throw new IllegalStateException(
+        s"Could not read block $blockId from disk $diskId because its file could not be found."))
+    val stream = new FileInputStream(file)
+
     blockId match {
       case ShuffleBlockId(shuffleId, mapId, reduceId) =>
-        // Need to read the index file to find the correct location. Since the index file is
-        // located on the same disk, we can do this read as part of the same disk monotask.
-        val indexBlockId = ShuffleIndexBlockId(shuffleId, mapId, 0)
-        val indexFile = blockManager.blockFileManager.getBlockFile(indexBlockId, diskId).getOrElse(
-          throw new IllegalStateException(
-            s"Could not read block $blockId from disk $diskId because the index file " +
-            s"($indexBlockId) could not be found")
-        )
-        val in = new DataInputStream(new FileInputStream(indexFile))
-        val (offset, nextOffset) = try {
-          ByteStreams.skipFully(in, reduceId * 8)
-          (in.readLong(), in.readLong())
+        // Need to read the index data to find the correct location.
+        val in = new DataInputStream(stream)
+        try {
+          val indexOffset = reduceId * 4
+          ByteStreams.skipFully(in, indexOffset)
+          val offset = in.readInt()
+          val nextOffset = in.readInt()
+
+          // The offset describes the offset of the shuffle data, relative to the beginning of the
+          // file. We need to subtract all of the data we've already read (or skipped), which
+          // includes the data skipped to get to the index information, plus 8 bytes for the two
+          // integers we read describing the offset.
+          val bytesToSkip = offset - indexOffset - 8
+          ByteStreams.skipFully(stream, bytesToSkip)
+
+          readAndCacheData(stream, nextOffset - offset)
         } finally {
           in.close()
         }
-        readAndCacheData(ShuffleBlockId(shuffleId, mapId, 0), offset, Some(nextOffset))
 
       case _ =>
-        readAndCacheData(blockId, 0, None)
+        readAndCacheData(stream, file.length().toInt)
     }
   }
 
   /**
-   * Reads data from disk and saves the result in-memory using the BlockManager.
+   * Reads the given amount of data from the given steam and saves the result in-memory using the
+   * BlockManager.
    *
-   * @param fileBlockId BlockId coresponding to the on-disk file.
-   * @param startOffset Offset at which to begin reading.
-   * @param endOffset Optional offset at which to end reading. If not specified, this function will
-   *                  read to the end of the file.
+   * The number of bytes to read needs to be specified as an Int (rather than a Long) because we
+   * store the data in a ByteBuffer, and a ByteBuffer cannot be larger than Integer.MAX_VALUE.
    */
-  private def readAndCacheData(fileBlockId: BlockId, startOffset: Long, endOffset: Option[Long]) = {
-    val file = blockManager.blockFileManager.getBlockFile(fileBlockId, diskId).getOrElse(
-      throw new IllegalStateException(
-        s"Could not read block $blockId from disk $diskId because its file could not be found."))
-    val stream = new FileInputStream(file)
-    ByteStreams.skipFully(stream, startOffset)
+  private def readAndCacheData(stream: FileInputStream, bytesToRead: Int): Unit = {
     val channel = stream.getChannel()
-    // Assume that the size of the shuffle block is small enough that an Int can describe the
-    // length.
-    val bytesToRead = (endOffset.getOrElse(file.length()) - startOffset).toInt
     val buffer = ByteBuffer.allocate(bytesToRead)
 
     try {
       val startTimeMillis = System.currentTimeMillis()
       channel.read(buffer)
-      logInfo(s"Block $blockId (size: ${Utils.bytesToString(bytesToRead)}) read from " +
+      logDebug(s"Block $blockId (size: ${Utils.bytesToString(bytesToRead)}) read from " +
         s"disk $diskId in ${System.currentTimeMillis - startTimeMillis} ms into $buffer")
     } finally {
       channel.close()

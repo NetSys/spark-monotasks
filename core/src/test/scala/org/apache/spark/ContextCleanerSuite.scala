@@ -15,6 +15,22 @@
  * limitations under the License.
  */
 
+/*
+ * Copyright 2014 The Regents of The University California
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package org.apache.spark
 
 import java.lang.ref.WeakReference
@@ -34,7 +50,6 @@ import org.apache.spark.storage._
 import org.apache.spark.storage.BroadcastBlockId
 import org.apache.spark.storage.RDDBlockId
 import org.apache.spark.storage.ShuffleBlockId
-import org.apache.spark.storage.ShuffleIndexBlockId
 
 /**
  * An abstract base class for context cleaner tests, which sets up a context with a config
@@ -430,7 +445,7 @@ class CleanerTester(
   private def getShuffleBlocks(shuffleId: Int): Seq[BlockId] = {
     blockManager.master.getMatchingBlockIds( _ match {
       case ShuffleBlockId(`shuffleId`, _, _) => true
-      case ShuffleIndexBlockId(`shuffleId`, _, _) => true
+      case MultipleShuffleBlocksId(`shuffleId`, _) => true
       case _ => false
     }, askSlaves = true)
   }

@@ -25,9 +25,9 @@ import org.apache.spark.{Partition, ShuffleDependency, SparkEnv, TaskContextImpl
 import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.monotasks.Monotask
 import org.apache.spark.monotasks.compute.ShuffleMapMonotask
-import org.apache.spark.monotasks.disk.MultipleBlockDiskWriteMonotask
+import org.apache.spark.monotasks.disk.DiskWriteMonotask
 import org.apache.spark.rdd.RDD
-import org.apache.spark.storage.ShuffleBlockId
+import org.apache.spark.storage.MultipleShuffleBlocksId
 
 /**
  * Describes a group of monotasks that will divide the elements of an RDD into multiple buckets
@@ -57,9 +57,8 @@ private[spark] class ShuffleMapMacrotask(
     val shuffleMapMonotask = new ShuffleMapMonotask(context, rdd, partition, dep)
 
     // Create one disk write monotask that will write all of the shuffle blocks.
-    val blockId = ShuffleBlockId(dep.shuffleId, partition.index, 0)
-    val diskWriteMonotask =
-      new MultipleBlockDiskWriteMonotask(context, blockId, shuffleMapMonotask.getResultBlockIds())
+    val blockId = shuffleMapMonotask.shuffleDataId
+    val diskWriteMonotask = new DiskWriteMonotask(context, blockId, blockId)
     diskWriteMonotask.addDependency(shuffleMapMonotask)
 
     // Create the monotasks that will generate the RDD to be shuffled.

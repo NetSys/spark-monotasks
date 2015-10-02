@@ -19,7 +19,7 @@ package org.apache.spark.monotasks.compute
 import org.apache.spark.{Partition, ShuffleDependency, SparkEnv, TaskContextImpl}
 import org.apache.spark.rdd.RDD
 import org.apache.spark.scheduler.MapStatus
-import org.apache.spark.storage.BlockId
+import org.apache.spark.storage.MultipleShuffleBlocksId
 
 /**
  * Divides the elements of an RDD into multiple buckets (based on a partitioner specified in the
@@ -35,9 +35,7 @@ private[spark] class ShuffleMapMonotask[T](
   private val shuffleWriter = SparkEnv.get.shuffleManager.getWriter[Any, Any](
     dependency.shuffleHandle, partition.index, context)
 
-  private var resultBlockIds = shuffleWriter.shuffleBlockIds
-
-  def getResultBlockIds(): Seq[BlockId] = resultBlockIds
+  val shuffleDataId = MultipleShuffleBlocksId(dependency.shuffleId, partition.index)
 
   override def getResult(): MapStatus = {
     val mapStatus = try {
@@ -58,14 +56,13 @@ private[spark] class ShuffleMapMonotask[T](
   }
 
   /**
-   * ShuffleMapMonotask overrides maybeCleanupIntermediate data because it has many result blocks
-   * for the shuffle data (in addition to the result block for the serialized task result) that all
-   * need to be deleted from the block manager.
+   * ShuffleMapMonotask overrides cleanupIntermediateData because it needs to clean up the shuffle
+   * data, in addition to the result block containing the serialized task result.
    */
   override def cleanupIntermediateData(): Unit = {
     super.cleanupIntermediateData()
     // Don't need to tell the master about shuffle block IDs being deleted, because their
     // storage status is tracked by MapStatuses rather than through the BlockManager.
-    resultBlockIds.foreach(SparkEnv.get.blockManager.removeBlockFromMemory(_, tellMaster = false))
+    SparkEnv.get.blockManager.removeBlockFromMemory(shuffleDataId, tellMaster = false)
   }
 }

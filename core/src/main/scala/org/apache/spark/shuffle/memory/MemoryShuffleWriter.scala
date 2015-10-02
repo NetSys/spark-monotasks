@@ -24,14 +24,15 @@ import org.apache.spark.executor.ShuffleWriteMetrics
 import org.apache.spark.scheduler.MapStatus
 import org.apache.spark.serializer.{SerializationStream, Serializer}
 import org.apache.spark.shuffle.{BaseShuffleHandle, ShuffleWriter}
-import org.apache.spark.storage.{BlockManager, ShuffleBlockId, StorageLevel}
+import org.apache.spark.storage.{BlockManager, MultipleShuffleBlocksId, ShuffleBlockId,
+  StorageLevel}
 import org.apache.spark.util.ByteArrayOutputStreamWithZeroCopyByteBuffer
 
 /** A ShuffleWriter that stores all shuffle data in memory using the block manager. */
 private[spark] class MemoryShuffleWriter[K, V](
     shuffleBlockManager: MemoryShuffleBlockManager,
     handle: BaseShuffleHandle[K, V, _],
-    mapId: Int,
+    private val mapId: Int,
     context: TaskContext) extends ShuffleWriter[K, V] {
 
   private val dep = handle.dependency
@@ -43,8 +44,6 @@ private[spark] class MemoryShuffleWriter[K, V](
     bucketId =>
       new SerializedObjectWriter(blockManager, dep, mapId, bucketId)
   }
-
-  override def shuffleBlockIds: Seq[ShuffleBlockId] = shuffleData.map(_.blockId)
 
   private val shuffleWriteMetrics = new ShuffleWriteMetrics()
   context.taskMetrics().shuffleWriteMetrics = Some(shuffleWriteMetrics)
@@ -69,17 +68,57 @@ private[spark] class MemoryShuffleWriter[K, V](
     }
   }
 
-  override def stop(success: Boolean): Option[MapStatus] = {
-    // Store the shuffle data in the block manager (if the shuffle was successful) and update the
-    // bytes written in ShuffleWriteMetrics.
-    val sizes = shuffleData.map { shuffleWriter =>
-      val bytesWritten = shuffleWriter.close(success)
-      shuffleWriteMetrics.incShuffleBytesWritten(bytesWritten)
-      bytesWritten
+  /**
+   * Writes information about where each shuffle block is located within the single file that holds
+   * all of the shuffle data.  For shuffle block i, the Int at byte 4*i describes the offset
+   * of the first byte of the block, and the Int at byte 4*(i+1) describes the offset of the
+   * first byte of the next block.
+   */
+  private def writeIndexInformation(buffer: ByteBuffer, sizes: Seq[Int], indexSize: Int): Unit = {
+    var offset = indexSize
+    buffer.putInt(offset)
+    sizes.foreach { size =>
+      offset += size
+      buffer.putInt(offset)
     }
+  }
+
+  /**
+   * Stops writing shuffle data by storing the shuffle data in the block manager (if the shuffle
+   * was successful) and updating the bytes written in the task's ShuffleWriteMetrics.
+   */
+  override def stop(success: Boolean): Option[MapStatus] = {
+    val byteBuffers = shuffleData.map(_.closeAndGetBytes())
+    val sizes = byteBuffers.map(_.limit)
+    val totalDataSize = sizes.sum
+    shuffleWriteMetrics.incShuffleBytesWritten(totalDataSize)
+
     if (success) {
+      // Create a new buffer that first has index information, and then has all of the shuffle
+      // data. Use a direct byte buffer, so that when a disk monotask writes this data
+      // to disk, it can avoid copying the data out of the JVM, which can be time consuming
+      // (e.g., hundreds of milliseconds for buffers with ~100MB).
+      // TODO: Could wait and write this (relatively small) index data at the beginning of the
+      //       disk write monotask, which would allow the disk scheduler to combine multiple
+      //       outputs from different map tasks into a single file (or alternately, could just
+      //       store the index data in-memory).
+      val indexSize = (sizes.length + 1) * 4
+      val bufferSize = indexSize + totalDataSize
+      val directBuffer = ByteBuffer.allocateDirect(bufferSize)
+
+      writeIndexInformation(directBuffer, sizes, indexSize)
+
+      // Write all of the shuffle data.
+      byteBuffers.foreach(directBuffer.put(_))
+
+      blockManager.cacheBytes(
+        MultipleShuffleBlocksId(dep.shuffleId, mapId),
+        directBuffer,
+        StorageLevel.MEMORY_ONLY_SER,
+        tellMaster = false)
+
       shuffleBlockManager.addShuffleOutput(dep.shuffleId, mapId, numBuckets)
-      Some(MapStatus(SparkEnv.get.blockManager.blockManagerId, sizes))
+      Some(MapStatus(SparkEnv.get.blockManager.blockManagerId, sizes.map(_.toLong)))
     } else {
       None
     }
@@ -115,28 +154,14 @@ private[spark] class SerializedObjectWriter(
     serializationStream.writeObject(value)
   }
 
-  def close(saveToBlockManager: Boolean): Long = {
+  /**
+   * Closes the byte stream and returns a ByteBuffer containing the serialized data.
+   */
+  def closeAndGetBytes(): ByteBuffer = {
     if (initialized) {
       serializationStream.flush()
       serializationStream.close()
-      if (saveToBlockManager) {
-        val result = blockManager.cacheBytes(
-          blockId,
-          byteOutputStream.getByteBuffer(),
-          StorageLevel.MEMORY_ONLY_SER,
-          tellMaster = false)
-        return result.map(_._2.memSize).sum
-      }
-    } else if (saveToBlockManager) {
-      // Put an empty ByteBuffer in the block manager so that the existence of the block is still
-      // tracked in the BlockManager.
-      // TODO: Avoid putting empty blocks in the MemoryStore.
-      blockManager.cacheBytes(
-        blockId,
-        ByteBuffer.allocate(0),
-        StorageLevel.MEMORY_ONLY_SER,
-        tellMaster = false)
     }
-    return 0
+    byteOutputStream.getByteBuffer()
   }
 }
