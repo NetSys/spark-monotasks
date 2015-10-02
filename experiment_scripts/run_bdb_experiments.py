@@ -96,11 +96,19 @@ def parse_args(args):
     required=True)
   parser.add_argument(
     "-p",
-    "--convert-to-parquet",
+    "--parquet",
     action="store_true",
     default=False,
-    dest="convert_to_parquet",
-    help="Whether to convert the benchmark input data to parquet.")
+    dest="parquet",
+    help="Indicates that the benchmark input data should be converted to Parquet and the Hive \
+      tables reconfigured accordingly.")
+  parser.add_argument(
+    "--skip-parquet-conversion",
+    action="store_true",
+    default=False,
+    dest="skip_parquet_conversion",
+    help="Indicates that the benchmark input data has already been converted to Parquet. This only \
+      makes sense if the \"--parquet\" option is also specified.")
   parser.add_argument(
     "-c",
     "--compress-output",
@@ -134,7 +142,13 @@ def parse_args(args):
     help="Which Git branch to use. This may be specified multiple times to test multiple branches.",
     metavar="GIT-BRANCH",
     required=True)
-  return parser.parse_args()
+
+  args = parser.parse_args()
+  if (args.skip_parquet_conversion and not args.parquet):
+    print "\"--skip-parquet-conversion\" only makes sense if \"--parquet\" is also specified. \
+      Exiting..."
+    System.exit(1)
+  return args
 
 def execute_queries_for_branch(aws_key_id, aws_key, args, branch, is_first_branch):
   """
@@ -189,7 +203,6 @@ def execute_query(aws_key_id, aws_key, args, query, branch, do_prepare):
 
   benchmark_runner_dir = os.path.join(args.benchmark_dir, "runner")
   if (do_prepare):
-    # Regenerate the Hive tables, and possibly convert the benchmark data to parquet.
     print "Preparing benchmark data"
     prepare_benchmark_script = os.path.join(benchmark_runner_dir, "prepare-benchmark.sh")
     prepare_benchmark_command = "%s \
@@ -208,8 +221,10 @@ def execute_query(aws_key_id, aws_key, args, query, branch, do_prepare):
         args.identity_file,
         args.scale_factor,
         args.file_format)
-    if (args.convert_to_parquet):
+    if (args.parquet):
       prepare_benchmark_command += " --parquet"
+      if (args.skip_parquet_conversion):
+        prepare_benchmark_command += " --skip-parquet-conversion"
     execute_shell_command(prepare_benchmark_command)
   else:
     start_thriftserver(args.driver_addr, args.identity_file)
