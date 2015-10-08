@@ -17,8 +17,7 @@
 package org.apache.spark.shuffle.memory
 
 import org.apache.spark.{ShuffleDependency, SparkConf, TaskContext}
-import org.apache.spark.shuffle.{BaseShuffleHandle, ShuffleHandle, ShuffleManager, ShuffleReader,
-  ShuffleWriter}
+import org.apache.spark.shuffle.{BaseShuffleHandle, ShuffleHandle, ShuffleManager, ShuffleWriter}
 
 /**
  * A ShuffleManager that stores shuffle data in-memory.
@@ -36,14 +35,6 @@ private[spark] class MemoryShuffleManager(conf: SparkConf) extends ShuffleManage
     new BaseShuffleHandle(shuffleId, numMaps, dependency)
   }
 
-  override def getReader[K, C](
-      handle: ShuffleHandle,
-      startPartition: Int,
-      endPartition: Int,
-      context: TaskContext): ShuffleReader[K, C] = {
-    throw new UnsupportedOperationException("Shuffle reader should not be used with monotasks")
-  }
-
   override def getWriter[K, V](
       handle: ShuffleHandle, mapId: Int, context: TaskContext): ShuffleWriter[K, V] = {
     new MemoryShuffleWriter(
@@ -54,11 +45,7 @@ private[spark] class MemoryShuffleManager(conf: SparkConf) extends ShuffleManage
     memoryShuffleBlockManager.removeShuffle(shuffleId)
   }
 
-  override def shuffleBlockManager: MemoryShuffleBlockManager = {
-    memoryShuffleBlockManager
-  }
-
   override def stop(): Unit = {
-    shuffleBlockManager.stop()
+    memoryShuffleBlockManager.stop()
   }
 }
