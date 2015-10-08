@@ -86,7 +86,7 @@ class LocalDagSchedulerSuite extends FunSuite with BeforeAndAfterEach with Local
     when(env.blockManager).thenReturn(blockManager)
     SparkEnv.set(env)
 
-    val context = mock(classOf[TaskContextImpl])
+    val context = new TaskContextImpl(0, 0, 0)
 
     val blockId = new TestBlockId("0")
     val monotaskA = new SimpleMonotask(context) {

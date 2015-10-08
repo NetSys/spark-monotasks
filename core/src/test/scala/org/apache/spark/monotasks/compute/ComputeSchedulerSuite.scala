@@ -18,10 +18,11 @@ package org.apache.spark.monotasks.compute
 
 import java.nio.ByteBuffer
 
-import org.mockito.Mockito.{mock, never, timeout, verify}
+import org.mockito.Mockito.{mock, never, timeout, verify, when}
 
 import org.scalatest.FunSuite
 
+import org.apache.spark.TaskContextImpl
 import org.apache.spark.storage.{BlockManager, MemoryStore, TestBlockId}
 
 class ComputeSchedulerSuite extends FunSuite {
@@ -38,6 +39,7 @@ class ComputeSchedulerSuite extends FunSuite {
 
     // Because there is no free memory, submitted monotasks shouldn't be run immediately.
     val mockComputeMonotask = mock(classOf[ComputeMonotask])
+    when(mockComputeMonotask.context).thenReturn(new TaskContextImpl(0, 0, 0))
     computeScheduler.submitTask(mockComputeMonotask)
     verify(mockComputeMonotask, never()).executeAndHandleExceptions()
 
