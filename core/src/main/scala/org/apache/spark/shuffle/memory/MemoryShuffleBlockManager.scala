@@ -16,23 +16,21 @@
 
 package org.apache.spark.shuffle.memory
 
-import java.nio.ByteBuffer
 import java.util.concurrent.ConcurrentLinkedQueue
 
 import scala.collection.JavaConversions._
 
 import org.apache.spark.{Logging, SparkConf, SparkEnv}
-import org.apache.spark.network.buffer.{ManagedBuffer, NioManagedBuffer}
-import org.apache.spark.shuffle.ShuffleBlockManager
-import org.apache.spark.storage.{BlockNotFoundException, ShuffleBlockId, ShuffleIndexBlockId}
+import org.apache.spark.storage.{ShuffleBlockId, ShuffleIndexBlockId}
 import org.apache.spark.util.{MetadataCleaner, MetadataCleanerType, TimeStampedHashMap}
 
 /**
  * Tracks metadata about the shuffle blocks stored on a particular executor, and periodically
  * deletes old shuffle files.
  */
-private[spark] class MemoryShuffleBlockManager(conf: SparkConf)
-  extends ShuffleBlockManager with Logging {
+private[spark] class MemoryShuffleBlockManager(conf: SparkConf) extends Logging {
+
+  type ShuffleId = Int
 
   private lazy val blockManager = SparkEnv.get.blockManager
 
@@ -43,16 +41,6 @@ private[spark] class MemoryShuffleBlockManager(conf: SparkConf)
 
   private val metadataCleaner =
     new MetadataCleaner(MetadataCleanerType.SHUFFLE_BLOCK_MANAGER, this.cleanup, conf)
-
-  override def getBytes(blockId: ShuffleBlockId): Option[ByteBuffer] = {
-    val segment = getBlockData(blockId)
-    Some(segment.nioByteBuffer())
-  }
-
-  override def getBlockData(blockId: ShuffleBlockId): ManagedBuffer = {
-    blockManager.memoryStore.getBytes(blockId).map(new NioManagedBuffer(_))
-      .getOrElse(throw new BlockNotFoundException(blockId.toString))
-  }
 
   /**
    * Registers shuffle output for a particular map task, so that it can be deleted later by the
@@ -94,7 +82,7 @@ private[spark] class MemoryShuffleBlockManager(conf: SparkConf)
       cleanupTime, (shuffleId, state) => removeShuffleBlocks(shuffleId))
   }
 
-  override def stop() {
+  def stop() {
     metadataCleaner.cancel()
   }
 }
