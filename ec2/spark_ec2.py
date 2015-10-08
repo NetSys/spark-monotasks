@@ -148,7 +148,7 @@ def parse_args():
         default=DEFAULT_SPARK_GITHUB_REPO,
         help="Github repo from which to checkout supplied commit hash (default: %default)")
     parser.add_option(
-        "--hadoop-major-version", default="1",
+        "--hadoop-major-version", default="2",
         help="Major version of Hadoop (default: %default)")
     parser.add_option(
         "-D", metavar="[ADDRESS:]PORT", dest="proxy_port",
