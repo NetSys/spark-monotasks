@@ -179,9 +179,9 @@ def parse_args():
         "--swap", metavar="SWAP", type="int", default=1024,
         help="Swap space to set up per node, in MB (default: %default)")
     parser.add_option(
-        "--spot-price", metavar="PRICE", type="float",
-        help="If specified, launch slaves as spot instances with the given " +
-             "maximum price (in dollars)")
+        "--spot-price", metavar="PRICE", type="float", default=3.0,
+        help="Launch slaves as spot instances with the given maximum price" +
+             "(in dollars). Set to 0 to launch on-demand instances.")
     parser.add_option(
         "--ganglia", action="store_true", default=True,
         help="Setup Ganglia monitoring on cluster (default: %default). NOTE: " +
@@ -465,7 +465,7 @@ def launch_cluster(conn, opts, cluster_name):
             block_map[name] = dev
 
     # Launch slaves
-    if opts.spot_price is not None:
+    if opts.spot_price > 0:
         # Launch spot instances with the requested price
         print ("Requesting %d slaves as spot instances with price $%.3f" %
                (opts.slaves, opts.spot_price))
