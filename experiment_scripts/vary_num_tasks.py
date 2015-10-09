@@ -62,7 +62,7 @@ for hdfs_block_size_multiplier in hdfs_block_size_multiplier_values:
       print "No sorted data deleted, likely because no sorted data existed"
 
   # Run the job.
-  command = "/root/spark/bin/run-example SortJob %s" % " ".join(stringified_parameters)
+  command = "/root/spark/bin/run-example monotasks.SortJob %s" % " ".join(stringified_parameters)
   print "Running sort job with command: ", command
   subprocess.check_call(command, shell=True)
 

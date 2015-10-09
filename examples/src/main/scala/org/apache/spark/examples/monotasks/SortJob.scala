@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package org.apache.spark.examples
+package org.apache.spark.examples.monotasks
 
 import scala.util.Random
 
@@ -58,8 +58,9 @@ object SortJob extends Logging {
         logInfo(s"Generating random data and storing it in $filename")
         val unsortedRdd = spark.parallelize(1 to numMapTasks, numMapTasks).flatMap { i =>
           val random = new Random(i)
-          val value = new LongArrayWritable(Array.fill(itemsPerValue)(random.nextLong))
-          Array.fill(itemsPerPartition)((new LongWritable(random.nextLong), value))
+          Array.fill(itemsPerPartition)((
+            new LongWritable(random.nextLong),
+            new LongArrayWritable(Array.fill(itemsPerValue)(random.nextLong))))
         }
         unsortedRdd.saveAsNewAPIHadoopFile[
           SequenceFileOutputFormat[LongWritable, LongArrayWritable]](filename)
@@ -92,7 +93,7 @@ object SortJob extends Logging {
 /**
  * Partitioner that evenly divides the space of all Longs. Useful to use to avoid sampling data.
  */
-class LongPartitioner(val partitions: Int) extends Partitioner with Logging {
+class LongPartitioner(val partitions: Int) extends Partitioner {
   override def numPartitions: Int = partitions
 
   val partitionSize = (Long.MaxValue.toFloat - Long.MinValue.toFloat) / partitions

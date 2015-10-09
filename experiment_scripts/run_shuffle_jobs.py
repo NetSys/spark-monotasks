@@ -26,7 +26,7 @@ for items_per_partition in items_per_partition_values:
     print "*************Running experiment with %s shuffle values" % items_per_partition
     parameters = [num_map_tasks, num_reduce_tasks, items_per_partition, longs_per_value, num_shuffles, sortByKey, cacheRdd]
     stringified_parameters = ["%s" % p for p in parameters]
-    command = "/root/spark/bin/run-example ShuffleJob %s" % " ".join(stringified_parameters)
+    command = "/root/spark/bin/run-example monotasks.ShuffleJob %s" % " ".join(stringified_parameters)
     print command
     subprocess.check_call(command, shell=True)
 

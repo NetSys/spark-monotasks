@@ -53,7 +53,7 @@ for cores_per_worker in cores_per_worker_values:
     parameters = [num_tasks, num_tasks, items_per_task, values_per_key, num_shuffles,
       data_filename, use_existing_data_files, cores_per_worker]
     stringified_parameters = ["%s" % p for p in parameters]
-    command = "/root/spark/bin/run-example SortJob %s" % " ".join(stringified_parameters)
+    command = "/root/spark/bin/run-example monotasks.SortJob %s" % " ".join(stringified_parameters)
     print command
     subprocess.check_call(command, shell=True)
 

@@ -33,7 +33,7 @@ for num_tasks_multiplier in num_tasks_multipliers:
   items_per_task = int(total_items / num_tasks)
   parameters = [num_tasks, num_tasks, items_per_task, longs_per_value, num_shuffles, sortByKey, cacheRdd]
   stringified_parameters = ["%s" % p for p in parameters]
-  command = "/root/spark/bin/run-example ShuffleJob %s" % " ".join(stringified_parameters)
+  command = "/root/spark/bin/run-example monotasks.ShuffleJob %s" % " ".join(stringified_parameters)
   print command
   subprocess.check_call(command, shell=True)
 
