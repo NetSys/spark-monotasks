@@ -21,7 +21,7 @@ import scala.util.Random
 import org.apache.hadoop.io.LongWritable
 import org.apache.hadoop.mapreduce.lib.output.SequenceFileOutputFormat
 
-import org.apache.spark.{Logging, Partitioner, SparkConf, SparkContext}
+import org.apache.spark.{Logging, SparkConf, SparkContext}
 import org.apache.spark.rdd.ShuffledRDD
 import org.apache.spark.util.LongArrayWritable
 
@@ -92,19 +92,5 @@ object SortJob extends Logging {
       // event logs are more difficult to access.
       spark.stop()
     }
-  }
-}
-
-/**
- * Partitioner that evenly divides the space of all Longs. Useful to use to avoid sampling data.
- */
-class LongPartitioner(val partitions: Int) extends Partitioner {
-  override def numPartitions: Int = partitions
-
-  val partitionSize = (Long.MaxValue.toFloat - Long.MinValue.toFloat) / partitions
-
-  override def getPartition(key: Any): Int = {
-    val partition = (key.asInstanceOf[Long].toDouble - Long.MinValue.toDouble) / partitionSize
-    return Math.min(partition.floor.toInt, numPartitions - 1)
   }
 }
