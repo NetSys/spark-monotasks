@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package org.apache.spark.examples
+package org.apache.spark.examples.monotasks
 
 import scala.concurrent.{Await, ExecutionContext, future}
 import scala.concurrent.duration.{Duration, MINUTES}
