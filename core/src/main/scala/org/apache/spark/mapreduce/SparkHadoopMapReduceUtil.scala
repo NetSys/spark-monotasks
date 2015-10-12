@@ -33,7 +33,7 @@
 
 package org.apache.spark.mapreduce
 
-import java.io.DataOutputStream
+import java.io.{DataOutputStream, OutputStream}
 import java.lang.{Boolean => JBoolean, Integer => JInteger}
 import java.nio.ByteBuffer
 import java.util.UUID
@@ -185,6 +185,9 @@ trait SparkHadoopMapReduceUtil {
       case _: SequenceFileOutputFormat[_, _] =>
         getSequenceFileRecordWriter(byteStream, hadoopConf, hadoopTaskContext, codec)
 
+      case teraOutputFormat: TeraOutputFormat =>
+        getTeraRecordWriter(byteStream, hadoopConf, teraOutputFormat)
+
       case _: TextOutputFormat[_, _] =>
         getTextFileRecordWriter(byteStream, hadoopConf, codec)
 
@@ -206,9 +209,7 @@ trait SparkHadoopMapReduceUtil {
       hadoopConf: Configuration,
       hadoopTaskContext: TaskAttemptContext,
       codec: Option[CompressionCodec]): RecordWriter[Any, Any] = {
-    val statistics = new Statistics(FileSystem.get(hadoopConf).getScheme())
-    val outputStream = new FSDataOutputStream(byteStream, statistics)
-
+    val outputStream = createFsDataOutputStream(byteStream, hadoopConf)
     val keyClass = hadoopTaskContext.getOutputKeyClass()
     val valueClass = hadoopTaskContext.getOutputValueClass()
     val compressionType = codec.map { _ =>
@@ -231,6 +232,15 @@ trait SparkHadoopMapReduceUtil {
     }
   }
 
+  private def getTeraRecordWriter(
+      byteStream: ByteArrayOutputStreamWithZeroCopyByteBuffer,
+      hadoopConf: Configuration,
+      teraOutputFormat: TeraOutputFormat): RecordWriter[Any, Any] = {
+    new teraOutputFormat.TeraRecordWriter(
+      createFsDataOutputStream(byteStream, hadoopConf),
+      Job.getInstance(hadoopConf)).asInstanceOf[RecordWriter[Any, Any]]
+  }
+
   private def getTextFileRecordWriter(
       byteStream: ByteArrayOutputStreamWithZeroCopyByteBuffer,
       hadoopConf: Configuration,
@@ -243,6 +253,12 @@ trait SparkHadoopMapReduceUtil {
     val separator = hadoopConf.get("mapreduce.output.textoutputformat.separator", "\t")
     new TextOutputFormat.LineRecordWriter[Any, Any](outputStream, separator)
   }
+
+  /** Creates an FSDataOutputStream that forwards data to the provided OutputStream. */
+  private def createFsDataOutputStream(
+      outputStream: OutputStream,
+      hadoopConf: Configuration): FSDataOutputStream =
+    new FSDataOutputStream(outputStream, new Statistics(FileSystem.get(hadoopConf).getScheme()))
 
   /**
    * Schedules an HdfsWriteMonotask that will write `buffer` to HDFS. `buffer` is first cached in
