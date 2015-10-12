@@ -2,21 +2,9 @@
 This script runs repeated jobs that read shuffled data.
 """
 
-import os
 import subprocess
-import time
 
-# Copy a file from a given host through scp, throwing an exception if scp fails.
-def scp_from(host, remote_file, local_file):
-  subprocess.check_call(
-    "scp -q -o StrictHostKeyChecking=no '%s:%s' '%s'" %
-    (host, remote_file, local_file), shell=True)
-
-def ssh_get_stdout(host, command):
-  command = "source /root/.bash_profile; %s" % command
-  ssh_command = ("ssh -t -o StrictHostKeyChecking=no %s '%s'" %
-    (host, command))
-  return subprocess.Popen(ssh_command, stdout=subprocess.PIPE, shell=True).communicate()[0]
+import utils
 
 num_machines = 1 
 cores_per_machine = 8
@@ -41,36 +29,5 @@ for items_per_partition in items_per_partition_values:
     command = "/root/spark/bin/run-example ShuffleJob %s" % " ".join(stringified_parameters)
     print command
     subprocess.check_call(command, shell=True)
-    # Name the directory with the logs based on the parameters, along with a timestamp.
-    log_directory_name = "/mnt/experiment_log_%s_%s" % ("_".join(stringified_parameters), time.time())
-    os.makedirs(log_directory_name)
 
-    for slave_hostname in slaves:
-      continuous_monitor_relative_filename = ssh_get_stdout(
-        slave_hostname,
-        "ls -t /tmp/ | grep continuous_monitor | head -n 1").strip("\n").strip("\r")
-      continuous_monitor_filename = "/tmp/%s" % continuous_monitor_relative_filename
-      local_continuous_monitor_file = "%s/%s_executor_monitor" % (log_directory_name, slave_hostname)
-      print ("Copying continuous monitor from file %s on host %s back to %s" % 
-        (continuous_monitor_filename, slave_hostname, local_continuous_monitor_file))
-      scp_from(slave_hostname, continuous_monitor_filename, local_continuous_monitor_file)
-
-    event_log_relative_filename = subprocess.Popen(
-      "ls -t /tmp/spark-events | head -n 1", stdout=subprocess.PIPE, shell=True).communicate()[0]
-    print "Relative filename: ", event_log_relative_filename
-    event_log_filename = "/tmp/spark-events/%s" % event_log_relative_filename.strip("\n").strip("\r")
-    print "Event log filename", event_log_filename
-    command = "mv %s %s/event_log" % (event_log_filename, log_directory_name)
-    subprocess.check_call(command, shell=True)
-
-    # Copy the configuration into the directory to make it easy to see config later.
-    subprocess.check_call("cp /root/spark/conf/spark-defaults.conf %s/" % log_directory_name, shell=True)
-    print "Finished copying results to %s" % log_directory_name
-     
-    # Tar and zip the file so that it can easily be copied out of the cluster.
-    tar_filename = log_directory_name + ".tar.gz"
-
-    # For some reason, the tar command fails without this.
-    subprocess.check_call("touch %s" % tar_filename, shell=True)
-
-    subprocess.check_call("tar czfv %s %s/*" % (tar_filename, log_directory_name), shell=True)
+    utils.copy_and_zip_all_logs(stringified_parameters, slaves)
