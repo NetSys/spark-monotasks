@@ -18,10 +18,7 @@ package org.apache.spark.monotasks.disk
 
 import java.nio.ByteBuffer
 
-import scala.reflect.classTag
-
 import org.apache.hadoop.conf.Configuration
-import org.apache.hadoop.mapreduce.lib.input.FileSplit
 
 import org.apache.spark.{Partition, SparkEnv, TaskContextImpl}
 import org.apache.spark.executor.DataReadMethod
@@ -40,14 +37,7 @@ private[spark] class HdfsReadMonotask(
     hadoopConf) {
 
   private val hadoopSplit =
-    sparkPartition.asInstanceOf[NewHadoopPartition].serializableHadoopSplit.value match {
-      case fileSplit: FileSplit =>
-        fileSplit
-      case otherSplit =>
-        throw new UnsupportedOperationException("Unsupported InputSplit: " +
-          s"${otherSplit.getClass().getName()}. HdfsReadMonotask only supports InputSplits of " +
-          s"type ${classTag[FileSplit]}.")
-    }
+    sparkPartition.asInstanceOf[NewHadoopPartition].serializableHadoopSplit.value
 
   pathOpt = Some(hadoopSplit.getPath())
   resultBlockId = Some(new MonotaskResultBlockId(taskId))

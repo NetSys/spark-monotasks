@@ -38,7 +38,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 
 import scala.collection.mutable.{HashMap, HashSet}
-import scala.reflect.{classTag, ClassTag}
+import scala.reflect.ClassTag
 import scala.util.control.NonFatal
 
 import org.apache.hadoop.conf.{Configurable, Configuration}
@@ -60,10 +60,11 @@ import org.apache.spark.util.NextIterator
 private[spark] class NewHadoopPartition(
     rddId: Int,
     val index: Int,
-    @transient rawSplit: InputSplit with Writable)
+    @transient rawSplit: InputSplit with Writable,
+    @transient hadoopConf: Configuration)
   extends Partition {
 
-  val serializableHadoopSplit = new SerializableWritable(rawSplit)
+  val serializableHadoopSplit = new SerializableWritable(validateSplit(rawSplit, hadoopConf))
 
   // The BlockId used to cache this partition's serialized bytes in the BlockManager after it is
   // read from disk. This is required because the process of reading a block from disk and the
@@ -72,6 +73,47 @@ private[spark] class NewHadoopPartition(
   var serializedDataBlockId: Option[BlockId] = None
 
   override def hashCode(): Int = 41 * (41 + rddId) + index
+
+  /**
+   * Currently, the only type of `InputSplit` that Monotasks supports is a `FileSplit` that
+   * corresponds to an entire HDFS partition. This method verifies that `rawHadoopSplit` meets these
+   * criteria, or throws an exception if it doesn't. Returns `rawHadoopSplit` cast to a `FileSplit`.
+   */
+  private def validateSplit(
+      rawHadoopSplit: InputSplit,
+      localHadoopConf: Configuration): FileSplit = {
+    val hadoopFileSplit = rawHadoopSplit match {
+      case fileSplit: FileSplit with Writable =>
+        fileSplit
+      case _ =>
+        throw new UnsupportedOperationException("Unsupported InputSplit: " +
+          s"${rawHadoopSplit.getClass().getName()}. NewHadoopRDD only supports InputSplits of " +
+          s"type ${classOf[FileSplit].getName()}.")
+    }
+
+    // Retrieve the FileStatus object for the partition so that we can verify that the FileSplit
+    // corresponds to the entire partition.
+    val pathToPartitionFile = hadoopFileSplit.getPath()
+    val fileStatuses =
+      pathToPartitionFile.getFileSystem(localHadoopConf).listStatus(pathToPartitionFile)
+    val numFiles = fileStatuses.size
+    val pathString = pathToPartitionFile.toUri()
+    if (numFiles == 0) {
+      throw new SparkException(s"Path $pathString does not exist.")
+    }
+    if (numFiles > 1) {
+      throw new SparkException(s"Path $pathString should point to a single file, but it " +
+        s"actually points to a directory containing $numFiles files. Monotasks does not " +
+        "currently support reading multiple files from one macrotask.")
+    }
+
+    if (hadoopFileSplit.getLength() != fileStatuses.head.getLen()) {
+      throw new UnsupportedOperationException(s"FileSplit for $pathString does not correspond " +
+        "to the entire HDFS partition. Monotasks does not currently support multiple " +
+        "FileSplits per HDFS partition.")
+    }
+    hadoopFileSplit
+  }
 }
 
 /**
@@ -128,22 +170,15 @@ class NewHadoopRDD[K, V](
     }
 
     val rawSplits = inputFormat.getSplits(newJobContext(hadoopConf, jobId)).toArray
-    (0 until rawSplits.size).map(i =>
-      new NewHadoopPartition(id, i, rawSplits(i).asInstanceOf[InputSplit with Writable])).toArray
+    (0 until rawSplits.size).map(i => new NewHadoopPartition(
+      id, i, rawSplits(i).asInstanceOf[InputSplit with Writable], hadoopConf)).toArray
   }
 
   override def compute(
       sparkPartition: Partition,
       sparkTaskContext: TaskContext): InterruptibleIterator[(K, V)] = {
     val memoryStoreHadoopPartition = sparkPartition.asInstanceOf[NewHadoopPartition]
-    val hadoopSplit = memoryStoreHadoopPartition.serializableHadoopSplit.value match {
-        case fileSplit: FileSplit =>
-          fileSplit
-        case otherSplit =>
-          throw new UnsupportedOperationException("Unsupported InputSplit: " +
-            s"${otherSplit.getClass().getName()}. NewHadoopRDD only supports InputSplits of " +
-            s"type ${classTag[FileSplit]}.")
-    }
+    val hadoopSplit = memoryStoreHadoopPartition.serializableHadoopSplit.value
 
     val startPosition = hadoopSplit.getStart()
     val path = hadoopSplit.getPath()
@@ -282,7 +317,7 @@ private[spark] class WholeTextFileRDD(
     inputFormatClass: Class[_ <: WholeTextFileInputFormat],
     keyClass: Class[String],
     valueClass: Class[String],
-    @transient hadoopConf: Configuration,
+    @transient private val hadoopConf: Configuration,
     private val minPartitions: Int)
   extends NewHadoopRDD[String, String](sc, inputFormatClass, keyClass, valueClass, hadoopConf) {
 
@@ -297,7 +332,7 @@ private[spark] class WholeTextFileRDD(
     inputFormat.setMinPartitions(jobContext, minPartitions)
 
     val rawSplits = inputFormat.getSplits(jobContext).toArray
-    (0 until rawSplits.size).map(i =>
-      new NewHadoopPartition(id, i, rawSplits(i).asInstanceOf[InputSplit with Writable])).toArray
+    (0 until rawSplits.size).map(i => new NewHadoopPartition(
+      id, i, rawSplits(i).asInstanceOf[InputSplit with Writable], hadoopConf)).toArray
   }
 }
