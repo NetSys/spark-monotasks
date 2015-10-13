@@ -24,24 +24,25 @@ import org.apache.spark.mapreduce.{TeraInputFormat, TeraOutputFormat}
 object TeraGen {
   def main(args: Array[String]) {
 
-    if (args.length < 2) {
+    if (args.length < 3) {
       println("Usage:")
       println("DRIVER_MEMORY=[mem] spark-submit " +
         "com.github.ehiggs.spark.terasort.TeraGen " +
         "spark-terasort-1.0-SNAPSHOT-with-dependencies.jar " +
-        "[output-size] [output-directory]")
+        "[number-of-partitions] [output-size] [output-directory]")
       println(" ")
       println("Example:")
       println("DRIVER_MEMORY=50g spark-submit " +
         "com.github.ehiggs.spark.terasort.TeraGen " +
         "spark-terasort-1.0-SNAPSHOT-with-dependencies.jar " +
-        "100G file:///scratch/username/terasort_in")
+        "10 100G file:///scratch/username/terasort_in")
       System.exit(0)
     }
 
     // Process command line arguments
-    val outputSizeInBytes = sizeStrToBytes(args(0))
-    val outputFile = args(1)
+    val numberOfPartitions = args(0).toInt
+    val outputSizeInBytes = sizeStrToBytes(args(1))
+    val outputFile = args(2)
 
     val size = sizeToSizeStr(outputSizeInBytes)
 
@@ -49,7 +50,7 @@ object TeraGen {
       .setAppName(s"TeraGen ($size)")
     val sc = new SparkContext(conf)
 
-    val parts = sc.defaultParallelism
+    val parts = numberOfPartitions
     val recordsPerPartition = outputSizeInBytes / 100 / parts.toLong
     val numRecords = recordsPerPartition * parts.toLong
 
