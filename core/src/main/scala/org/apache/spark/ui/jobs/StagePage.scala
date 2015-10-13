@@ -655,7 +655,7 @@ private[ui] class StagePage(parent: StagesTab) extends WebUIPage("stage") {
           {Unparsed(diskUtilizationReadable)}
         </td>
         <td class={TaskDetailsClassNames.NETWORK_UTILIZATION}>
-          {networkBytesReadReadable + " , " + networkBytesTransmittedReadable}
+          {networkBytesReadReadable + ", " + networkBytesTransmittedReadable}
         </td>
         {errorMessageCell(errorMessage)}
       </tr>
