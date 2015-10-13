@@ -58,6 +58,13 @@ object TeraInputFormat {
 
 class TeraInputFormat extends FileInputFormat[Array[Byte], Array[Byte]] {
 
+  /**
+   * Always returns false, signifying that each HDFS partition file should correspond to exactly one
+   * InputSplit. This is necessary in order to achieve the same behavior as Monotasks, which does
+   * not support multiple InputSplits per partition.
+   */
+  override def isSplitable(context: JobContext, filename: Path): Boolean = false
+
   override def createRecordReader(split: InputSplit, context: TaskAttemptContext)
   : RecordReader[Array[Byte], Array[Byte]] = new TeraRecordReader()
 
