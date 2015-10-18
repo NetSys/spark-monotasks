@@ -57,6 +57,8 @@ import org.apache.spark.rdd.NewHadoopRDD.NewHadoopMapPartitionsWithSplitRDD
 import org.apache.spark.storage.{BlockException, BlockId, RDDBlockId, StorageLevel}
 import org.apache.spark.util.NextIterator
 
+import parquet.hadoop.{ParquetInputSplit, ParquetInputSplitPrivateMethodAccessor}
+
 private[spark] class NewHadoopPartition(
     rddId: Int,
     val index: Int,
@@ -177,33 +179,16 @@ class NewHadoopRDD[K, V](
   override def compute(
       sparkPartition: Partition,
       sparkTaskContext: TaskContext): InterruptibleIterator[(K, V)] = {
-    val memoryStoreHadoopPartition = sparkPartition.asInstanceOf[NewHadoopPartition]
-    val hadoopSplit = memoryStoreHadoopPartition.serializableHadoopSplit.value
-
-    val startPosition = hadoopSplit.getStart()
-    val path = hadoopSplit.getPath()
     val localHadoopConf = confBroadcast.value.value
-    val memoryStoreFileSystem = new MemoryStoreFileSystem(
-      SparkEnv.get.blockManager,
-      startPosition,
-      path.getFileSystem(localHadoopConf),
-      localHadoopConf)
-
-    val blockId = new RDDBlockId(id, sparkPartition.index)
-    val serializedDataBlockId = memoryStoreHadoopPartition.serializedDataBlockId.getOrElse(
-      throw new BlockException(
-        blockId, s"Could not find the serialized data blockId for block $blockId."))
-
-    val memoryStorePath =
-      new MemoryStorePath(path.toUri(), Some(serializedDataBlockId), memoryStoreFileSystem)
-    val memoryStoreFileSplit =
-      new FileSplit(memoryStorePath, startPosition, hadoopSplit.getLength(), null)
-
     val inputFormat = inputFormatClass.newInstance
     inputFormat match {
       case configurable: Configurable => configurable.setConf(localHadoopConf)
       case _ =>
     }
+
+    val memoryStoreHadoopPartition = sparkPartition.asInstanceOf[NewHadoopPartition]
+    val memoryStoreFileSplit =
+      createMemoryStoreFileSplit(memoryStoreHadoopPartition, localHadoopConf)
 
     // Hadoop wants a 32-bit task attempt ID, so if ours is bigger than Int.MaxValue, roll it
     // around by taking a mod. We expect that no task will be attempted 2 billion times.
@@ -251,6 +236,53 @@ class NewHadoopRDD[K, V](
         }
       }
     })
+  }
+
+  /**
+   * Creates the Hadoop `FileSplit` object corresponding to the provided `NewHadoopPartition`. The
+   * path stored internally by the `FileSplit` will be a `MemoryStorePath` configured to read the
+   * partition from the `MemoryStore`, instead of from HDFS.
+   */
+  private def createMemoryStoreFileSplit(
+      memoryStoreHadoopPartition: NewHadoopPartition,
+      hadoopConf: Configuration): FileSplit = {
+    val hadoopFileSplit = memoryStoreHadoopPartition.serializableHadoopSplit.value
+    val splitStartPosition = hadoopFileSplit.getStart()
+    val path = hadoopFileSplit.getPath()
+    val memoryStoreFileSystem = new MemoryStoreFileSystem(
+      SparkEnv.get.blockManager,
+      splitStartPosition,
+      path.getFileSystem(hadoopConf),
+      hadoopConf)
+
+    val blockId = new RDDBlockId(id, memoryStoreHadoopPartition.index)
+    val serializedDataBlockId = memoryStoreHadoopPartition.serializedDataBlockId.getOrElse(
+      throw new BlockException(
+        blockId, s"Could not find the serialized data blockId for block $blockId."))
+    val memoryStorePath =
+      new MemoryStorePath(path.toUri(), Some(serializedDataBlockId), memoryStoreFileSystem)
+    val splitLength = hadoopFileSplit.getLength()
+    val splitLocations = hadoopFileSplit.getLocations()
+
+    // Duplicate the FileSplit, but use a MemoryStorePath that points to data that is in memory,
+    // rather than data stored on disk using HDFS.
+    hadoopFileSplit match {
+      // In order to support new subclasses of FileSplits, add specialized cases here.
+      case parquetSplit: ParquetInputSplit =>
+        val wrapper = new ParquetInputSplitPrivateMethodAccessor(parquetSplit)
+        new ParquetInputSplit(
+          memoryStorePath,
+          splitStartPosition,
+          wrapper.getEnd(),
+          splitLength,
+          splitLocations,
+          wrapper.getRowGroupOffsets(),
+          wrapper.getRequestedSchema(),
+          wrapper.getReadSupportMetadata())
+
+      case _ =>
+        new FileSplit(memoryStorePath, splitStartPosition, splitLength, splitLocations)
+    }
   }
 
   /** Maps over a partition, providing the InputSplit that was used as the base of the partition. */
