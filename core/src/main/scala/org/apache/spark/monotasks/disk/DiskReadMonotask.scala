@@ -91,7 +91,11 @@ private[spark] class DiskReadMonotask(
     }
 
     buffer.flip()
-    blockManager.cacheBytes(getResultBlockId(), buffer, StorageLevel.MEMORY_ONLY_SER, true)
+    // The master should never be told about blocks read by a DiskReadMonotask, because they're
+    // only read into memory temporarily, and will be dropped from memory as soon as all of
+    // this task's dependents finish.
+    blockManager.cacheBytes(
+      getResultBlockId(), buffer, StorageLevel.MEMORY_ONLY_SER, tellMaster = false)
     context.taskMetrics.getInputMetricsForReadMethod(DataReadMethod.Disk).incBytesRead(bytesToRead)
   }
 }

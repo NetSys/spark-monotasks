@@ -85,6 +85,6 @@ class DiskReadMonotaskSuite extends FunSuite with BeforeAndAfter {
 
     writeMonotask.execute()
     new DiskReadMonotask(taskContext, blockId, diskId).execute()
-    verify(blockManager).cacheBytes(blockId, dataBuffer, StorageLevel.MEMORY_ONLY_SER, true)
+    verify(blockManager).cacheBytes(blockId, dataBuffer, StorageLevel.MEMORY_ONLY_SER, false)
   }
 }
