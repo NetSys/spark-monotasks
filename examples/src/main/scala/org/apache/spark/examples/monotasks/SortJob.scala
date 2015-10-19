@@ -42,6 +42,11 @@ object SortJob extends Logging {
     val maybeInputFilename = if (args.length > 5) Some(args(5)) else None
     val readExistingData = if (args.length > 6) args(6).toBoolean else false
 
+    // Sleep for a few seconds to give all of the executors a chance to register. Without this
+    // sleep, the first stage can get scheduled before all of the executors have registered,
+    // leading to load imbalance.
+    Thread.sleep(5000)
+
     try {
       val filename = maybeInputFilename match {
         case Some(inputFilename) =>
