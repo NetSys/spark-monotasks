@@ -860,7 +860,10 @@ private[spark] class TaskSetManager(
   }
 
   private def getLocalityWait(level: TaskLocality.TaskLocality): Long = {
-    val defaultWait = conf.get("spark.locality.wait", "3000")
+    // Set this wait to very high by default, to essentially disable delay scheduling for monotasks.
+    // TODO: Add functionality to allow monotasks to run macrotasks on a different machine than
+    //       where the input data resides.
+    val defaultWait = conf.get("spark.locality.wait", "1000000")
     level match {
       case TaskLocality.PROCESS_LOCAL =>
         conf.get("spark.locality.wait.process", defaultWait).toLong
