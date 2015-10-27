@@ -520,7 +520,7 @@ private[sql] case class ParquetRelation2(
 
           Array.tabulate[SparkPartition](rawSplits.size) { i =>
             new NewHadoopPartition(
-              id, i, rawSplits(i).asInstanceOf[InputSplit with Writable], jobConf)
+              id, i, rawSplits(i).asInstanceOf[InputSplit with Writable], getConf)
           }
         }
       }
