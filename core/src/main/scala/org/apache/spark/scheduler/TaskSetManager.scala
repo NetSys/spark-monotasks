@@ -863,14 +863,14 @@ private[spark] class TaskSetManager(
     // Set this wait to very high by default, to essentially disable delay scheduling for monotasks.
     // TODO: Add functionality to allow monotasks to run macrotasks on a different machine than
     //       where the input data resides.
-    val defaultWait = conf.get("spark.locality.wait", "1000000")
+    val defaultWait = conf.getLong("spark.locality.wait", TaskSetManager.DEFAULT_LOCALITY_WAIT)
     level match {
       case TaskLocality.PROCESS_LOCAL =>
-        conf.get("spark.locality.wait.process", defaultWait).toLong
+        conf.getLong("spark.locality.wait.process", defaultWait)
       case TaskLocality.NODE_LOCAL =>
-        conf.get("spark.locality.wait.node", defaultWait).toLong
+        conf.getLong("spark.locality.wait.node", defaultWait)
       case TaskLocality.RACK_LOCAL =>
-        conf.get("spark.locality.wait.rack", defaultWait).toLong
+        conf.getLong("spark.locality.wait.rack", defaultWait)
       case _ => 0L
     }
   }
@@ -919,4 +919,7 @@ private[spark] object TaskSetManager {
   // The user will be warned if any stages contain a task that has a serialized size greater than
   // this.
   val TASK_SIZE_TO_WARN_KB = 100
+
+  // Default amount of time to wait before allowing task scheduling at the next locality level.
+  val DEFAULT_LOCALITY_WAIT = 1000000
 }
