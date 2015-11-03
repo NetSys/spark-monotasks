@@ -45,19 +45,25 @@ private[spark] class NetworkRequestMonotask(
   resultBlockId = Some(new MonotaskResultBlockId(taskId))
 
   /** Scheduler to notify about bytes received over the network. Set by execute(). */
-  var networkScheduler: Option[NetworkScheduler] = None
+  private var networkScheduler: Option[NetworkScheduler] = None
+
+  /** Time when the request for remote data was issued. */
+  private var requestIssueTimeNanos = 0L
 
   override def execute(scheduler: NetworkScheduler): Unit = {
     logInfo(s"Sending request for block $shuffleBlockId (size (${Utils.bytesToString(size)}}) " +
       s"to $remoteAddress")
     networkScheduler = Some(scheduler)
     scheduler.addOutstandingBytes(size)
+    requestIssueTimeNanos = System.nanoTime()
 
     try {
       SparkEnv.get.blockTransferService.fetchBlock(
         remoteAddress.host,
         remoteAddress.port,
         shuffleBlockId.toString,
+        context.taskAttemptId,
+        context.attemptNumber,
         this)
     } catch {
       case NonFatal(t) => {
@@ -73,17 +79,26 @@ private[spark] class NetworkRequestMonotask(
     }
   }
 
-  override def onSuccess(blockId: String, buf: ManagedBuffer): Unit = {
+  override def onSuccess(
+      blockId: String,
+      diskReadNanos: Long,
+      totalRemoteNanos: Long,
+      buf: ManagedBuffer): Unit = {
     networkScheduler.map(_.addOutstandingBytes(-size)).orElse {
       throw new IllegalStateException(
         s"onSuccess called for block $blockId in monotask $taskId before a NetworkScheduler " +
         "was configured")
     }
 
+    val elapsedNanos = System.nanoTime() - requestIssueTimeNanos
+    logInfo(s"Received block $blockId from BlockManagerId $remoteAddress (total elapsed nanos: " +
+      s"$elapsedNanos; nanos on remote machine: $totalRemoteNanos; disk nanos: $diskReadNanos)")
+
     // Increment the ref count because we need to pass this to a different thread.
     // This needs to be released after use.
     buf.retain()
     SparkEnv.get.blockManager.cacheSingle(getResultBlockId(), buf, StorageLevel.MEMORY_ONLY, false)
+    context.taskMetrics.incDiskNanos(diskReadNanos)
     localDagScheduler.post(TaskSuccess(this))
   }
 

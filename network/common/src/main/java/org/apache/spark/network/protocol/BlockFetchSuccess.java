@@ -49,10 +49,22 @@ import org.apache.spark.network.buffer.NettyManagedBuffer;
 public final class BlockFetchSuccess implements ResponseMessage {
   public final String blockId;
   public final ManagedBuffer buffer;
+  public final Long diskReadNanos;
+  /**
+   * Time elapsed on the remote machine, from when the machine received the request for a remote
+   * block until the machine sent a response.
+   */
+  public final Long totalRemoteNanos;
 
-  public BlockFetchSuccess(String blockId, ManagedBuffer buffer) {
+  public BlockFetchSuccess(
+      String blockId,
+      ManagedBuffer buffer,
+      Long diskReadNanos,
+      Long totalRemoteNanos) {
     this.blockId = blockId;
     this.buffer = buffer;
+    this.diskReadNanos = diskReadNanos;
+    this.totalRemoteNanos = totalRemoteNanos;
   }
 
   @Override
@@ -60,28 +72,33 @@ public final class BlockFetchSuccess implements ResponseMessage {
 
   @Override
   public int encodedLength() {
-    return Encoders.Strings.encodedLength(blockId);
+    return Encoders.Strings.encodedLength(blockId) + 8 + 8;
   }
 
   /** Encoding does NOT include 'buffer' itself. See {@link MessageEncoder}. */
   @Override
   public void encode(ByteBuf buf) {
     Encoders.Strings.encode(buf, blockId);
+    buf.writeLong(diskReadNanos);
+    buf.writeLong(totalRemoteNanos);
   }
 
   /** Decoding uses the given ByteBuf as our data, and will retain() it. */
   public static BlockFetchSuccess decode(ByteBuf buf) {
     String blockId = Encoders.Strings.decode(buf);
+    Long diskReadNanos = buf.readLong();
+    Long totalFetchTimeNanos = buf.readLong();
     buf.retain();
     NettyManagedBuffer managedBuf = new NettyManagedBuffer(buf.duplicate());
-    return new BlockFetchSuccess(blockId, managedBuf);
+    return new BlockFetchSuccess(blockId, managedBuf, diskReadNanos, totalFetchTimeNanos);
   }
 
   @Override
   public boolean equals(Object other) {
     if (other instanceof BlockFetchSuccess) {
       BlockFetchSuccess o = (BlockFetchSuccess) other;
-      return blockId.equals(o.blockId) && buffer.equals(o.buffer);
+      return (blockId.equals(o.blockId) && buffer.equals(o.buffer) &&
+        (diskReadNanos == o.diskReadNanos) && (totalRemoteNanos == o.totalRemoteNanos));
     }
     return false;
   }
@@ -91,6 +108,8 @@ public final class BlockFetchSuccess implements ResponseMessage {
     return Objects.toStringHelper(this)
       .add("blockId", blockId)
       .add("buffer", buffer)
+      .add("diskReadNanos", diskReadNanos)
+      .add("totalRemoteNanos", totalRemoteNanos)
       .toString();
   }
 }

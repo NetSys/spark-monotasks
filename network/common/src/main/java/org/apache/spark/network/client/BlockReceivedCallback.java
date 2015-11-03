@@ -44,7 +44,7 @@ public interface BlockReceivedCallback {
    * call returns. You must therefore either retain() the buffer or copy its contents before
    * returning.
    */
-  void onSuccess(String blockId, ManagedBuffer buffer);
+  void onSuccess(String blockId, long diskReadNanos, long totalRemoteNanos, ManagedBuffer buffer);
 
   /** Called upon failure to fetch a particular block. */
   void onFailure(String blockId, Throwable e);

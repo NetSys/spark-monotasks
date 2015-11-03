@@ -47,7 +47,7 @@ private[spark] class LocalDagScheduler(blockFileManager: BlockFileManager)
    * TaskContextImpl to use for monotasks that do not correspond to a macrotask running on this
    * machine (e.g., DiskRemoveMonotasks that are removing shuffle data that is no longer needed).
    */
-  val genericTaskContext = new TaskContextImpl(-1, 0)
+  val genericTaskContext = new TaskContextImpl(-1, 0, taskIsRunningRemotely = true)
 
   /**
    * Backend to send notifications to when macrotasks complete successfully. Set by
@@ -72,8 +72,18 @@ private[spark] class LocalDagScheduler(blockFileManager: BlockFileManager)
    * IDs for macrotasks that currently are running. Used to determine whether to notify the
    * executor backend that a task has failed (used to avoid duplicate failure messages if multiple
    * monotasks for the macrotask fail).
+   *
+   * TODO: Consider separating out the macrotasks that are running locally from the ones that are
+   *       running remotely.
    */
   private[monotasks] val runningMacrotaskAttemptIds = new HashSet[Long]()
+
+  /**
+   * For each remote macrotask that has monotasks running on this executor, the number of remaining
+   * monotasks to be run (including any monotasks that are currently running). This is used to
+   * clean up state when all of the monotasks corresponding to a remote macrotask have completed.
+   */
+  private val remoteMacrotaskAttemptIdToRemainingMonotasks = new HashMap[Long, Int]()
 
   // These maps each map a macrotask ID to the number of a particular type of monotasks that
   // are running for that macrotask. Each map includes only macrotasks that have at least one
@@ -169,6 +179,12 @@ private[spark] class LocalDagScheduler(blockFileManager: BlockFileManager)
     val taskAttemptId = monotask.context.taskAttemptId
     logDebug(s"Submitting monotask $monotask (id: ${monotask.taskId}) for macrotask $taskAttemptId")
     runningMacrotaskAttemptIds += taskAttemptId
+
+    if (monotask.context.taskIsRunningRemotely) {
+      remoteMacrotaskAttemptIdToRemainingMonotasks.put(
+        taskAttemptId,
+        remoteMacrotaskAttemptIdToRemainingMonotasks.getOrElse(taskAttemptId, 0) + 1)
+    }
   }
 
   private def getMapToUpdateNumRunningMonotasks(monotask: Monotask): HashMap[Long, Int] = {
@@ -249,6 +265,18 @@ private[spark] class LocalDagScheduler(blockFileManager: BlockFileManager)
         logDebug(s"Notifying executorBackend about successful completion of task $taskAttemptId")
         sendStatusUpdate(taskAttemptId, TaskState.FINISHED, result)
       }
+
+      if (completedMonotask.context.taskIsRunningRemotely) {
+        remoteMacrotaskAttemptIdToRemainingMonotasks.get(taskAttemptId).foreach { numMonotasks =>
+          val numRemainingMonotasks = numMonotasks - 1
+          if (numRemainingMonotasks == 0) {
+            runningMacrotaskAttemptIds.remove(taskAttemptId)
+            remoteMacrotaskAttemptIdToRemainingMonotasks.remove(taskAttemptId)
+          } else {
+            remoteMacrotaskAttemptIdToRemainingMonotasks.put(taskAttemptId, numRemainingMonotasks)
+          }
+        }
+      }
     } else {
       // This will only happen if another monotask in this macrotask failed while completedMonotask
       // was running, causing the macrotask to fail and its taskAttemptId to be removed from
@@ -280,15 +308,17 @@ private[spark] class LocalDagScheduler(blockFileManager: BlockFileManager)
 
     // Notify the executor backend that the macrotask has failed if we didn't already, and if the
     // monotask failure corresponded to a macrotask running on this machine.
-    if (runningMacrotaskAttemptIds.remove(taskAttemptId) &&
-      (failedMonotask.context != genericTaskContext)) {
-
-      failedMonotask.context.markTaskCompleted()
-      val failureReason = serializedFailureReason.getOrElse {
-        throw new IllegalStateException(
-          s"Expect a failure reason to be passed in when monotasks for local macrotasks fail")
+    if (runningMacrotaskAttemptIds.remove(taskAttemptId)) {
+      if (failedMonotask.context.taskIsRunningRemotely) {
+        remoteMacrotaskAttemptIdToRemainingMonotasks.remove(taskAttemptId)
+      } else {
+        failedMonotask.context.markTaskCompleted()
+        val failureReason = serializedFailureReason.getOrElse {
+          throw new IllegalStateException(
+            s"Expect a failure reason to be passed in when monotasks for local macrotasks fail")
+        }
+        sendStatusUpdate(taskAttemptId, TaskState.FAILED, failureReason)
       }
-      sendStatusUpdate(taskAttemptId, TaskState.FAILED, failureReason)
     }
   }
 

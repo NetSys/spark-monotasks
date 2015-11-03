@@ -42,9 +42,13 @@ import io.netty.buffer.ByteBuf;
  */
 public final class BlockFetchRequest implements RequestMessage {
   public final String blockId;
+  public final Long taskAttemptId;
+  public final int attemptNumber;
 
-  public BlockFetchRequest(String blockId) {
+  public BlockFetchRequest(String blockId, Long taskAttemptId, int attemptNumber) {
     this.blockId = blockId;
+    this.taskAttemptId = taskAttemptId;
+    this.attemptNumber = attemptNumber;
   }
 
   @Override
@@ -54,23 +58,30 @@ public final class BlockFetchRequest implements RequestMessage {
 
   @Override
   public int encodedLength() {
-    return Encoders.Strings.encodedLength(blockId);
+    return Encoders.Strings.encodedLength(blockId) + 8 + 4;
   }
 
   @Override
   public void encode(ByteBuf buf) {
     Encoders.Strings.encode(buf, blockId);
+    buf.writeLong(taskAttemptId);
+    buf.writeInt(attemptNumber);
   }
 
   public static BlockFetchRequest decode(ByteBuf buf) {
-    return new BlockFetchRequest(Encoders.Strings.decode(buf));
+    String blockId = Encoders.Strings.decode(buf);
+    Long taskAttemptId = buf.readLong();
+    int attemptNumber = buf.readInt();
+    return new BlockFetchRequest(blockId, taskAttemptId, attemptNumber);
+
   }
 
   @Override
   public boolean equals(Object other) {
     if (other instanceof BlockFetchRequest) {
       BlockFetchRequest o = (BlockFetchRequest) other;
-      return blockId.equals(o.blockId);
+      return ((blockId.equals(o.blockId)) && (taskAttemptId == o.taskAttemptId) &&
+        (attemptNumber == o.attemptNumber));
     }
     return false;
   }
@@ -79,6 +90,8 @@ public final class BlockFetchRequest implements RequestMessage {
   public String toString() {
     return Objects.toStringHelper(this)
       .add("blockId", blockId)
+      .add("taskAttemptId", taskAttemptId)
+      .add("attemptNumber", attemptNumber)
       .toString();
   }
 }

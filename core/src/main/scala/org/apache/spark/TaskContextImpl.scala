@@ -38,9 +38,18 @@ import scala.collection.mutable.{ArrayBuffer, Map}
 import org.apache.spark.executor.TaskMetrics
 import org.apache.spark.util.{TaskCompletionListener, TaskCompletionListenerException}
 
+/**
+ * Stores metadata about a macrotask, including metrics.
+ *
+ * @param taskIsRunningRemotely Whether this TaskContextImpl is for a macrotask that is running on
+ *                              a remote executor (this will be true when a TaskContextImpl is
+ *                              created for the monotasks that fetch shuffle data, for example).
+ * @param runningLocally Whether the task is running in the same JVM as the Spark Master.
+ */
 private[spark] class TaskContextImpl(
     override val taskAttemptId: Long,
     override val attemptNumber: Int,
+    val taskIsRunningRemotely: Boolean = false,
     val runningLocally: Boolean = false,
     val taskMetrics: TaskMetrics = TaskMetrics.empty)
   extends TaskContext

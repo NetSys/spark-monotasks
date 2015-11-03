@@ -79,13 +79,13 @@ public class ProtocolSuite {
 
   @Test
   public void requests() {
-    testClientToServer(new BlockFetchRequest("rdd_1_2"));
+    testClientToServer(new BlockFetchRequest("rdd_1_2", 0L, 0));
   }
 
   @Test
   public void responses() {
-    testServerToClient(new BlockFetchSuccess("rdd_1_2", new TestManagedBuffer(10)));
-    testServerToClient(new BlockFetchSuccess("rdd_1_2", new TestManagedBuffer(0)));
+    testServerToClient(new BlockFetchSuccess("rdd_1_2", new TestManagedBuffer(10), 0L, 0L));
+    testServerToClient(new BlockFetchSuccess("rdd_1_2", new TestManagedBuffer(0), 0L, 0L));
     testServerToClient(new BlockFetchFailure("rdd_1_2", "this is an error"));
     testServerToClient(new BlockFetchFailure("rdd_1_2", ""));
   }

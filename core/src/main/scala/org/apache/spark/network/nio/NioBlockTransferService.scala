@@ -97,6 +97,8 @@ final class NioBlockTransferService(conf: SparkConf, securityManager: SecurityMa
       host: String,
       port: Int,
       blockId: String,
+      taskAttemptId: Long,
+      attemptNumber: Int,
       listener: BlockReceivedCallback): Unit = {
     checkInit()
 
@@ -126,7 +128,7 @@ final class NioBlockTransferService(conf: SparkConf, securityManager: SecurityMa
           } else {
             val blockId = blockMessage.getId
             listener.onSuccess(
-              blockId.toString, new NioManagedBuffer(blockMessage.getData))
+              blockId.toString, 0L, 0L, new NioManagedBuffer(blockMessage.getData))
           }
         }
       }

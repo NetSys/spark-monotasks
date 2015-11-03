@@ -119,7 +119,7 @@ public class TransportResponseHandler extends MessageHandler<ResponseMessage> {
         resp.buffer.release();
       } else {
         outstandingFetches.remove(resp.blockId);
-        listener.onSuccess(resp.blockId, resp.buffer);
+        listener.onSuccess(resp.blockId, resp.diskReadNanos, resp.totalRemoteNanos, resp.buffer);
         resp.buffer.release();
       }
     } else if (message instanceof BlockFetchFailure) {

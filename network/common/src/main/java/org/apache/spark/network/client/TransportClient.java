@@ -86,14 +86,18 @@ public class TransportClient implements Closeable {
    * @param blockId Identifier for the block.
    * @param callback Callback invoked upon successful receipt of block, or upon any failure.
    */
-  public void fetchBlock(final String blockId, final BlockReceivedCallback callback) {
+  public void fetchBlock(
+      final String blockId,
+      Long taskAttemptId,
+      int attemptNumber,
+      final BlockReceivedCallback callback) {
     final String serverAddr = NettyUtils.getRemoteAddress(channel);
     final long startTime = System.currentTimeMillis();
     logger.debug("Sending request for block {} to {}", blockId, serverAddr);
 
     handler.addFetchRequest(blockId, callback);
 
-    channel.writeAndFlush(new BlockFetchRequest(blockId)).addListener(
+    channel.writeAndFlush(new BlockFetchRequest(blockId, taskAttemptId, attemptNumber)).addListener(
       new ChannelFutureListener() {
         @Override
         public void operationComplete(ChannelFuture future) throws Exception {

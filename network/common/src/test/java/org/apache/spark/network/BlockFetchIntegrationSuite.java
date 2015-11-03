@@ -101,13 +101,14 @@ public class BlockFetchIntegrationSuite {
 
     BlockFetcher blockFetcher = new BlockFetcher() {
       @Override
-      public void getBlockData(String blockId, Channel channel) {
+      public void getBlockData(
+           String blockId, Channel channel, long taskAttemptId, int attemptNumber) {
         if (blockId.equals(BUFFER_BLOCK_ID)) {
-          channel.writeAndFlush(new BlockFetchSuccess(blockId, new NioManagedBuffer(buf)));
+          channel.writeAndFlush(new BlockFetchSuccess(blockId, new NioManagedBuffer(buf), 0L, 0L));
         } else if (blockId.equals(FILE_BLOCK_ID)) {
           ManagedBuffer buffer =
             new FileSegmentManagedBuffer(conf, testFile, 10, testFile.length() - 25);
-          channel.writeAndFlush(new BlockFetchSuccess(blockId, buffer));
+          channel.writeAndFlush(new BlockFetchSuccess(blockId, buffer, 0L, 0L));
         } else {
           channel.writeAndFlush(new BlockFetchFailure(blockId, "Invalid chunk index: " + blockId));
         }
@@ -149,7 +150,8 @@ public class BlockFetchIntegrationSuite {
 
     BlockReceivedCallback callback = new BlockReceivedCallback() {
       @Override
-      public void onSuccess(String blockId, ManagedBuffer buffer) {
+      public void onSuccess(
+          String blockId, long diskReadNanos, long totalRemoteNanos, ManagedBuffer buffer) {
         buffer.retain();
         res.successBlocks.add(blockId);
         res.buffers.add(buffer);
@@ -163,7 +165,7 @@ public class BlockFetchIntegrationSuite {
       }
     };
 
-    client.fetchBlock(blockId, callback);
+    client.fetchBlock(blockId, 0L, 0, callback);
     if (!sem.tryAcquire(1, 5, TimeUnit.SECONDS)) {
       fail("Timeout getting response from the server");
     }

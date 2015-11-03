@@ -75,22 +75,32 @@ abstract class BlockTransferService extends Closeable with Logging {
       host: String,
       port: Int,
       blockId: String,
+      taskAttemptId: Long,
+      attemptNumber: Int,
       blockReceivedCallback: BlockReceivedCallback): Unit
 
   /**
    * A special case of [[fetchBlock]] that is blocking.
    *
    * It is also only available after [[init]] is invoked.
+   *
+   * TODO: This is only used by TorrentBroadcast and the TaskResultGetter (when a task result is too
+   *       large to be sent directly). Those uses should be converted to use network monotasks and
+   *       this method should be removed.
    */
   def fetchBlockSync(host: String, port: Int, blockId: String): ManagedBuffer = {
     // A monitor for the thread to wait on.
     val result = Promise[ManagedBuffer]()
-    fetchBlock(host, port, blockId,
+    fetchBlock(host, port, blockId, -1L, -1,
       new BlockReceivedCallback {
         override def onFailure(blockId: String, exception: Throwable): Unit = {
           result.failure(exception)
         }
-        override def onSuccess(blockId: String, data: ManagedBuffer): Unit = {
+        override def onSuccess(
+            blockId: String,
+            diskReadNanos: Long,
+            totalRemoteNanos: Long,
+            data: ManagedBuffer): Unit = {
           val ret = ByteBuffer.allocate(data.size.toInt)
           ret.put(data.nioByteBuffer())
           ret.flip()

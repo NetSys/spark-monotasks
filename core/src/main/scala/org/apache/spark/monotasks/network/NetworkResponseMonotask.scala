@@ -43,6 +43,12 @@ private[spark] class NetworkResponseMonotask(
   extends NetworkMonotask(context) with Logging {
 
   /**
+   * Time when the monotask was created. Used to determine how much time was spent servicing the
+   * remote request.
+   */
+  private val creationTime = System.nanoTime()
+
+  /**
    * Failure message to respond to the remote executor with. Set only when the request to fetch
    * data has failed.
    */
@@ -68,7 +74,11 @@ private[spark] class NetworkResponseMonotask(
       case None =>
         try {
           val buffer = SparkEnv.get.blockManager.getBlockData(blockId)
-          respond(new BlockFetchSuccess(blockId.toString(), buffer))
+          respond(new BlockFetchSuccess(
+            blockId.toString(),
+            buffer,
+            context.taskMetrics.diskNanos,
+            System.nanoTime() - creationTime))
         } catch {
           case NonFatal(t) =>
             respond(new BlockFetchFailure(blockId.toString(), Throwables.getStackTraceAsString(t)))

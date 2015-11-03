@@ -25,5 +25,6 @@ import io.netty.channel.Channel;
  * Used by TransportRequestHandler to service requests from remote hosts for particular blocks.
  */
 public abstract class BlockFetcher {
-  public abstract void getBlockData(String blockId, Channel channel);
+  public abstract void getBlockData(
+    String blockId, Channel channel, long taskAttemptId, int attemptNumber);
 }

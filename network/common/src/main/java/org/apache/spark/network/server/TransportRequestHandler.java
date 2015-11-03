@@ -87,6 +87,6 @@ public class TransportRequestHandler extends MessageHandler<RequestMessage> {
 
     logger.info("Received req from {} to fetch block {}", client, req.blockId);
 
-    blockFetcher.getBlockData(req.blockId, channel);
+    blockFetcher.getBlockData(req.blockId, channel, req.taskAttemptId, req.attemptNumber);
   }
 }
