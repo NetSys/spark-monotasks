@@ -36,7 +36,7 @@ private[spark] class ContinuousMonitor(
     sparkConf: SparkConf,
     getOutstandingNetworkBytes: () => Long,
     getNumRunningComputeMonotasks: () => Int,
-    getDiskIdToNumRunningAndQueuedDiskMonotasks: () => HashMap[String, Int],
+    getDiskNameToNumRunningAndQueuedDiskMonotasks: () => HashMap[String, Int],
     getNumRunningMacrotasks: () => Int,
     getNumMacrotasksInCompute: () => Long,
     getNumMacrotasksInDisk: () => Long,
@@ -51,10 +51,10 @@ private[spark] class ContinuousMonitor(
   private var previousDiskCounters = new DiskCounters()
   private var previousNetworkCounters = new NetworkCounters()
 
-  private def getDiskIdToCountsJson(diskIdToCount: HashMap[String, Int]): JValue = {
-    JArray(diskIdToCount.toList.map {
-      case (id, count) =>
-        ("Disk ID" -> id) ~ ("Running And Queued Monotasks" -> count)
+  private def getDiskNameToCountsJson(diskNameToCount: HashMap[String, Int]): JValue = {
+    JArray(diskNameToCount.toList.map {
+      case (name, count) =>
+        ("Disk Name" -> name) ~ ("Running And Queued Monotasks" -> count)
     })
   }
 
@@ -84,7 +84,7 @@ private[spark] class ContinuousMonitor(
     ("Outstanding Network Bytes" -> getOutstandingNetworkBytes()) ~
     ("Running Compute Monotasks" -> getNumRunningComputeMonotasks()) ~
     ("Running Disk Monotasks" ->
-      getDiskIdToCountsJson(getDiskIdToNumRunningAndQueuedDiskMonotasks())) ~
+      getDiskNameToCountsJson(getDiskNameToNumRunningAndQueuedDiskMonotasks())) ~
     ("Running Macrotasks" -> getNumRunningMacrotasks()) ~
     ("Macrotasks In Compute" -> getNumMacrotasksInCompute()) ~
     ("Macrotasks In Disk" -> getNumMacrotasksInDisk()) ~

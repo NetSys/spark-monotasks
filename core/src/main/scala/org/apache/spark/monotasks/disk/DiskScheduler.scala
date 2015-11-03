@@ -16,6 +16,7 @@
 
 package org.apache.spark.monotasks.disk
 
+import java.io.FileNotFoundException
 import java.nio.channels.ClosedByInterruptException
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.atomic.AtomicInteger
@@ -62,7 +63,7 @@ private[spark] class DiskScheduler(blockFileManager: BlockFileManager) extends L
    */
   private def buildDiskAccessors() {
     diskIds.foreach { diskId =>
-      val diskAccessor = new DiskAccessor()
+      val diskAccessor = new DiskAccessor(diskId)
       diskAccessors(diskId) = diskAccessor
       val diskAccessorThread = new Thread(diskAccessor)
       diskAccessorThread.setDaemon(true)
@@ -103,13 +104,13 @@ private[spark] class DiskScheduler(blockFileManager: BlockFileManager) extends L
   }
 
   /**
-   * Returns a mapping of disk identifier to the number of running and queued disk monotasks on
+   * Returns a mapping of physical disk name to the number of running and queued disk monotasks on
    * that disk.
    */
-  def getDiskIdToNumRunningAndQueuedDiskMonotasks: HashMap[String, Int] = {
+  def getDiskNameToNumRunningAndQueuedDiskMonotasks: HashMap[String, Int] = {
     diskAccessors.map {
-      case (diskId, diskAccessor) =>
-        (diskId, diskAccessor.getNumRunningAndQueuedDiskMonotasks)
+      case (_, diskAccessor) =>
+        (diskAccessor.diskName, diskAccessor.getNumRunningAndQueuedDiskMonotasks)
     }
   }
 
@@ -231,7 +232,10 @@ private[spark] class DiskScheduler(blockFileManager: BlockFileManager) extends L
    * Stores a single disk's task queue. When used to create a thread, a DiskAccessor object will
    * execute the DiskMonotasks in its task queue.
    */
-  private class DiskAccessor() extends Runnable {
+  private class DiskAccessor(diskId: String) extends Runnable {
+
+    // The name of the physical disk on which this DiskAccessor will operate.
+    val diskName = BlockFileManager.pathToDiskId(diskId)
 
     // A queue of DiskMonotasks that are waiting to be executed.
     private val taskQueue = new LinkedBlockingQueue[DiskMonotask]()
