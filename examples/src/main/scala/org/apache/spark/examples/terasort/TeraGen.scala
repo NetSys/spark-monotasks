@@ -66,35 +66,39 @@ object TeraGen {
     assert(recordsPerPartition < Int.MaxValue, s"records per partition > ${Int.MaxValue}")
 
 
-    val dataset = sc.parallelize(1 to parts, parts).mapPartitionsWithIndex { case (index, _) =>
-      val one = new Unsigned16(1)
-      val firstRecordNumber = new Unsigned16(index.toLong * recordsPerPartition.toLong)
-      val recordsToGenerate = new Unsigned16(recordsPerPartition)
+    try {
+      val dataset = sc.parallelize(1 to parts, parts).mapPartitionsWithIndex { case (index, _) =>
+        val one = new Unsigned16(1)
+        val firstRecordNumber = new Unsigned16(index.toLong * recordsPerPartition.toLong)
+        val recordsToGenerate = new Unsigned16(recordsPerPartition)
 
-      val recordNumber = new Unsigned16(firstRecordNumber)
-      val lastRecordNumber = new Unsigned16(firstRecordNumber)
-      lastRecordNumber.add(recordsToGenerate)
+        val recordNumber = new Unsigned16(firstRecordNumber)
+        val lastRecordNumber = new Unsigned16(firstRecordNumber)
+        lastRecordNumber.add(recordsToGenerate)
 
-      val rand = Random16.skipAhead(firstRecordNumber)
+        val rand = Random16.skipAhead(firstRecordNumber)
 
-      val rowBytes: Array[Byte] = new Array[Byte](TeraInputFormat.RECORD_LEN)
-      val key = new Array[Byte](TeraInputFormat.KEY_LEN)
-      val value = new Array[Byte](TeraInputFormat.VALUE_LEN)
+        val rowBytes: Array[Byte] = new Array[Byte](TeraInputFormat.RECORD_LEN)
+        val key = new Array[Byte](TeraInputFormat.KEY_LEN)
+        val value = new Array[Byte](TeraInputFormat.VALUE_LEN)
 
-      Iterator.tabulate(recordsPerPartition.toInt) { offset =>
-        Random16.nextRand(rand)
-        generateRecord(rowBytes, rand, recordNumber)
-        recordNumber.add(one)
-        rowBytes.copyToArray(key, 0, TeraInputFormat.KEY_LEN)
-        rowBytes.takeRight(TeraInputFormat.VALUE_LEN).copyToArray(value, 0,
-          TeraInputFormat.VALUE_LEN)
-        (key, value)
+        Iterator.tabulate(recordsPerPartition.toInt) { offset =>
+          Random16.nextRand(rand)
+          generateRecord(rowBytes, rand, recordNumber)
+          recordNumber.add(one)
+          rowBytes.copyToArray(key, 0, TeraInputFormat.KEY_LEN)
+          rowBytes.takeRight(TeraInputFormat.VALUE_LEN).copyToArray(value, 0,
+            TeraInputFormat.VALUE_LEN)
+          (key, value)
+        }
       }
+
+      dataset.saveAsNewAPIHadoopFile[TeraOutputFormat](outputFile)
+
+      println("Number of records written: " + dataset.count())
+    } finally {
+      sc.stop()
     }
-
-    dataset.saveAsNewAPIHadoopFile[TeraOutputFormat](outputFile)
-
-    println("Number of records written: " + dataset.count())
   }
 
   def sizeStrToBytes(str: String): Long = {
