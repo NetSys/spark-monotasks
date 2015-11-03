@@ -18,10 +18,10 @@
 package org.apache.spark.examples.terasort
 
 import com.google.common.primitives.UnsignedBytes
-import org.apache.spark.SparkContext._
-import org.apache.spark._
+
 import org.apache.spark.{SparkConf, SparkContext}
 import org.apache.spark.mapreduce.{TeraInputFormat, TeraOutputFormat}
+import org.apache.spark.rdd.ShuffledRDD
 
 /**
  * This is a great example program to stress test Spark's shuffle mechanism.
@@ -60,7 +60,9 @@ object TeraSort {
 
     try {
       val dataset = sc.newAPIHadoopFile[Array[Byte], Array[Byte], TeraInputFormat](inputFile)
-      val sorted = dataset.partitionBy(new TeraSortPartitioner(dataset.partitions.size)).sortByKey()
+      val partitioner = new TeraSortPartitioner(dataset.partitions.size)
+      val sorted = new ShuffledRDD[Array[Byte], Array[Byte], Array[Byte]](dataset, partitioner)
+        .setKeyOrdering(Ordering[Array[Byte]])
       sorted.saveAsNewAPIHadoopFile[TeraOutputFormat](outputFile)
     } finally {
       sc.stop()
