@@ -39,7 +39,6 @@ import org.apache.spark.executor.TaskMetrics
 import org.apache.spark.util.{TaskCompletionListener, TaskCompletionListenerException}
 
 private[spark] class TaskContextImpl(
-    val maximumResultSizeBytes: Long,
     override val taskAttemptId: Long,
     override val attemptNumber: Int,
     val runningLocally: Boolean = false,

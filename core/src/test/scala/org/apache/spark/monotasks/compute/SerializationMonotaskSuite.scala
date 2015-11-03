@@ -30,7 +30,7 @@ import org.apache.spark.storage.{BlockManager, BlockResult, TestBlockId}
 class SerializationMonotaskSuite extends FunSuite with BeforeAndAfterEach {
 
   private var blockManager: BlockManager = _
-  private val taskContext = new TaskContextImpl(0, 0, 0)
+  private val taskContext = new TaskContextImpl(0, 0)
 
   override def beforeEach() {
     blockManager = mock(classOf[BlockManager])

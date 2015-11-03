@@ -37,7 +37,7 @@ import org.apache.spark.util.Utils
 
 class DiskSchedulerSuite extends FunSuite with BeforeAndAfter with Timeouts {
   private var diskScheduler: DiskScheduler = _
-  private val taskContext: TaskContextImpl = new TaskContextImpl(0, 0, 0)
+  private val taskContext: TaskContextImpl = new TaskContextImpl(0, 0)
   private var localDagScheduler: LocalDagScheduler = _
   private var conf: SparkConf = _
   val timeoutMillis = 10000

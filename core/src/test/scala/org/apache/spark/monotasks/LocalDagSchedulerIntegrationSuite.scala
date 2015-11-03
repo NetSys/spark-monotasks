@@ -74,7 +74,7 @@ class LocalDagSchedulerIntegrationSuite extends FunSuite with BeforeAndAfter
     val timeoutMillis = 10000
     val numBlocks = 10
     val dataBuffer = ByteBuffer.wrap((1 to 1000).map(_.toByte).toArray)
-    val taskContext = new TaskContextImpl(0, 0, 0)
+    val taskContext = new TaskContextImpl(0, 0)
 
     // Submit the write monotasks. Create a result monotask that creates a dummy task result and
     // saves that as the macrotask result, so that the LocalDagScheduler will identify the macrotask

@@ -46,7 +46,7 @@ class ResultMacrotaskSuite extends FunSuite with BeforeAndAfter with LocalSparkC
     //               \                                                   /
     //                `-- Serialization -- DiskWrite -------------------'
     //
-    val context = new TaskContextImpl(0, 0, 0)
+    val context = new TaskContextImpl(0, 0)
     val diskLevel = StorageLevel.DISK_ONLY
     val rdd = sc.parallelize(1 to 10).persist(diskLevel).map(2 * _).persist(diskLevel)
 

@@ -56,7 +56,7 @@ class RddIteratorSuite extends FunSuite with BeforeAndAfter with LocalSparkConte
 
   before {
     // Make a new task context for each test so each test gets its own set of task metrics.
-    context = new TaskContextImpl(0, 0, 0)
+    context = new TaskContextImpl(0, 0)
 
     // Create a SparkContext as a convenient way to construct a BlockManager.
     sc = new SparkContext("local", "test", new SparkConf(false))
@@ -115,7 +115,7 @@ class RddIteratorSuite extends FunSuite with BeforeAndAfter with LocalSparkConte
 
   test("iterator: get uncached local rdd") {
     rddA.persist(StorageLevel.MEMORY_ONLY)
-    val values = rddA.iterator(split, new TaskContextImpl(0, 0, 0, runningLocally = true))
+    val values = rddA.iterator(split, new TaskContextImpl(0, 0, runningLocally = true))
     assert(values.toList === List(1, 2, 3, 4))
     // Since the task is running locally, the RDD should not be cached.
     assert(blockManager.getStatus(new RDDBlockId(rddA.id, split.index)).isEmpty)

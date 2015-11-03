@@ -47,7 +47,7 @@ private[spark] class LocalDagScheduler(blockFileManager: BlockFileManager)
    * TaskContextImpl to use for monotasks that do not correspond to a macrotask running on this
    * machine (e.g., DiskRemoveMonotasks that are removing shuffle data that is no longer needed).
    */
-  val genericTaskContext = new TaskContextImpl(0, -1, 0)
+  val genericTaskContext = new TaskContextImpl(-1, 0)
 
   /**
    * Backend to send notifications to when macrotasks complete successfully. Set by

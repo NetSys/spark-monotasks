@@ -65,7 +65,7 @@ class RDDSuite extends FunSuite with BeforeAndAfter with SharedSparkContext {
   private var dependencyIdToPartitions: HashMap[Long, HashSet[Partition]] = _
   private var nextMonotask: Monotask = _
   private var partition: Partition = _
-  private var taskContext = new TaskContextImpl(0, 0, 0)
+  private var taskContext = new TaskContextImpl(0, 0)
 
   /** Initializes the objects necessary to test the buildDag method. */
   private def initializeBuildDagTestObjects(): Unit = {

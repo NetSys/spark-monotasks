@@ -89,10 +89,6 @@ private[spark] class Executor(
   private val executorActor = env.actorSystem.actorOf(
     Props(new ExecutorActor(executorId)), "ExecutorActor")
 
-  // If a task result is larger than this, we use the block manager to send the task result back.
-  private val maximumResultSizeBytes =
-    AkkaUtils.maxFrameSizeBytes(conf) - AkkaUtils.reservedSizeBytes
-
   private val localDagScheduler = env.localDagScheduler
   localDagScheduler.initialize(executorBackend, env.blockManager.memoryStore)
 
@@ -116,7 +112,6 @@ private[spark] class Executor(
       taskName: String,
       serializedTask: ByteBuffer) {
     val context = new TaskContextImpl(
-      maximumResultSizeBytes,
       taskAttemptId,
       attemptNumber)
     val prepareMonotask = new PrepareMonotask(context, serializedTask)

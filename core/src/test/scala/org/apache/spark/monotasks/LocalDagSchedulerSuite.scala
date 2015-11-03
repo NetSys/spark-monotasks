@@ -86,7 +86,7 @@ class LocalDagSchedulerSuite extends FunSuite with BeforeAndAfterEach with Local
     when(env.blockManager).thenReturn(blockManager)
     SparkEnv.set(env)
 
-    val context = new TaskContextImpl(0, 0, 0)
+    val context = new TaskContextImpl(0, 0)
 
     val blockId = new TestBlockId("0")
     val monotaskA = new SimpleMonotask(context) {
@@ -362,7 +362,7 @@ class LocalDagSchedulerSuite extends FunSuite with BeforeAndAfterEach with Local
    */
   test("updateMetricsForStartedMonotask and updateMetricsForFinishedMonotask") {
     // Setup the 3 monotasks for macrotask 0.
-    val macrotask0Context = new TaskContextImpl(0, 0, 0)
+    val macrotask0Context = new TaskContextImpl(0, 0)
     val macrotask0NetworkMonotask = mock(classOf[NetworkMonotask])
     when(macrotask0NetworkMonotask.dependencies).thenReturn(HashSet.empty[Monotask])
     when(macrotask0NetworkMonotask.context).thenReturn(macrotask0Context)
@@ -374,7 +374,7 @@ class LocalDagSchedulerSuite extends FunSuite with BeforeAndAfterEach with Local
     when(macrotask0DiskMonotask.context).thenReturn(macrotask0Context)
 
     // Setup the 2 monotasks for macrotask 1.
-    val macrotask1Context = new TaskContextImpl(0, 1, 0)
+    val macrotask1Context = new TaskContextImpl(1, 0)
     val macrotask1DiskMonotask = mock(classOf[DiskMonotask])
     when(macrotask1DiskMonotask.dependencies).thenReturn(HashSet.empty[Monotask])
     when(macrotask1DiskMonotask.context).thenReturn(macrotask1Context)

@@ -89,6 +89,13 @@ class SparkEnv (
     val localDagScheduler: LocalDagScheduler,
     val conf: SparkConf) extends Logging {
 
+  /**
+   * If a task result is larger than this, the task result should be sent back via the block
+   * manager (rather than sending it directly).
+   */
+  val maximumTaskResultSizeBytes =
+    AkkaUtils.maxFrameSizeBytes(conf) - AkkaUtils.reservedSizeBytes
+
   private[spark] var isStopped = false
   private val pythonWorkers = mutable.HashMap[(String, Map[String, String]), PythonWorkerFactory]()
 

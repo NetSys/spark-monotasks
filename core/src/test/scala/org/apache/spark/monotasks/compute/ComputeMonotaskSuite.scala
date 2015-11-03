@@ -32,7 +32,7 @@ import org.apache.spark.serializer.JavaSerializer
 class ComputeMonotaskSuite extends FunSuite with BeforeAndAfterEach {
 
   var localDagScheduler: LocalDagScheduler = _
-  val taskContext = new TaskContextImpl(500, 12, 0)
+  val taskContext = new TaskContextImpl(12, 0)
 
   override def beforeEach() {
     // Mock out SparkEnv to point to a mocked LocalDagScheduler, so that we can verify that

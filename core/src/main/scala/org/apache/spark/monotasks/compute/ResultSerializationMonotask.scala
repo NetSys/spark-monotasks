@@ -55,7 +55,8 @@ class ResultSerializationMonotask(context: TaskContextImpl, macrotaskResultBlock
       val serializedDirectResult = closureSerializer.serialize(directResult)
       val resultSize = serializedDirectResult.limit
 
-      if (context.maximumResultSizeBytes > 0 && resultSize > context.maximumResultSizeBytes) {
+      val maximumTaskResultSizeBytes = SparkEnv.get.maximumTaskResultSizeBytes
+      if (maximumTaskResultSizeBytes > 0 && resultSize > maximumTaskResultSizeBytes) {
         val serializedMacrotaskResultBlockId = new TaskResultBlockId(taskAttemptId)
         blockManager.cacheBytes(
           serializedMacrotaskResultBlockId,
