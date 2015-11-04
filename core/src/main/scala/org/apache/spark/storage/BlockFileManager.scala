@@ -182,13 +182,13 @@ private[spark] class BlockFileManager(conf: SparkConf) extends Logging {
       }
     }
     val localDirsPaths = localDirs.keys.toArray
-    val diskIds = localDirsPaths.map(BlockFileManager.pathToDiskId)
-    /* Since Sets do not contain duplicates, if diskIds.toSet contains more elements than diskIds,
-     * then diskIds must contain duplicates. If diskIds contains duplicates, then multiple Spark
-     * local directories reside on the same physical disk. Having multiple Spark local directories
-     * on the same physical disk can hurt DiskScheduler performance. */
-    if (diskIds.size != diskIds.toSet.size) {
-      val details = localDirsPaths.zip(diskIds).map(a => s"${a._1} : ${a._2}").mkString("\n")
+    val diskNames = localDirsPaths.map(BlockFileManager.getDiskNameFromPath)
+    // Since Sets do not contain duplicates, if diskNames.toSet contains more elements than
+    // diskNames, then diskNames must contain duplicates, which implies that multiple Spark local
+    // directories reside on the same physical disk. Having multiple Spark local directories on the
+    // same physical disk can hurt DiskScheduler performance.
+    if (diskNames.size != diskNames.toSet.size) {
+      val details = localDirsPaths.zip(diskNames).map(a => s"${a._1} : ${a._2}").mkString("\n")
       logWarning("Spark local directories do not reside on separate physical disks. For best " +
         "performance, each Spark local directory should reside on a separate physical disk." +
         s"\nLocal Directory : Disk\n$details")
@@ -207,5 +207,6 @@ private[spark] class BlockFileManager(conf: SparkConf) extends Logging {
 
 private[spark] object BlockFileManager {
 
-  def pathToDiskId(path: String): String = Files.getFileStore(new File(path).toPath()).name()
+  /** Returns the name of the physical disk on which the provided path is located. */
+  def getDiskNameFromPath(path: String): String = Files.getFileStore(new File(path).toPath()).name()
 }

@@ -235,7 +235,7 @@ private[spark] class DiskScheduler(blockFileManager: BlockFileManager) extends L
   private class DiskAccessor(diskId: String) extends Runnable {
 
     // The name of the physical disk on which this DiskAccessor will operate.
-    val diskName = BlockFileManager.pathToDiskId(diskId)
+    val diskName = BlockFileManager.getDiskNameFromPath(diskId)
 
     // A queue of DiskMonotasks that are waiting to be executed.
     private val taskQueue = new LinkedBlockingQueue[DiskMonotask]()

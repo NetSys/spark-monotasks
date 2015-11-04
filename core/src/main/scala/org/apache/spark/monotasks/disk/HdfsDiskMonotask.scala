@@ -76,14 +76,14 @@ private[spark] abstract class HdfsDiskMonotask(
       logDebug(s"The local path for block $blockId is: $localPath")
 
       // Find a Spark local directory that is on the same disk as the HDFS data directory.
-      val dataDiskId = BlockFileManager.pathToDiskId(localPath)
-      val localDirsDiskIds = sparkLocalDirs.map(BlockFileManager.pathToDiskId)
-      val localDirIndexOpt = localDirsDiskIds.zipWithIndex.find(_._1 == dataDiskId).map(_._2)
+      val dataDiskName = BlockFileManager.getDiskNameFromPath(localPath)
+      val localDirsDiskNames = sparkLocalDirs.map(BlockFileManager.getDiskNameFromPath)
+      val localDirIndexOpt = localDirsDiskNames.zipWithIndex.find(_._1 == dataDiskName).map(_._2)
 
       if (localDirIndexOpt.isEmpty) {
-        logWarning(s"Block $blockId (on disk $dataDiskId) is not stored on the same disk as " +
+        logWarning(s"Block $blockId (on disk $dataDiskName) is not stored on the same disk as " +
           "any of the Spark local directories (which are on disks: " +
-          s"${localDirsDiskIds.mkString("[", ", ", "]")}). Falling back to choosing a " +
+          s"${localDirsDiskNames.mkString("[", ", ", "]")}). Falling back to choosing a " +
           "Spark local directory at random.")
       }
 
