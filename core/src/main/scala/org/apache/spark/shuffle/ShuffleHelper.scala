@@ -16,7 +16,7 @@
 
 package org.apache.spark.shuffle
 
-import scala.collection.mutable.{ArrayBuffer, HashMap}
+import scala.collection.mutable.ArrayBuffer
 
 import org.apache.spark.{InterruptibleIterator, Logging, ShuffleDependency, SparkEnv,
   SparkException, TaskContextImpl}
@@ -43,7 +43,13 @@ class ShuffleHelper[K, V, C](
     context: TaskContextImpl)
   extends Logging {
 
-  private val localBlockIds = new ArrayBuffer[BlockId]()
+  /**
+   * For each shuffle block, a pair where the first item is the blockId used to store the block
+   * locally, and the second item is the ID of the map task that produced the block (used to report
+   * failures).
+   */
+  private val localBlockIdAndMapIdPairs = new ArrayBuffer[(BlockId, Int)]()
+
   private val blockManager = SparkEnv.get.blockManager
   private val readMetrics = context.taskMetrics.createShuffleReadMetricsForDependency()
 
@@ -56,10 +62,6 @@ class ShuffleHelper[K, V, C](
   logDebug("Fetching map output location for shuffle %d, reduce %d took %d ms".format(
     shuffleDependency.shuffleId, reduceId, System.currentTimeMillis - startTime))
 
-  // Store the mapping of block IDs to the map ID in order to properly construct the
-  // FetchFailedException if things fail.
-  private val blockIdToMapId = new HashMap[BlockId, Int]()
-
   def getReadMonotasks(): Seq[Monotask] = {
     statuses.zipWithIndex.flatMap { statusAndIndex =>
       val address = statusAndIndex._1._1
@@ -68,7 +70,6 @@ class ShuffleHelper[K, V, C](
       // Only need to fetch blocks that have non-zero size.
       if (size > 0) {
         val blockId = new ShuffleBlockId(shuffleDependency.shuffleId, mapId, reduceId)
-        blockIdToMapId(blockId) = mapId
         val monotask = if (address.executorId == blockManager.blockManagerId.executorId) {
           // Create a DiskReadMonotask to load the data into memory.
           // The data loaded into memory by these monotasks will be automatically deleted by the
@@ -89,7 +90,7 @@ class ShuffleHelper[K, V, C](
           new NetworkRequestMonotask(context, address, blockId, size)
         }
 
-        localBlockIds.append(monotask.getResultBlockId())
+        localBlockIdAndMapIdPairs.append((monotask.getResultBlockId(), mapId))
         Some(monotask)
       } else {
         None
@@ -106,34 +107,34 @@ class ShuffleHelper[K, V, C](
     // settings for the data.
     val dummyShuffleBlockId = new ShuffleBlockId(shuffleDependency.shuffleId, 0, reduceId)
 
-    val iter = localBlockIds.iterator.flatMap { blockId =>
-      val dataBuffer = getShuffleDataBuffer(blockId)
+    val iter = localBlockIdAndMapIdPairs.iterator.flatMap {
+      case (blockId, mapId) =>
+        val dataBuffer = getShuffleDataBuffer(blockId)
 
-      // Can't use BlockManager.dataDeserialize here, because we have an InputStream already
-      // (as opposed to a ByteBuffer).
-      try {
-        val inputStream = dataBuffer.createInputStream()
-        val decompressedStream = blockManager.wrapForCompression(dummyShuffleBlockId, inputStream)
-        val iter = shuffleDataSerializer.newInstance()
-          .deserializeStream(decompressedStream).asIterator
-        CompletionIterator[Any, Iterator[Any]](iter, {
-          // Once the iterator is exhausted, release the buffer.
-          dataBuffer.release()
+        // Can't use BlockManager.dataDeserialize here, because we have an InputStream already
+        // (as opposed to a ByteBuffer).
+        try {
+          val inputStream = dataBuffer.createInputStream()
+          val decompressedStream = blockManager.wrapForCompression(dummyShuffleBlockId, inputStream)
+          val iter = shuffleDataSerializer.newInstance()
+            .deserializeStream(decompressedStream).asIterator
+          CompletionIterator[Any, Iterator[Any]](iter, {
+            // Once the iterator is exhausted, release the buffer.
+            dataBuffer.release()
 
-           // After iterating through all of the shuffle data, aggregate the shuffle read metrics.
-           // All calls to updateShuffleReadMetrics() (across all shuffle dependencies) need to
-           // happen in a single thread; this is guaranteed here, because this will be called from
-           // the task's main compute monotask.
-           context.taskMetrics.updateShuffleReadMetrics()
-         })
-      } catch {
-        case e: Exception =>
-          logError(s"Failed to get shuffle block $blockId", e)
-          val mapId = blockIdToMapId(blockId)
-          val address = statuses(mapId)._1
-          throw new FetchFailedException(
-            address, shuffleDependency.shuffleId, mapId, reduceId, e)
-      }
+             // After iterating through all of the shuffle data, aggregate the shuffle read metrics.
+             // All calls to updateShuffleReadMetrics() (across all shuffle dependencies) need to
+             // happen in a single thread; this is guaranteed here, because this will be called from
+             // the task's main compute monotask.
+             context.taskMetrics.updateShuffleReadMetrics()
+           })
+        } catch {
+          case e: Exception =>
+            logError(s"Failed to get shuffle block $blockId", e)
+            val address = statuses(mapId)._1
+            throw new FetchFailedException(
+              address, shuffleDependency.shuffleId, mapId, reduceId, e)
+        }
     }
 
     // Create an iterator that will record the number of records read.
