@@ -76,8 +76,8 @@ class DAGScheduler(
     private[scheduler] val sc: SparkContext,
     private[scheduler] val taskScheduler: TaskScheduler,
     listenerBus: LiveListenerBus,
-    mapOutputTracker: MapOutputTrackerMaster,
-    blockManagerMaster: BlockManagerMaster,
+    private val mapOutputTracker: MapOutputTrackerMaster,
+    private val blockManagerMaster: BlockManagerMaster,
     env: SparkEnv,
     clock: Clock = new SystemClock())
   extends Logging {
@@ -149,6 +149,8 @@ class DAGScheduler(
   taskScheduler.setDAGScheduler(this)
 
   private val outputCommitCoordinator = env.outputCommitCoordinator
+
+  private val writeShuffleDataToDisk = sc.conf.getBoolean("spark.shuffle.writeToDisk", true)
 
   // Called by TaskScheduler to report task's starting.
   def taskStarted(stageId: Int, taskInfo: TaskInfo) {
@@ -874,7 +876,8 @@ class DAGScheduler(
         val locs = getPreferredLocs(stage.rdd, id)
         val part = stage.rdd.partitions(id)
         val dependencyIdToPartitions = Dependency.getDependencyIdToPartitions(stage.rdd, part.index)
-        new ShuffleMapMacrotask(stage.id, taskBinary, part, dependencyIdToPartitions, locs)
+        new ShuffleMapMacrotask(
+          stage.id, taskBinary, part, dependencyIdToPartitions, locs, writeShuffleDataToDisk)
       }
     } else {
       val job = stage.resultOfJob.get
@@ -975,7 +978,25 @@ class DAGScheduler(
       }
       listenerBus.post(SparkListenerStageCompleted(stage.latestInfo))
       runningStages -= stage
+
+      if (!writeShuffleDataToDisk) {
+        // If shuffle data is stored in memory, delete any shuffle data consumed by the stage as
+        // soon as the stage finishes, so that we don't waste valuable space in memory.
+        // TODO: This code will lead to failures if multiple stages depend on the same shuffle
+        //       output.
+        stage.rdd.dependencies.foreach {
+          case shuffleDependency: ShuffleDependency[_, _, _] =>
+            val shuffleId = shuffleDependency.shuffleId
+            logInfo(s"Deleting shuffle data for shuffle $shuffleId because $stage finished.")
+            mapOutputTracker.unregisterShuffle(shuffleId)
+            blockManagerMaster.removeShuffle(shuffleId, blocking = false)
+
+          case _ =>
+            // Do nothing.
+        }
+      }
     }
+
     event.reason match {
       case Success =>
         listenerBus.post(SparkListenerTaskEnd(stageId, stage.latestInfo.attemptId, taskType,

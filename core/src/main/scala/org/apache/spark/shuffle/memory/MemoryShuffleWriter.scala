@@ -28,12 +28,19 @@ import org.apache.spark.storage.{BlockManager, MultipleShuffleBlocksId, ShuffleB
   StorageLevel}
 import org.apache.spark.util.ByteArrayOutputStreamWithZeroCopyByteBuffer
 
-/** A ShuffleWriter that stores all shuffle data in memory using the block manager. */
+/**
+ * A ShuffleWriter that stores all shuffle data in memory using the block manager.
+ *
+ * The parameter `outputSingleBlock` specifies whether the shuffle data should be stored as a
+ * single, off heap buffer (if set to true) or as a set of on-heap buffers, one corresponding to
+ * the data for each reduce task (if set to false).
+ */
 private[spark] class MemoryShuffleWriter[K, V](
     shuffleBlockManager: MemoryShuffleBlockManager,
     handle: BaseShuffleHandle[K, V, _],
     private val mapId: Int,
-    context: TaskContext) extends ShuffleWriter[K, V] {
+    context: TaskContext,
+    private val outputSingleBlock: Boolean) extends ShuffleWriter[K, V] {
 
   private val dep = handle.dependency
 
@@ -94,33 +101,57 @@ private[spark] class MemoryShuffleWriter[K, V](
     shuffleWriteMetrics.incShuffleBytesWritten(totalDataSize)
 
     if (success) {
-      // Create a new buffer that first has index information, and then has all of the shuffle
-      // data. Use a direct byte buffer, so that when a disk monotask writes this data
-      // to disk, it can avoid copying the data out of the JVM, which can be time consuming
-      // (e.g., hundreds of milliseconds for buffers with ~100MB).
-      // TODO: Could wait and write this (relatively small) index data at the beginning of the
-      //       disk write monotask, which would allow the disk scheduler to combine multiple
-      //       outputs from different map tasks into a single file (or alternately, could just
-      //       store the index data in-memory).
-      val indexSize = (sizes.length + 1) * 4
-      val bufferSize = indexSize + totalDataSize
-      val directBuffer = ByteBuffer.allocateDirect(bufferSize)
-
-      writeIndexInformation(directBuffer, sizes, indexSize)
-
-      // Write all of the shuffle data.
-      byteBuffers.foreach(directBuffer.put(_))
-
-      blockManager.cacheBytes(
-        MultipleShuffleBlocksId(dep.shuffleId, mapId),
-        directBuffer,
-        StorageLevel.MEMORY_ONLY_SER,
-        tellMaster = false)
-
+      if (outputSingleBlock) {
+        cacheSingleBlock(byteBuffers, sizes, totalDataSize)
+      } else {
+        cacheIndividualBlocks(byteBuffers)
+      }
       shuffleBlockManager.addShuffleOutput(dep.shuffleId, mapId, numBuckets)
       Some(MapStatus(SparkEnv.get.blockManager.blockManagerId, sizes.map(_.toLong)))
     } else {
       None
+    }
+  }
+
+  /** Saves the shuffle data in-memory as a single, off-heap byte buffer. */
+  private def cacheSingleBlock(
+      shuffleBlocks: Seq[ByteBuffer],
+      sizes: Seq[Int],
+      totalDataSize: Int): Unit = {
+    // Create a new buffer that first has index information, and then has all of the shuffle
+    // data. Use a direct byte buffer, so that when a disk monotask writes this data
+    // to disk, it spends less time copying the data out of the JVM (for 200MB blocks, using a
+    // DirectByteBuffer, as opposed to a regular ByteBuffer, reduced the copying time from about
+    // 150ms to about 110ms).
+    // TODO: Could wait and write this (relatively small) index data at the beginning of the
+    //       disk write monotask, which would allow the disk scheduler to combine multiple
+    //       outputs from different map tasks into a single file (or alternately, could just
+    //       store the index data in-memory).
+    val indexSize = (sizes.length + 1) * 4
+    val bufferSize = indexSize + totalDataSize
+    val directBuffer = ByteBuffer.allocateDirect(bufferSize)
+
+    writeIndexInformation(directBuffer, sizes, indexSize)
+
+    // Write all of the shuffle data.
+    shuffleBlocks.foreach(directBuffer.put(_))
+
+    blockManager.cacheBytes(
+      MultipleShuffleBlocksId(dep.shuffleId, mapId),
+      directBuffer,
+      StorageLevel.MEMORY_ONLY_SER,
+      tellMaster = false)
+  }
+
+  /** Saves the shuffle data in-memory as a set of individual blocks, one for each reduce task. */
+  private def cacheIndividualBlocks(shuffleBlocks: Seq[ByteBuffer]): Unit = {
+    shuffleBlocks.zipWithIndex.foreach {
+      case (shuffleData, reduceId) =>
+        blockManager.cacheBytes(
+          ShuffleBlockId(dep.shuffleId, mapId, reduceId),
+          shuffleData,
+          StorageLevel.MEMORY_ONLY_SER,
+          tellMaster = false)
     }
   }
 }

@@ -36,9 +36,16 @@ private[spark] class MemoryShuffleManager(conf: SparkConf) extends ShuffleManage
   }
 
   override def getWriter[K, V](
-      handle: ShuffleHandle, mapId: Int, context: TaskContext): ShuffleWriter[K, V] = {
+      handle: ShuffleHandle,
+      mapId: Int,
+      context: TaskContext,
+      outputSingleBlock: Boolean): ShuffleWriter[K, V] = {
     new MemoryShuffleWriter(
-      memoryShuffleBlockManager, handle.asInstanceOf[BaseShuffleHandle[K, V, _]], mapId, context)
+      memoryShuffleBlockManager,
+      handle.asInstanceOf[BaseShuffleHandle[K, V, _]],
+      mapId,
+      context,
+      outputSingleBlock)
   }
 
   override def unregisterShuffle(shuffleId: Int): Boolean = {

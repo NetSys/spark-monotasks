@@ -52,8 +52,18 @@ private[spark] trait ShuffleManager {
       numMaps: Int,
       dependency: ShuffleDependency[K, V, C]): ShuffleHandle
 
-  /** Get a writer for a given partition. Called on executors by map tasks. */
-  def getWriter[K, V](handle: ShuffleHandle, mapId: Int, context: TaskContext): ShuffleWriter[K, V]
+  /**
+   * Get a writer for a given partition. Called on executors by map tasks.
+   *
+   * The parameter `outputSingleBlock` specifies whether all of the shuffle output for
+   * a particular map task should be stored as a single block (if set to true) or as a set
+   * of blocks, one for each reduce task (if set to false).
+   */
+  def getWriter[K, V](
+      handle: ShuffleHandle,
+      mapId: Int,
+      context: TaskContext,
+      outputSingleBlock: Boolean): ShuffleWriter[K, V]
 
   /**
     * Remove a shuffle's metadata from the ShuffleManager.

@@ -24,18 +24,21 @@ import org.apache.spark.storage.MultipleShuffleBlocksId
 /**
  * Divides the elements of an RDD into multiple buckets (based on a partitioner specified in the
  * ShuffleDependency) and stores the result in the BlockManager.
+ *
+ * The parameter `outputSingleBlock` specifies whether the shuffle data should be stored as a
+ * single, off-heap buffer (if set to true) or as a set of on-heap buffers, one corresponding to
+ * the data for each reduce task (if set to false).
  */
 private[spark] class ShuffleMapMonotask[T](
     context: TaskContextImpl,
     rdd: RDD[T],
-    partition: Partition,
-    dependency: ShuffleDependency[Any, Any, _])
+    private val partition: Partition,
+    private val dependency: ShuffleDependency[Any, Any, _],
+    private val outputSingleBlock: Boolean)
   extends ExecutionMonotask[T, MapStatus](context, rdd, partition) {
 
   private val shuffleWriter = SparkEnv.get.shuffleManager.getWriter[Any, Any](
-    dependency.shuffleHandle, partition.index, context)
-
-  val shuffleDataId = MultipleShuffleBlocksId(dependency.shuffleId, partition.index)
+    dependency.shuffleHandle, partition.index, context, outputSingleBlock)
 
   override def getResult(): MapStatus = {
     val mapStatus = try {
@@ -61,8 +64,14 @@ private[spark] class ShuffleMapMonotask[T](
    */
   override def cleanupIntermediateData(): Unit = {
     super.cleanupIntermediateData()
-    // Don't need to tell the master about shuffle block IDs being deleted, because their
-    // storage status is tracked by MapStatuses rather than through the BlockManager.
-    SparkEnv.get.blockManager.removeBlockFromMemory(shuffleDataId, tellMaster = false)
+    // Only need to cleanup extra intermediate data if output is stored as a single block, in which
+    // case the shuffle data will be written to disk, so the in-memory data is not necessary to
+    // keep around.
+    if (outputSingleBlock) {
+      // Don't tell the master about shuffle block IDs being deleted, because their
+      // storage status is tracked by MapStatuses rather than through the BlockManager.
+      SparkEnv.get.blockManager.removeBlockFromMemory(
+        MultipleShuffleBlocksId(dependency.shuffleId, partition.index), tellMaster = false)
+    }
   }
 }
