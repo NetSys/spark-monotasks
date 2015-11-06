@@ -96,6 +96,7 @@ class ReceivedBlockHandlerSuite extends FunSuite with BeforeAndAfter with Matche
       blockManagerMaster,
       serializer,
       blockManagerSize,
+      maxOffHeapMemory = 0,
       conf,
       mapOutputTracker,
       shuffleManager,

@@ -101,7 +101,7 @@ private[spark] class Executor(
     localDagScheduler.getNumMacrotasksInCompute,
     localDagScheduler.getNumMacrotasksInDisk,
     localDagScheduler.getNumMacrotasksInNetwork,
-    () => env.blockManager.memoryStore.freeMemory)
+    () => env.blockManager.memoryStore.freeHeapMemory)
   continuousMonitor.start(env)
 
   startDriverHeartbeater()

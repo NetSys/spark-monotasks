@@ -101,6 +101,7 @@ class BlockManagerSuite extends FunSuite with Matchers with BeforeAndAfterEach
       master,
       serializer,
       maxMem,
+      maxMem,
       conf,
       mapOutputTracker,
       shuffleManager,

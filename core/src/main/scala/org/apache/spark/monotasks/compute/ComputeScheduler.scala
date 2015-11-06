@@ -97,7 +97,7 @@ private[spark] class ComputeScheduler(
     val freeMemory = memoryStore.getOrElse {
       throw new IllegalStateException(
         "A MemoryStore must be set in ComputeScheduler before tasks are launched")
-    }.freeMemory
+    }.freeHeapMemory
 
     if (freeMemory > 0) {
       // Any kind of monotask can be run, so first look to see if there are any monotasks that
@@ -127,8 +127,10 @@ private[spark] class ComputeScheduler(
     }
   }
 
-  private def handleBlockRemovedFromMemoryStore(freeMemory: Long): Unit = synchronized {
-    if (freeMemory > 0) {
+  private def handleBlockRemovedFromMemoryStore(
+      freeHeapMemory: Long,
+      freeOffHeapMemory: Long): Unit = synchronized {
+    if (freeHeapMemory > 0) {
       // TODO: Consider tracking whether there was already free memory, and only calling
       //       notify() when the amount of free memory is newly greater than 0.
       this.notify()

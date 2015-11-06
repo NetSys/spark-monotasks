@@ -84,7 +84,8 @@ private[spark] class BlockManager(
     actorSystem: ActorSystem,
     val master: BlockManagerMaster,
     defaultSerializer: Serializer,
-    maxMemory: Long,
+    maxHeapMemory: Long,
+    maxOffHeapMemory: Long,
     val conf: SparkConf,
     mapOutputTracker: MapOutputTracker,
     shuffleManager: ShuffleManager,
@@ -97,7 +98,7 @@ private[spark] class BlockManager(
 
   // Actual storage of where blocks are kept
   private var tachyonInitialized = false
-  private[spark] val memoryStore = new MemoryStore(this, maxMemory)
+  private[spark] val memoryStore = new MemoryStore(this, maxHeapMemory, maxOffHeapMemory)
   private[spark] lazy val tachyonStore: TachyonStore = {
     val storeDir = conf.get("spark.tachyonStore.baseDir", "/tmp_spark_tachyon")
     val appFolderName = conf.get("spark.tachyonStore.folderName")
@@ -160,7 +161,8 @@ private[spark] class BlockManager(
       actorSystem,
       master,
       serializer,
-      BlockManager.getMaxMemory(conf),
+      BlockManager.getMaxHeapMemory(conf),
+      BlockManager.getMaxOffHeapMemory(conf),
       conf,
       mapOutputTracker,
       shuffleManager,
@@ -183,7 +185,7 @@ private[spark] class BlockManager(
     blockManagerId = BlockManagerId(
       executorId, blockTransferService.hostName, blockTransferService.port)
 
-    master.registerBlockManager(blockManagerId, maxMemory, slaveActor)
+    master.registerBlockManager(blockManagerId, maxHeapMemory, slaveActor)
   }
 
   /**
@@ -218,7 +220,7 @@ private[spark] class BlockManager(
   def reregister(): Unit = {
     // TODO: We might need to rate limit re-registering.
     logInfo("BlockManager re-registering with master")
-    master.registerBlockManager(blockManagerId, maxMemory, slaveActor)
+    master.registerBlockManager(blockManagerId, maxHeapMemory, slaveActor)
     reportAllBlocks()
   }
 
@@ -975,11 +977,20 @@ private[spark] class BlockManager(
 private[spark] object BlockManager extends Logging {
   private val ID_GENERATOR = new IdGenerator
 
-  /** Return the total amount of storage memory available. */
-  private def getMaxMemory(conf: SparkConf): Long = {
+  /** Return the total amount of heap storage memory available. */
+  private def getMaxHeapMemory(conf: SparkConf): Long = {
     val memoryFraction = conf.getDouble("spark.storage.memoryFraction", 0.6)
     val safetyFraction = conf.getDouble("spark.storage.safetyFraction", 0.9)
     (Runtime.getRuntime.maxMemory * memoryFraction * safetyFraction).toLong
+  }
+
+  /**
+   * Return the total amount of off-heap storage memory available, set manually by the
+   * spark.storage.offHeapMemory config variable. The default value here is arbitrarily set to be
+   * 1GB.
+   */
+  private def getMaxOffHeapMemory(conf: SparkConf): Long = {
+    conf.getLong("spark.storage.offHeapMemory", Math.pow(1024, 3).toLong)
   }
 
   /**

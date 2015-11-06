@@ -38,6 +38,7 @@ import scala.collection.JavaConversions._
 import java.nio.ByteBuffer
 import java.util.LinkedHashMap
 
+import org.apache.spark.SparkException
 import org.apache.spark.util.{SizeEstimator, Utils}
 
 private case class MemoryEntry(value: Any, size: Long, deserialized: Boolean)
@@ -47,32 +48,43 @@ private case class MemoryEntry(value: Any, size: Long, deserialized: Boolean)
  * serialized ByteBuffers.
  *
  * @param blockManager BlockManager to use to (de)serialize data.
- * @param targetMaxMemory Maximum amount of memory intended to be used by the memory store.
- *                        The MemoryStore does not enforce this maxmimum and is only responsible
- *                        for tracking the amount of memory currently in use; calling classes are
- *                        responsible for ensuring that this number is not exceeded.
+ * @param targetMaxHeapMemory Maximum amount of on-heap memory intended to be used by the memory
+ *                            store. The MemoryStore does not enforce this maxmimum and is only
+ *                            responsible for tracking the amount of memory currently in use;
+ *                            calling classes are responsible for ensuring that this number is not
+ *                            exceeded.
+ * @param targetMaxOffHeapMemory Maximimum amount of off-heap memory intended to be used by
+ *                               the memory store. The MemoryStore will throw a `SparkException` if
+ *                               `doCache` is called with a block whose size would exceed
+ *                               freeOffHeapMemory
+ *
  */
 private[spark] class MemoryStore(
     blockManager: BlockManager,
-    private val targetMaxMemory: Long) extends InMemoryBlockStore(blockManager) {
+    private val targetMaxHeapMemory: Long,
+    private val targetMaxOffHeapMemory: Long) extends InMemoryBlockStore(blockManager) {
 
   private val entries = new LinkedHashMap[BlockId, MemoryEntry](32, 0.75f, true)
 
-  @volatile private var currentMemory = 0L
+  @volatile private var currentHeapMemory = 0L
+  @volatile private var currentOffHeapMemory = 0L
 
   /** Callback to be executed when data is removed from the memory store. */
-  private var blockRemovalCallback: Option[Long => Unit] = None
+  private var blockRemovalCallback: Option[(Long, Long) => Unit] = None
 
-  logInfo(s"MemoryStore started with capacity ${Utils.bytesToString(targetMaxMemory)}")
+  logInfo(s"MemoryStore started with capacity " +
+    s"${Utils.bytesToString(targetMaxHeapMemory)} Heap Memory and " +
+    s"${Utils.bytesToString(targetMaxOffHeapMemory)} Off-Heap Memory")
 
   /** Free memory not occupied by existing blocks. */
-  def freeMemory: Long = targetMaxMemory - currentMemory
+  def freeHeapMemory: Long = targetMaxHeapMemory - currentHeapMemory
+  def freeOffHeapMemory: Long = targetMaxOffHeapMemory - currentOffHeapMemory
 
   /**
-   * Registers a function to be called with the current amount of free memory anytime a block is
-   * removed from the memory store.
+   * Registers a function to be called with the current amount of free heap memory and
+   * off-heap memory anytime a block is removed from the memory store.
    */
-  def registerBlockRemovalCallback(callback: Long => Unit): Unit = {
+  def registerBlockRemovalCallback(callback: (Long, Long) => Unit): Unit = {
     if (blockRemovalCallback.isDefined) {
       throw new IllegalStateException(
         "At most one callback to be called on block removal can be registered with the " +
@@ -163,10 +175,17 @@ private[spark] class MemoryStore(
     entries.synchronized {
       val entry = entries.remove(blockId)
       if (entry != null) {
-        currentMemory -= entry.size
-        logDebug(s"Block $blockId of size ${Utils.bytesToString(entry.size)} removed from memory " +
-          s"(free: ${Utils.bytesToString(freeMemory)}).")
-        blockRemovalCallback.map(_(freeMemory))
+        val size = entry.size
+        val memoryType = entry.value match {
+          case byteBuffer: ByteBuffer if byteBuffer.isDirect =>
+            currentOffHeapMemory -= size
+            "off-heap"
+          case _ =>
+            currentHeapMemory -= size
+            "heap"
+        }
+        logUpdate(blockId, size, "removed from", memoryType)
+        blockRemovalCallback.map(_(freeHeapMemory, freeOffHeapMemory))
         true
       } else {
         false
@@ -177,8 +196,9 @@ private[spark] class MemoryStore(
   override def clear() {
     entries.synchronized {
       entries.clear()
-      currentMemory = 0
-      blockRemovalCallback.map(_(freeMemory))
+      currentHeapMemory = 0L
+      currentOffHeapMemory = 0L
+      blockRemovalCallback.map(_(freeHeapMemory, freeOffHeapMemory))
     }
     logInfo("MemoryStore cleared")
   }
@@ -186,6 +206,7 @@ private[spark] class MemoryStore(
   /**
    * Caches the given value. The value should either be an Array if `deserialized` is true or a
    * ByteBuffer otherwise. Its (possibly estimated) size must also be passed by the caller.
+   * Throws `SparkException` if size of block to be cached exceeds free memory.
    */
   private def doCache(
       blockId: BlockId,
@@ -195,13 +216,37 @@ private[spark] class MemoryStore(
     val entry = new MemoryEntry(value, size, deserialized)
     entries.synchronized {
       entries.put(blockId, entry)
-      currentMemory += size
-
+      val memoryType = value match {
+        case byteBuffer: ByteBuffer if byteBuffer.isDirect =>
+          if (size > freeOffHeapMemory) {
+            throw new SparkException(s"Cannot cache block $blockId (size " +
+              s"${Utils.bytesToString(size)}) because there is insufficient off-heap memory " +
+              s"remaining (${Utils.bytesToString(freeOffHeapMemory)} memory free, of " +
+              s"${Utils.bytesToString(targetMaxOffHeapMemory)} total off-heap memory)")
+          }
+          currentOffHeapMemory += size
+          "off-heap"
+        case _ =>
+          currentHeapMemory += size
+          "heap"
+      }
       val valuesOrBytes = if (deserialized) "values" else "bytes"
-      logDebug(s"Block $blockId stored as $valuesOrBytes in memory (estimated size:  " +
-        s"${Utils.bytesToString(size)}; (${Utils.bytesToString(currentMemory)} stored out of " +
-        s"${Utils.bytesToString(targetMaxMemory)} target maximum)")
+      logUpdate(blockId, size, s"stored as $valuesOrBytes in", memoryType)
     }
+  }
+
+  /** Log block storage, current, and max memory for a cache action. */
+  private def logUpdate(
+      blockId: BlockId,
+      size: Long,
+      description: String,
+      memoryType: String): Unit = {
+    logDebug(s"Block $blockId $description $memoryType memory (estimated size: " +
+      s"${Utils.bytesToString(size)}; (on-heap memory free: " +
+      s"${Utils.bytesToString(freeHeapMemory)} " +
+      s"max: ${Utils.bytesToString(targetMaxHeapMemory)}), (off-heap memory " +
+      s"free: ${Utils.bytesToString(freeOffHeapMemory)} " +
+      s"max: ${Utils.bytesToString(targetMaxOffHeapMemory)})")
   }
 
   override def contains(blockId: BlockId): Boolean = {

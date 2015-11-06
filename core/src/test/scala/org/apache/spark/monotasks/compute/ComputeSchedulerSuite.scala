@@ -29,7 +29,10 @@ class ComputeSchedulerSuite extends FunSuite {
   test("monotasks aren't scheduled until memory is available") {
     // Create a MemoryStore and put enough data in it that it has no remaining space.
     val maxMemoryBytes = 300
-    val memoryStore = new MemoryStore(mock(classOf[BlockManager]), maxMemoryBytes)
+    val memoryStore = new MemoryStore(
+      mock(classOf[BlockManager]),
+      maxMemoryBytes,
+      targetMaxOffHeapMemory = 0)
     val dummyData = ByteBuffer.wrap((1 to maxMemoryBytes).map(_.toByte).toArray)
     val blockId = new TestBlockId("testData")
     memoryStore.cacheBytes(blockId, dummyData, false)
