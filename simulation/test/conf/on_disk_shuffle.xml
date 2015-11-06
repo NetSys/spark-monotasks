@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<simulator>
+  <!--
+      A configuration that describes a 2-worker cluster executing a two-stage job where all input,
+      shuffle, and output data is stored on disk.
+  -->
+
+  <num_workers>2</num_workers>
+  <num_cores_per_worker>1</num_cores_per_worker>
+  <worker_network_bandwidth_Mbps>1000</worker_network_bandwidth_Mbps>
+  <worker_network_latency_ms>1</worker_network_latency_ms>
+
+  <disks_per_worker>
+    <disk>
+      <id>xvdb</id>
+      <write_throughput_MBps>50</write_throughput_MBps>
+      <read_throughput_MBps>100</read_throughput_MBps>
+    </disk>
+  </disks_per_worker>
+
+  <jobs>
+    <job>
+      <stages>
+        <stage>
+          <num_partitions>2</num_partitions>
+          <monotasks_per_partition>
+            <monotask>
+              <dag_id>A</dag_id>
+              <type>disk</type>
+              <is_write>False</is_write>
+              <data_size_bytes>100000000</data_size_bytes>
+            </monotask>
+
+            <monotask>
+              <dag_id>B</dag_id>
+              <type>compute</type>
+              <compute_time_ms>1000</compute_time_ms>
+
+              <dependency_dag_ids>
+                <dependency_dag_id>A</dependency_dag_id>
+              </dependency_dag_ids>
+            </monotask>
+
+            <monotask>
+              <dag_id>C</dag_id>
+              <type>disk</type>
+              <is_write>True</is_write>
+              <data_size_bytes>100000000</data_size_bytes>
+
+              <dependency_dag_ids>
+                <dependency_dag_id>B</dependency_dag_id>
+              </dependency_dag_ids>
+            </monotask>
+          </monotasks_per_partition>
+        </stage>
+
+        <stage>
+          <num_partitions>2</num_partitions>
+          <monotasks_per_partition>
+            <monotask>
+              <dag_id>A</dag_id>
+              <type>compute</type>
+              <compute_time_ms>1000</compute_time_ms>
+
+              <shuffle_dependency>
+                <total_size_bytes>400000000</total_size_bytes>
+                <is_on_disk>True</is_on_disk>
+              </shuffle_dependency>
+            </monotask>
+
+            <monotask>
+              <dag_id>B</dag_id>
+              <type>disk</type>
+              <is_write>True</is_write>
+              <data_size_bytes>100000000</data_size_bytes>
+
+              <dependency_dag_ids>
+                <dependency_dag_id>A</dependency_dag_id>
+              </dependency_dag_ids>
+            </monotask>
+          </monotasks_per_partition>
+        </stage>
+      </stages>
+    </job>
+  </jobs>
+</simulator>

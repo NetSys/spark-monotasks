@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<simulator>
+  <!--
+      A template configuration that describes a two-worker cluster executing a map-reduce job, where
+      the input data and shuffle data is stored on disk.
+  -->
+
+  <!-- The number of worker nodes in the simulated cluster. -->
+  <num_workers>2</num_workers>
+
+  <!-- The number of CPU cores on each worker. -->
+  <num_cores_per_worker>8</num_cores_per_worker>
+
+  <!-- The bandwidth (in Mb/s) of the network edge links. This is treated as full duplex. -->
+  <worker_network_bandwidth_Mbps>1000</worker_network_bandwidth_Mbps>
+
+  <!-- The latency (in ms) between any two machines in the network. -->
+  <worker_network_latency_ms>1</worker_network_latency_ms>
+
+  <disks_per_worker>
+    <disk>
+      <!-- Must be unique, since it is used by the simulator as a dictionary key. -->
+      <id>xvdb</id>
+
+      <!-- The write and read throughput (in MB/s) of this disk. -->
+      <write_throughput_MBps>50</write_throughput_MBps>
+      <read_throughput_MBps>100</read_throughput_MBps>
+    </disk>
+    <disk>
+      <id>xvdf</id>
+      <write_throughput_MBps>75</write_throughput_MBps>
+      <read_throughput_MBps>125</read_throughput_MBps>
+    </disk>
+  </disks_per_worker>
+
+  <jobs>
+    <job>
+      <stages>
+        <stage>
+          <num_partitions>16</num_partitions>
+          <monotasks_per_partition>
+            <!--
+                The following DAG of monotasks is used as a template for building this stage's
+                macrotasks.
+            -->
+
+            <monotask>
+              <!--
+                  Used by other monotasks to declare this monotask as a dependency. Not used by the
+                  simulator. This must be unique in the context of this stage.
+              -->
+              <dag_id>A</dag_id>
+
+              <!--
+                  One of: {compute, disk}. Network monotasks are implicitly specified by adding a
+                  shuffle dependency to a compute monotask (see below).
+              -->
+              <type>disk</type>
+
+              <!--
+                  Required if type == disk. If True, then this is a disk write monotask, otherwise
+                  this is a disk read monotask.
+              -->
+              <is_write>False</is_write>
+
+              <!--
+                  Required if type == disk. The amount of data (in bytes) that will be written to or
+                  read from disk.
+              -->
+              <data_size_bytes>100000000</data_size_bytes>
+            </monotask>
+
+            <monotask>
+              <dag_id>B</dag_id>
+              <type>compute</type>
+
+              <!--
+                  Required if type == compute. The amount of time (in ms) that this monotask will
+                  use one CPU core.
+              -->
+              <compute_time_ms>10000</compute_time_ms>
+
+              <!-- Optional -->
+              <dependency_dag_ids>
+                <!-- List of this monotask's dependencies, specified by their <dag_id>. -->
+                <dependency_dag_id>A</dependency_dag_id>
+              </dependency_dag_ids>
+            </monotask>
+
+            <monotask>
+              <dag_id>C</dag_id>
+              <type>disk</type>
+              <is_write>True</is_write>
+              <data_size_bytes>100000000</data_size_bytes>
+
+              <dependency_dag_ids>
+                <dependency_dag_id>B</dependency_dag_id>
+              </dependency_dag_ids>
+            </monotask>
+          </monotasks_per_partition>
+        </stage>
+
+        <stage>
+          <num_partitions>16</num_partitions>
+          <monotasks_per_partition>
+            <monotask>
+              <dag_id>A</dag_id>
+              <type>compute</type>
+              <compute_time_ms>10000</compute_time_ms>
+
+              <!--
+                  Optional. If present, indicates that this compute monotask has a shuffle
+                  dependency. Network monotasks will be created to read shuffle data from remote
+                  workers. Currently, this is the only way to create network monotasks.
+              -->
+              <shuffle_dependency>
+                <!-- The total amount of data that this stage will shuffle. -->
+                <total_size_bytes>3200000000</total_size_bytes>
+
+                <!--
+                    If True, then the shuffle data is assumed to be stored on disk. The simulator
+                    will create disk read monotasks to read the shuffle data from disk. If False,
+                    the shuffle data is assumed to already be in memory.
+                -->
+                <is_on_disk>True</is_on_disk>
+              </shuffle_dependency>
+            </monotask>
+
+            <monotask>
+              <dag_id>B</dag_id>
+              <type>disk</type>
+              <is_write>True</is_write>
+              <data_size_bytes>100000000</data_size_bytes>
+
+              <dependency_dag_ids>
+                <dependency_dag_id>A</dependency_dag_id>
+              </dependency_dag_ids>
+            </monotask>
+          </monotasks_per_partition>
+        </stage>
+      </stages>
+    </job>
+  </jobs>
+</simulator>
