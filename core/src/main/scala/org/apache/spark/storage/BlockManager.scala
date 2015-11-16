@@ -467,17 +467,6 @@ private[spark] class BlockManager(
   }
 
   /**
-   * Get block from remote block managers.
-   *
-   * TODO: Remove this method, as the process of retrieving a block from a remote BlockManager
-   *       should use a NetworkMonotask instead.
-   */
-  def getRemote(blockId: BlockId): Option[BlockResult] = {
-    logDebug(s"Getting remote block $blockId")
-    doGetRemote(blockId, asBlockResult = true).asInstanceOf[Option[BlockResult]]
-  }
-
-  /**
    * Get block from remote block managers as serialized bytes.
    *
    * TODO: Remove this method, as the process of retrieving a block from a remote BlockManager
@@ -485,12 +474,6 @@ private[spark] class BlockManager(
    */
   def getRemoteBytes(blockId: BlockId): Option[ByteBuffer] = {
     logDebug(s"Getting remote block $blockId as bytes")
-    doGetRemote(blockId, asBlockResult = false).asInstanceOf[Option[ByteBuffer]]
-  }
-
-  // TODO: Remove this method, as the process of retrieving a block from a remote BlockManager
-  //       should use a NetworkMonotask instead.
-  private def doGetRemote(blockId: BlockId, asBlockResult: Boolean): Option[Any] = {
     require(blockId != null, "BlockId is null")
     val locations = Random.shuffle(master.getLocations(blockId))
     for (loc <- locations) {
@@ -499,14 +482,7 @@ private[spark] class BlockManager(
         loc.host, loc.port, blockId.toString).nioByteBuffer()
 
       if (data != null) {
-        if (asBlockResult) {
-          return Some(new BlockResult(
-            dataDeserialize(blockId, data),
-            DataReadMethod.Network,
-            data.limit()))
-        } else {
-          return Some(data)
-        }
+        return Some(data)
       }
       logDebug(s"The value of block $blockId is null")
     }
