@@ -33,6 +33,8 @@
 
 package org.apache.spark.network.protocol;
 
+import java.util.Arrays;
+
 import com.google.common.base.Objects;
 import io.netty.buffer.ByteBuf;
 
@@ -41,12 +43,12 @@ import io.netty.buffer.ByteBuf;
  * {@link org.apache.spark.network.protocol.ResponseMessage} (either success or failure).
  */
 public final class BlockFetchRequest implements RequestMessage {
-  public final String blockId;
+  public final String[] blockIds;
   public final Long taskAttemptId;
   public final int attemptNumber;
 
-  public BlockFetchRequest(String blockId, Long taskAttemptId, int attemptNumber) {
-    this.blockId = blockId;
+  public BlockFetchRequest(String[] blockIds, Long taskAttemptId, int attemptNumber) {
+    this.blockIds = blockIds;
     this.taskAttemptId = taskAttemptId;
     this.attemptNumber = attemptNumber;
   }
@@ -58,21 +60,21 @@ public final class BlockFetchRequest implements RequestMessage {
 
   @Override
   public int encodedLength() {
-    return Encoders.Strings.encodedLength(blockId) + 8 + 4;
+    return Encoders.StringArrays.encodedLength(blockIds) + 8 + 4;
   }
 
   @Override
   public void encode(ByteBuf buf) {
-    Encoders.Strings.encode(buf, blockId);
+    Encoders.StringArrays.encode(buf, blockIds);
     buf.writeLong(taskAttemptId);
     buf.writeInt(attemptNumber);
   }
 
   public static BlockFetchRequest decode(ByteBuf buf) {
-    String blockId = Encoders.Strings.decode(buf);
+    String[] blockIds = Encoders.StringArrays.decode(buf);
     Long taskAttemptId = buf.readLong();
     int attemptNumber = buf.readInt();
-    return new BlockFetchRequest(blockId, taskAttemptId, attemptNumber);
+    return new BlockFetchRequest(blockIds, taskAttemptId, attemptNumber);
 
   }
 
@@ -80,7 +82,7 @@ public final class BlockFetchRequest implements RequestMessage {
   public boolean equals(Object other) {
     if (other instanceof BlockFetchRequest) {
       BlockFetchRequest o = (BlockFetchRequest) other;
-      return ((blockId.equals(o.blockId)) && (taskAttemptId == o.taskAttemptId) &&
+      return ((Arrays.equals(blockIds, o.blockIds)) && (taskAttemptId == o.taskAttemptId) &&
         (attemptNumber == o.attemptNumber));
     }
     return false;
@@ -89,7 +91,7 @@ public final class BlockFetchRequest implements RequestMessage {
   @Override
   public String toString() {
     return Objects.toStringHelper(this)
-      .add("blockId", blockId)
+      .add("blockIds", Arrays.toString(blockIds))
       .add("taskAttemptId", taskAttemptId)
       .add("attemptNumber", attemptNumber)
       .toString();

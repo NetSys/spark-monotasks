@@ -69,18 +69,18 @@ abstract class BlockTransferService extends Closeable with Logging {
   def hostName: String
 
   /**
-   * Fetch a block from a remote node asynchronously, available only after [[init]] is invoked.
+   * Fetches blocks from a remote node asynchronously, available only after [[init]] is invoked.
    */
-  def fetchBlock(
+  def fetchBlocks(
       host: String,
       port: Int,
-      blockId: String,
+      blockIds: Array[String],
       taskAttemptId: Long,
       attemptNumber: Int,
       blockReceivedCallback: BlockReceivedCallback): Unit
 
   /**
-   * A special case of [[fetchBlock]] that is blocking.
+   * A special case of [[fetchBlocks]] that is blocking and that only fetches a single block.
    *
    * It is also only available after [[init]] is invoked.
    *
@@ -91,7 +91,7 @@ abstract class BlockTransferService extends Closeable with Logging {
   def fetchBlockSync(host: String, port: Int, blockId: String): ManagedBuffer = {
     // A monitor for the thread to wait on.
     val result = Promise[ManagedBuffer]()
-    fetchBlock(host, port, blockId, -1L, -1,
+    fetchBlocks(host, port, Array(blockId), -1L, -1,
       new BlockReceivedCallback {
         override def onFailure(blockId: String, exception: Throwable): Unit = {
           result.failure(exception)

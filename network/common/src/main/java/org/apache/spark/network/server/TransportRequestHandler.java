@@ -33,6 +33,8 @@
 
 package org.apache.spark.network.server;
 
+import java.util.Arrays;
+
 import io.netty.channel.Channel;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -85,8 +87,8 @@ public class TransportRequestHandler extends MessageHandler<RequestMessage> {
   private void processFetchRequest(final BlockFetchRequest req) {
     final String client = NettyUtils.getRemoteAddress(channel);
 
-    logger.info("Received req from {} to fetch block {}", client, req.blockId);
+    logger.info("Received req from {} to fetch blocks {}", client, Arrays.toString(req.blockIds));
 
-    blockFetcher.getBlockData(req.blockId, channel, req.taskAttemptId, req.attemptNumber);
+    blockFetcher.getBlockData(req.blockIds, channel, req.taskAttemptId, req.attemptNumber);
   }
 }

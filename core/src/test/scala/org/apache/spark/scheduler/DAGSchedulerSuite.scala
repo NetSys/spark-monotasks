@@ -15,6 +15,22 @@
  * limitations under the License.
  */
 
+/*
+ * Copyright 2015 The Regents of The University California
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package org.apache.spark.scheduler
 
 import scala.collection.mutable.{ArrayBuffer, HashSet, HashMap, Map}
@@ -424,8 +440,8 @@ class DAGSchedulerSuite extends FunSuiteLike  with BeforeAndAfter with LocalSpar
     complete(taskSets(0), Seq(
         (Success, makeMapStatus("hostA", 1)),
         (Success, makeMapStatus("hostB", 1))))
-    assert(mapOutputTracker.getServerStatuses(shuffleId, 0).map(_._1) ===
-           Array(makeBlockManagerId("hostA"), makeBlockManagerId("hostB")))
+    assert(mapOutputTracker.getMapStatusesByExecutorId(shuffleId, 0).map(_._1).toSet ===
+      HashSet(makeBlockManagerId("hostA"), makeBlockManagerId("hostB")))
     complete(taskSets(1), Seq((Success, 42)))
     assert(results === Map(0 -> 42))
     assertDataStructuresEmpty
@@ -451,7 +467,8 @@ class DAGSchedulerSuite extends FunSuiteLike  with BeforeAndAfter with LocalSpar
     // have the 2nd attempt pass
     complete(taskSets(2), Seq((Success, makeMapStatus("hostA", 1))))
     // we can see both result blocks now
-    assert(mapOutputTracker.getServerStatuses(shuffleId, 0).map(_._1.host) === Array("hostA", "hostB"))
+    assert(mapOutputTracker.getMapStatusesByExecutorId(shuffleId, 0).map(_._1.host).toSet ===
+      HashSet("hostA", "hostB"))
     complete(taskSets(3), Seq((Success, 43)))
     assert(results === Map(0 -> 42, 1 -> 43))
     assertDataStructuresEmpty
@@ -467,8 +484,8 @@ class DAGSchedulerSuite extends FunSuiteLike  with BeforeAndAfter with LocalSpar
       (Success, makeMapStatus("hostA", 1)),
       (Success, makeMapStatus("hostB", 1))))
     // The MapOutputTracker should know about both map output locations.
-    assert(mapOutputTracker.getServerStatuses(shuffleId, 0).map(_._1.host) ===
-      Array("hostA", "hostB"))
+    assert(mapOutputTracker.getMapStatusesByExecutorId(shuffleId, 0).map(_._1.host).toSet ===
+      HashSet("hostA", "hostB"))
 
     // The first result task fails, with a fetch failure for the output from the first mapper.
     runEvent(CompletionEvent(
@@ -515,8 +532,8 @@ class DAGSchedulerSuite extends FunSuiteLike  with BeforeAndAfter with LocalSpar
     // should work because it's a new epoch
     taskSet.tasks(1).epoch = newEpoch
     runEvent(CompletionEvent(taskSet.tasks(1), Success, makeMapStatus("hostA", 1), null, createFakeTaskInfo(), null))
-    assert(mapOutputTracker.getServerStatuses(shuffleId, 0).map(_._1) ===
-           Array(makeBlockManagerId("hostB"), makeBlockManagerId("hostA")))
+    assert(mapOutputTracker.getMapStatusesByExecutorId(shuffleId, 0).map(_._1).toSet ===
+      HashSet(makeBlockManagerId("hostB"), makeBlockManagerId("hostA")))
     complete(taskSets(1), Seq((Success, 42), (Success, 43)))
     assert(results === Map(0 -> 42, 1 -> 43))
     assertDataStructuresEmpty
@@ -611,8 +628,8 @@ class DAGSchedulerSuite extends FunSuiteLike  with BeforeAndAfter with LocalSpar
        (Success, makeMapStatus("hostB", 1))))
     // have hostC complete the resubmitted task
     complete(taskSets(1), Seq((Success, makeMapStatus("hostC", 1))))
-    assert(mapOutputTracker.getServerStatuses(shuffleId, 0).map(_._1) ===
-           Array(makeBlockManagerId("hostC"), makeBlockManagerId("hostB")))
+    assert(mapOutputTracker.getMapStatusesByExecutorId(shuffleId, 0).map(_._1).toSet ===
+      HashSet(makeBlockManagerId("hostC"), makeBlockManagerId("hostB")))
     complete(taskSets(2), Seq((Success, 42)))
     assert(results === Map(0 -> 42))
     assertDataStructuresEmpty

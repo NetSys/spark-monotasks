@@ -15,8 +15,25 @@
  * limitations under the License.
  */
 
+/*
+ * Copyright 2015 The Regents of The University California
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package org.apache.spark
 
+import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.Await
 
 import akka.actor._
@@ -25,7 +42,7 @@ import org.scalatest.FunSuite
 
 import org.apache.spark.scheduler.{CompressedMapStatus, MapStatus}
 import org.apache.spark.shuffle.FetchFailedException
-import org.apache.spark.storage.BlockManagerId
+import org.apache.spark.storage.{BlockManagerId, ShuffleBlockId}
 import org.apache.spark.util.AkkaUtils
 
 class MapOutputTrackerSuite extends FunSuite {
@@ -53,9 +70,10 @@ class MapOutputTrackerSuite extends FunSuite {
         Array(1000L, 10000L)))
     tracker.registerMapOutput(10, 1, MapStatus(BlockManagerId("b", "hostB", 1000),
         Array(10000L, 1000L)))
-    val statuses = tracker.getServerStatuses(10, 0)
-    assert(statuses.toSeq === Seq((BlockManagerId("a", "hostA", 1000), size1000),
-                                  (BlockManagerId("b", "hostB", 1000), size10000)))
+    val statuses = tracker.getMapStatusesByExecutorId(10, 0)
+    assert(statuses.toSet ===
+      Seq((BlockManagerId("a", "hostA", 1000), ArrayBuffer((ShuffleBlockId(10, 0, 0), size1000))),
+          (BlockManagerId("b", "hostB", 1000), ArrayBuffer((ShuffleBlockId(10, 1, 0), size10000)))))
     tracker.stop()
     actorSystem.shutdown()
   }
@@ -72,10 +90,10 @@ class MapOutputTrackerSuite extends FunSuite {
     tracker.registerMapOutput(10, 1, MapStatus(BlockManagerId("b", "hostB", 1000),
       Array(compressedSize10000, compressedSize1000)))
     assert(tracker.containsShuffle(10))
-    assert(tracker.getServerStatuses(10, 0).nonEmpty)
+    assert(tracker.getMapStatusesByExecutorId(10, 0).nonEmpty)
     tracker.unregisterShuffle(10)
     assert(!tracker.containsShuffle(10))
-    assert(tracker.getServerStatuses(10, 0).isEmpty)
+    assert(tracker.getMapStatusesByExecutorId(10, 0).isEmpty)
 
     tracker.stop()
     actorSystem.shutdown()
@@ -101,7 +119,7 @@ class MapOutputTrackerSuite extends FunSuite {
     // The remaining reduce task might try to grab the output despite the shuffle failure;
     // this should cause it to fail, and the scheduler will ignore the failure due to the
     // stage already being aborted.
-    intercept[FetchFailedException] { tracker.getServerStatuses(10, 1) }
+    intercept[FetchFailedException] { tracker.getMapStatusesByExecutorId(10, 1) }
 
     tracker.stop()
     actorSystem.shutdown()
@@ -127,23 +145,23 @@ class MapOutputTrackerSuite extends FunSuite {
     masterTracker.registerShuffle(10, 1)
     masterTracker.incrementEpoch()
     slaveTracker.updateEpoch(masterTracker.getEpoch)
-    intercept[FetchFailedException] { slaveTracker.getServerStatuses(10, 0) }
+    intercept[FetchFailedException] { slaveTracker.getMapStatusesByExecutorId(10, 0) }
 
     val size1000 = MapStatus.decompressSize(MapStatus.compressSize(1000L))
     masterTracker.registerMapOutput(10, 0, MapStatus(
       BlockManagerId("a", "hostA", 1000), Array(1000L)))
     masterTracker.incrementEpoch()
     slaveTracker.updateEpoch(masterTracker.getEpoch)
-    assert(slaveTracker.getServerStatuses(10, 0).toSeq ===
-      Seq((BlockManagerId("a", "hostA", 1000), size1000)))
+    assert(slaveTracker.getMapStatusesByExecutorId(10, 0) ===
+      Seq((BlockManagerId("a", "hostA", 1000), ArrayBuffer((ShuffleBlockId(10, 0, 0), size1000)))))
 
     masterTracker.unregisterMapOutput(10, 0, BlockManagerId("a", "hostA", 1000))
     masterTracker.incrementEpoch()
     slaveTracker.updateEpoch(masterTracker.getEpoch)
-    intercept[FetchFailedException] { slaveTracker.getServerStatuses(10, 0) }
+    intercept[FetchFailedException] { slaveTracker.getMapStatusesByExecutorId(10, 0) }
 
     // failure should be cached
-    intercept[FetchFailedException] { slaveTracker.getServerStatuses(10, 0) }
+    intercept[FetchFailedException] { slaveTracker.getMapStatusesByExecutorId(10, 0) }
 
     masterTracker.stop()
     slaveTracker.stop()

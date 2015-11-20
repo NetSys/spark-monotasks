@@ -251,32 +251,36 @@ private[spark] class BlockManager(
   }
 
   override def getBlockData(
-      blockIdStr: String, channel: Channel, taskAttemptId: Long, attemptNumber: Int): Unit = {
-    val blockId = BlockId(blockIdStr)
-
+      blockIdStrs: Array[String],
+      channel: Channel,
+      taskAttemptId: Long,
+      attemptNumber: Int): Unit = {
     val taskContext =
       new TaskContextImpl(taskAttemptId, attemptNumber, taskIsRunningRemotely = true)
+    blockIdStrs.foreach { blockIdStr =>
+      val blockId = BlockId(blockIdStr)
 
-    val networkResponseMonotask = new NetworkResponseMonotask(blockId, channel, taskContext)
+      val networkResponseMonotask = new NetworkResponseMonotask(blockId, channel, taskContext)
 
-    // Try to send the block back from in-memory.
-    if (memoryStore.contains(blockId)) {
-      localDagScheduler.post(SubmitMonotask(networkResponseMonotask))
-    } else {
-      // Try to load the block from disk.
-      getBlockLoadMonotask(blockId, taskContext) match {
-        case Some(blockLoadMonotask) =>
-          blockLoadMonotask.addAlternateFailureHandler { failureReason: TaskFailedReason =>
-            networkResponseMonotask.markAsFailed(failureReason.toErrorString)
-          }
-          networkResponseMonotask.addDependency(blockLoadMonotask)
-          localDagScheduler.post(SubmitMonotasks(Seq(networkResponseMonotask, blockLoadMonotask)))
+      // Try to send the block back from in-memory.
+      if (memoryStore.contains(blockId)) {
+        localDagScheduler.post(SubmitMonotask(networkResponseMonotask))
+      } else {
+        // Try to load the block from disk.
+        getBlockLoadMonotask(blockId, taskContext) match {
+          case Some(blockLoadMonotask) =>
+            blockLoadMonotask.addAlternateFailureHandler { failureReason: TaskFailedReason =>
+              networkResponseMonotask.markAsFailed(failureReason.toErrorString)
+            }
+            networkResponseMonotask.addDependency(blockLoadMonotask)
+            localDagScheduler.post(SubmitMonotasks(Seq(networkResponseMonotask, blockLoadMonotask)))
 
-        case None =>
-          val failureMessage = s"Block $blockId not found in memory or on disk"
-          logError(failureMessage)
-          networkResponseMonotask.markAsFailed(failureMessage)
-          localDagScheduler.post(SubmitMonotask(networkResponseMonotask))
+          case None =>
+            val failureMessage = s"Block $blockId not found in memory or on disk"
+            logError(failureMessage)
+            networkResponseMonotask.markAsFailed(failureMessage)
+            localDagScheduler.post(SubmitMonotask(networkResponseMonotask))
+        }
       }
     }
   }

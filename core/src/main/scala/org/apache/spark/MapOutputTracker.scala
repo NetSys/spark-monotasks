@@ -15,14 +15,29 @@
  * limitations under the License.
  */
 
+/*
+ * Copyright 2015 The Regents of The University California
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package org.apache.spark
 
 import java.io._
 import java.util.concurrent.ConcurrentHashMap
 import java.util.zip.{GZIPInputStream, GZIPOutputStream}
 
-import scala.collection.mutable.{HashSet, HashMap, Map}
-import scala.concurrent.Await
+import scala.collection.mutable.{ArrayBuffer, HashSet, HashMap, Map}
 import scala.collection.JavaConversions._
 
 import akka.actor._
@@ -30,7 +45,7 @@ import akka.pattern.ask
 
 import org.apache.spark.scheduler.MapStatus
 import org.apache.spark.shuffle.MetadataFetchFailedException
-import org.apache.spark.storage.BlockManagerId
+import org.apache.spark.storage.{BlockManagerId, ShuffleBlockId}
 import org.apache.spark.util._
 
 private[spark] sealed trait MapOutputTrackerMessage
@@ -131,7 +146,8 @@ private[spark] abstract class MapOutputTracker(conf: SparkConf) extends Logging 
    * Called from executors to get the server URIs and output sizes of the map outputs of
    * a given shuffle.
    */
-  def getServerStatuses(shuffleId: Int, reduceId: Int): Array[(BlockManagerId, Long)] = {
+  def getMapStatusesByExecutorId(
+      shuffleId: Int, reduceId: Int): Seq[(BlockManagerId, Seq[(ShuffleBlockId, Long)])] = {
     val statuses = mapStatuses.get(shuffleId).orNull
     if (statuses == null) {
       logInfo("Don't have map outputs for shuffle " + shuffleId + ", fetching them")
@@ -370,23 +386,37 @@ private[spark] object MapOutputTracker extends Logging {
     objIn.readObject().asInstanceOf[Array[MapStatus]]
   }
 
-  // Convert an array of MapStatuses to locations and sizes for a given reduce ID. If
-  // any of the statuses is null (indicating a missing location due to a failed mapper),
-  // throw a FetchFailedException.
+  /**
+   * Converts an array of MapStatuses for a given reduce ID to a sequence that, for each block
+   * manager ID, lists the shuffle block ids and corresponding shuffle block sizes stored at that
+   * block manager.
+   *
+   * If any of the statuses is null (indicating a missing location due to a failed mapper), throws
+   * a FetchFailedException.
+   *
+   * @param shuffleId Identifier for the shuffle.
+   * @param reduceId Identifier for the reduce macrotask.
+   * @param statuses List of map statuses, indexed by map ID.
+   * @return A sequence of 2-item tuples, where the first item in the tuple is a BlockManagerId,
+   *         and the second item is a sequence of (shuffle block id, shuffle block size) tuples
+   *         describing the shuffle blocks that are stored at that block manager.
+   */
   private def convertMapStatuses(
       shuffleId: Int,
       reduceId: Int,
-      statuses: Array[MapStatus]): Array[(BlockManagerId, Long)] = {
+      statuses: Array[MapStatus]): Seq[(BlockManagerId, Seq[(ShuffleBlockId, Long)])] = {
     assert (statuses != null)
-    statuses.map {
-      status =>
-        if (status == null) {
-          logError("Missing an output location for shuffle " + shuffleId)
-          throw new MetadataFetchFailedException(
-            shuffleId, reduceId, "Missing an output location for shuffle " + shuffleId)
-        } else {
-          (status.location, status.getSizeForBlock(reduceId))
-        }
+    val splitsByAddress = new HashMap[BlockManagerId, ArrayBuffer[(ShuffleBlockId, Long)]]
+    for ((status, mapId) <- statuses.zipWithIndex) {
+      if (status == null) {
+        val errorMessage = s"Missing an output location for shuffle $shuffleId"
+        logError(errorMessage)
+        throw new MetadataFetchFailedException(shuffleId, reduceId, errorMessage)
+      } else {
+        splitsByAddress.getOrElseUpdate(status.location, ArrayBuffer()) +=
+          ((ShuffleBlockId(shuffleId, mapId, reduceId), status.getSizeForBlock(reduceId)))
+      }
     }
+    splitsByAddress.toSeq
   }
 }

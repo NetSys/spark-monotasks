@@ -59,16 +59,16 @@ class NettyBlockTransferService(conf: SparkConf, securityManager: SecurityManage
     logInfo("Server created on " + server.getPort)
   }
 
-  override def fetchBlock(
+  override def fetchBlocks(
       host: String,
       port: Int,
-      blockId: String,
+      blockIds: Array[String],
       taskAttemptId: Long,
       attemptNumber: Int,
       blockReceivedCallback: BlockReceivedCallback): Unit = {
-    logTrace(s"Fetching block $blockId from $host:$port")
+    logTrace(s"Fetching blocks ${blockIds.mkString(", ")} from $host:$port")
     val client = clientFactory.createClient(host, port)
-    client.fetchBlock(blockId.toString, taskAttemptId, attemptNumber, blockReceivedCallback)
+    client.fetchBlocks(blockIds, taskAttemptId, attemptNumber, blockReceivedCallback)
   }
 
   override def hostName: String = Utils.localHostName()

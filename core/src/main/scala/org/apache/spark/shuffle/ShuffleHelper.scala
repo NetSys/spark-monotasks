@@ -16,15 +16,13 @@
 
 package org.apache.spark.shuffle
 
-import scala.collection.mutable.ArrayBuffer
-
 import org.apache.spark.{InterruptibleIterator, Logging, ShuffleDependency, SparkEnv,
-  SparkException, TaskContextImpl}
+  TaskContextImpl}
 import org.apache.spark.monotasks.Monotask
 import org.apache.spark.monotasks.network.NetworkRequestMonotask
 import org.apache.spark.network.buffer.ManagedBuffer
 import org.apache.spark.serializer.Serializer
-import org.apache.spark.storage.{BlockId, BlockManagerId, MonotaskResultBlockId, ShuffleBlockId}
+import org.apache.spark.storage.{BlockManagerId, ShuffleBlockId}
 import org.apache.spark.util.CompletionIterator
 
 /**
@@ -43,13 +41,6 @@ class ShuffleHelper[K, V, C](
     private val context: TaskContextImpl)
   extends Logging {
 
-  /**
-   * For each shuffle block, a pair where the first item is the blockId used to store the block
-   * locally, and the second item is the ID of the map task that produced the block (used to report
-   * failures).
-   */
-  private val localBlockIdAndMapIdPairs = new ArrayBuffer[(BlockId, Int)]()
-
   private val blockManager = SparkEnv.get.blockManager
   private val readMetrics = context.taskMetrics.createShuffleReadMetricsForDependency()
 
@@ -57,151 +48,132 @@ class ShuffleHelper[K, V, C](
   // TODO: Should this fetching of server statuses happen in a network monotask? Could
   //       involve network (to send message to the master); this should be measured.
   private val startTime = System.currentTimeMillis
-  private val statuses: Array[(BlockManagerId, Long)] =
-    SparkEnv.get.mapOutputTracker.getServerStatuses(shuffleDependency.shuffleId, reduceId)
+  private val statusesByExecutorId: Seq[(BlockManagerId, Seq[(ShuffleBlockId, Long)])] =
+    SparkEnv.get.mapOutputTracker.getMapStatusesByExecutorId(shuffleDependency.shuffleId, reduceId)
   logDebug("Fetching map output location for shuffle %d, reduce %d took %d ms".format(
     shuffleDependency.shuffleId, reduceId, System.currentTimeMillis - startTime))
 
   def getReadMonotasks(): Seq[Monotask] = {
-    statuses.zipWithIndex.flatMap { statusAndIndex =>
-      val address = statusAndIndex._1._1
-      val size = statusAndIndex._1._2
-      val mapId = statusAndIndex._2
-      // Only need to fetch blocks that have non-zero size.
-      if (size > 0) {
-        getReadMonotaskForBlock(
-          ShuffleBlockId(shuffleDependency.shuffleId, mapId, reduceId), size, address)
-      } else {
-        None
-      }
+    statusesByExecutorId.flatMap {
+      case (blockManagerId, blockIdsAndSizes) =>
+        val nonZeroBlockIdsAndSizes = blockIdsAndSizes.filter(_._2 > 0)
+        if (nonZeroBlockIdsAndSizes.size > 0) {
+          getReadMonotasksForBlocks(nonZeroBlockIdsAndSizes, blockManagerId)
+        } else {
+          None
+        }
     }
   }
 
   /**
-   * Returns a Monotask that will load the given block into memory on this machine, or None if
-   * the block is already in memory.
+   * Returns monotasks that will load the given blocks into memory on this machine, or None if
+   * all of the blocks are already in memory.
    */
-  private def getReadMonotaskForBlock(
-       blockId: ShuffleBlockId,
-       blockSize: Long,
-       blockLocation: BlockManagerId): Option[Monotask] = {
-    if (blockLocation.executorId == blockManager.blockManagerId.executorId) {
-      localBlockIdAndMapIdPairs.append((blockId, blockId.mapId))
-      if (blockManager.memoryStore.contains(blockId)) {
-        // If the data is already in local memory, don't need a monotask to load it.
-        None
-      } else {
-        // Create a DiskReadMonotask to load the data into memory.
-        // The data loaded into memory by this monotask will be automatically deleted by the
-        // LocalDagScheduler, because DiskReadMonotasks always mark the data read from disk as
-        // intermediate data that should be deleted when all of the monotask's dependents
-        // complete.
-        val maybeDiskLoadMonotask = blockManager.getBlockLoadMonotask(blockId, context)
-        if (maybeDiskLoadMonotask.isEmpty) {
-          throw new FetchFailedException(
-            blockManager.blockManagerId,
-            blockId.shuffleId,
-            blockId.mapId,
-            reduceId,
-            s"Could not find local shuffle block ID $blockId in BlockManager")
-        }
-        maybeDiskLoadMonotask
+  private def getReadMonotasksForBlocks(
+       blockIdsAndSizes: Seq[(ShuffleBlockId, Long)], location: BlockManagerId): Seq[Monotask] = {
+    if (location.executorId == blockManager.blockManagerId.executorId) {
+      blockIdsAndSizes.flatMap {
+        case (blockId, size) =>
+          if (blockManager.memoryStore.contains(blockId)) {
+            // If the data is already in local memory, don't need a monotask to load it.
+            None
+          } else {
+            // Create a DiskReadMonotask to load the data into memory.
+            // The data loaded into memory by this monotask will be automatically deleted by the
+            // LocalDagScheduler, because DiskReadMonotasks always mark the data read from disk as
+            // intermediate data that should be deleted when all of the monotask's dependents
+            // complete.
+            val maybeDiskLoadMonotask = blockManager.getBlockLoadMonotask(blockId, context)
+            if (maybeDiskLoadMonotask.isEmpty) {
+              throw new FetchFailedException(
+                blockManager.blockManagerId,
+                blockId.shuffleId,
+                blockId.mapId,
+                reduceId,
+                s"Could not find local shuffle block ID $blockId in BlockManager")
+            }
+            maybeDiskLoadMonotask
+          }
       }
     } else {
       // Need to read the shuffle data from a remote machine.
       val networkLoadMonotask =
-        new NetworkRequestMonotask(context, blockLocation, blockId, blockSize)
-      localBlockIdAndMapIdPairs.append((networkLoadMonotask.getResultBlockId(), blockId.mapId))
-      Some(networkLoadMonotask)
+        new NetworkRequestMonotask(context, location, blockIdsAndSizes)
+      Seq(networkLoadMonotask)
     }
   }
 
   def getDeserializedAggregatedSortedData(): Iterator[Product2[K, C]] = {
     val shuffleDataSerializer = Serializer.getSerializer(shuffleDependency.serializer)
 
-    // A ShuffleBlockId to use when decompressing shuffle data read from remote executors using the
-    // BlockManager. We need to use a ShuffleBlockId for that (as opposed to the
-    // MonotaskResultBlockId) so that the block manager correctly determines the compression and
-    // settings for the data.
-    val dummyShuffleBlockId = new ShuffleBlockId(shuffleDependency.shuffleId, 0, reduceId)
-
-    val iter = localBlockIdAndMapIdPairs.iterator.flatMap {
-      case (blockId, mapId) =>
-        val dataBuffer = getShuffleDataBuffer(blockId)
-
-        // Can't use BlockManager.dataDeserialize here, because we have an InputStream already
-        // (as opposed to a ByteBuffer).
-        try {
-          val inputStream = dataBuffer.createInputStream()
-          val decompressedStream = blockManager.wrapForCompression(dummyShuffleBlockId, inputStream)
-          val iter = shuffleDataSerializer.newInstance()
-            .deserializeStream(decompressedStream).asIterator
-          CompletionIterator[Any, Iterator[Any]](iter, {
-            // Once the iterator is exhausted, release the buffer.
-            dataBuffer.release()
-
-             // After iterating through all of the shuffle data, aggregate the shuffle read metrics.
-             // All calls to updateShuffleReadMetrics() (across all shuffle dependencies) need to
-             // happen in a single thread; this is guaranteed here, because this will be called from
-             // the task's main compute monotask.
-             context.taskMetrics.updateShuffleReadMetrics()
-           })
-        } catch {
-          case e: Exception =>
-            logError(s"Failed to get shuffle block $blockId", e)
-            val address = statuses(mapId)._1
-            throw new FetchFailedException(
-              address, shuffleDependency.shuffleId, mapId, reduceId, e)
+    val decompressedDeserializedIter = statusesByExecutorId.iterator.flatMap {
+      case (blockManagerId, blockIdsAndSizes) =>
+        blockIdsAndSizes.flatMap {
+          case (blockId, size) =>
+            if (size > 0) {
+              try {
+                getIteratorForBlock(blockId, blockManagerId, shuffleDataSerializer)
+              } catch {
+                case e: Exception =>
+                  logError(s"Failed to get deserialized data for shuffle block $blockId", e)
+                  throw new FetchFailedException(
+                    blockManagerId, shuffleDependency.shuffleId, blockId.mapId, reduceId, e)
+              }
+            } else {
+              None
+            }
         }
     }
 
-    // Create an iterator that will record the number of records read.
-    val recordLoggingIterator = new InterruptibleIterator[Any](context, iter) {
-      override def next(): Any = {
-        readMetrics.incRecordsRead(1)
-        delegate.next()
-      }
-    }
-
-    getMaybeSortedIterator(getMaybeAggregatedIterator(recordLoggingIterator))
+    getMaybeSortedIterator(getMaybeAggregatedIterator(decompressedDeserializedIter))
   }
 
   /**
-   * Returns a ManagedBuffer containing the shuffle data corresponding to the given block. Throws
-   * an exception if the block could not be found or if the given blockId is not a ShuffleBlockId
-   * (for shuffle data read locally) or MonotaskResultBlockId (for shuffle data read from remote
-   * executors).
+   * Returns an iterator over the decompressed, deserialized data for the given BlockId. Throws
+   * an error if the block could not be found.
    */
-  private def getShuffleDataBuffer(blockId: BlockId): ManagedBuffer = blockId match {
-    case shuffleBlockId: ShuffleBlockId =>
-      try {
-        val bufferMessage = blockManager.getBlockData(shuffleBlockId)
-        readMetrics.incLocalBlocksFetched(1)
-        readMetrics.incLocalBytesRead(bufferMessage.size)
-        bufferMessage
-      } catch {
-        case e: Exception =>
-          val failureMessage = s"Unable to fetch local shuffle block with id $blockId"
-          logError(failureMessage, e)
-          throw new FetchFailedException(
-            blockManager.blockManagerId,
-            shuffleBlockId.shuffleId,
-            shuffleBlockId.mapId,
-            reduceId,
-            failureMessage,
-            e)
+  private def getIteratorForBlock(
+      blockId: ShuffleBlockId,
+      blockManagerId: BlockManagerId,
+      serializer: Serializer): Iterator[Any] = {
+    val dataBuffer = if (blockManagerId.executorId == blockManager.blockManagerId.executorId) {
+      val buffer = blockManager.getBlockData(blockId)
+      readMetrics.incLocalBlocksFetched(1)
+      readMetrics.incLocalBytesRead(buffer.size)
+      buffer
+    } else {
+      val buffer = blockManager.getSingle(blockId).get.asInstanceOf[ManagedBuffer]
+      readMetrics.incRemoteBlocksFetched(1)
+      readMetrics.incRemoteBytesRead(buffer.size)
+      buffer
+    }
+
+    // Deserialize and possibly decompress the data.  Can't use BlockManager.dataDeserialize here,
+    // because we have an InputStream already (as opposed to a ByteBuffer).
+    val inputStream = dataBuffer.createInputStream()
+    val decompressedStream = blockManager.wrapForCompression(blockId, inputStream)
+    val iter = serializer.newInstance().deserializeStream(decompressedStream).asIterator
+
+    // Create an iterator that will record the number of records read.
+    val recordLoggingIterator =
+      new InterruptibleIterator[Any](context, iter) {
+        override def next(): Any = {
+          readMetrics.incRecordsRead(1)
+          delegate.next()
+        }
       }
 
-    case monotaskResultBlockId: MonotaskResultBlockId =>
-      // TODO: handle case where the block doesn't exist.
-      val bufferMessage = blockManager.getSingle(monotaskResultBlockId).get
-        .asInstanceOf[ManagedBuffer]
-      readMetrics.incRemoteBytesRead(bufferMessage.size)
-      readMetrics.incRemoteBlocksFetched(1)
-      bufferMessage
+    CompletionIterator[Any, Iterator[Any]](recordLoggingIterator, {
+      // Once the iterator is exhausted, release the buffer.
+      dataBuffer.release()
 
-    case _ =>
-      throw new SparkException(s"Failed to get block $blockId, which is not a shuffle block")
+      // After iterating through all of the shuffle data, aggregate the shuffle read metrics.
+      // All calls to updateShuffleReadMetrics() (across all shuffle dependencies) need to
+      // happen in a single thread; this is guaranteed here, because this will be called from
+      // the task's main compute monotask. This call needs to occur after all metrics updates
+      // associated with the shuffle.
+      context.taskMetrics.updateShuffleReadMetrics()
+    })
   }
 
   /** If an aggregator is defined for the shuffle, returns an aggregated iterator. */

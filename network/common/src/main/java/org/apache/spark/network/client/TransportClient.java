@@ -35,6 +35,7 @@ package org.apache.spark.network.client;
 
 import java.io.Closeable;
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.concurrent.TimeUnit;
 
 import com.google.common.base.Objects;
@@ -49,7 +50,7 @@ import org.apache.spark.network.protocol.BlockFetchRequest;
 import org.apache.spark.network.util.NettyUtils;
 
 /**
- * Client for fetching one block at a time from a remote host. This API is intended to allow
+ * Client for fetching blocks from a remote host. This API is intended to allow
  * efficient transfer of large blocks of data (block size ranges from hundreds of KB to a few MB).
  *
  * Construct an instance of TransportClient using {@link TransportClientFactory}. A single
@@ -77,44 +78,51 @@ public class TransportClient implements Closeable {
   }
 
   /**
-   * Requests a single block from the remote side.
+   * Requests blocks from the remote side.
    *
-   * Multiple fetchBlock requests may be outstanding simultaneously, and the blocks are guaranteed
-   * to be returned in the same order that they were requested, assuming only a single
-   * TransportClient is used to fetch the blocks.
+   * Multiple fetchBlocks requests may be outstanding simultaneously. If the blocks reside in-memory
+   * on the remote host, they will be returned in the same order that they were requested
+   * (assuming that only one client is used); otherwise, requests may be re-ordered if some requests
+   * need to be read from a disk with a longer queue.
    *
-   * @param blockId Identifier for the block.
-   * @param callback Callback invoked upon successful receipt of block, or upon any failure.
+   * @param blockIds Identifiers of the blocks that should be fetched.
+   * @param callback Callback invoked upon successful receipt of each block, or upon any failure.
    */
-  public void fetchBlock(
-      final String blockId,
+  public void fetchBlocks(
+      final String[] blockIds,
       Long taskAttemptId,
       int attemptNumber,
       final BlockReceivedCallback callback) {
     final String serverAddr = NettyUtils.getRemoteAddress(channel);
+    final String blockIdsAsStrings = Arrays.toString(blockIds);
     final long startTime = System.currentTimeMillis();
-    logger.debug("Sending request for block {} to {}", blockId, serverAddr);
+    logger.debug("Sending request for blocks {} to {}", blockIdsAsStrings, serverAddr);
 
-    handler.addFetchRequest(blockId, callback);
+    for (String blockId : blockIds) {
+      handler.addFetchRequest(blockId, callback);
+    }
 
-    channel.writeAndFlush(new BlockFetchRequest(blockId, taskAttemptId, attemptNumber)).addListener(
+    BlockFetchRequest request = new BlockFetchRequest(blockIds, taskAttemptId, attemptNumber);
+    channel.writeAndFlush(request).addListener(
       new ChannelFutureListener() {
         @Override
         public void operationComplete(ChannelFuture future) throws Exception {
           if (future.isSuccess()) {
             long timeTaken = System.currentTimeMillis() - startTime;
-            logger.trace("Sending request {} to {} took {} ms", blockId, serverAddr,
+            logger.trace("Sending request for {} to {} took {} ms", blockIdsAsStrings, serverAddr,
               timeTaken);
           } else {
-            String errorMsg = String.format("Failed to send request %s to %s: %s", blockId,
-              serverAddr, future.cause());
+            String errorMsg = String.format("Failed to send request for %s to %s: %s",
+              blockIdsAsStrings, serverAddr, future.cause());
             logger.error(errorMsg, future.cause());
-            handler.removeFetchRequest(blockId);
             channel.close();
-            try {
-              callback.onFailure(blockId, new IOException(errorMsg, future.cause()));
-            } catch (Exception e) {
-              logger.error("Uncaught exception in RPC response callback handler!", e);
+            for (String blockId: blockIds) {
+              handler.removeFetchRequest(blockId);
+              try {
+                callback.onFailure(blockId, new IOException(errorMsg, future.cause()));
+              } catch (Exception e) {
+                logger.error("Uncaught exception in RPC response callback handler!", e);
+              }
             }
           }
         }

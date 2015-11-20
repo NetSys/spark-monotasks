@@ -19,12 +19,12 @@ package org.apache.spark.network.server;
 import io.netty.channel.Channel;
 
 /**
- * Interface for asynchronously getting data identified by a block id. The requested data (or an
- * error, if applicable) is sent back on the given channel.
+ * Interface for asynchronously getting data identified by a set of block identifiers. The requested
+ * data (or an error, if applicable) is sent back on the given channel.
  *
  * Used by TransportRequestHandler to service requests from remote hosts for particular blocks.
  */
 public abstract class BlockFetcher {
   public abstract void getBlockData(
-    String blockId, Channel channel, long taskAttemptId, int attemptNumber);
+    String[] blockIds, Channel channel, long taskAttemptId, int attemptNumber);
 }
