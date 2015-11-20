@@ -57,7 +57,7 @@ import org.apache.spark.{MapOutputTrackerMaster, SparkConf, SparkContext, SparkE
   SecurityManager}
 import org.apache.spark.executor.DataReadMethod
 import org.apache.spark.monotasks.LocalDagScheduler
-import org.apache.spark.network.nio.NioBlockTransferService
+import org.apache.spark.network.netty.NettyBlockTransferService
 import org.apache.spark.scheduler.LiveListenerBus
 import org.apache.spark.serializer.KryoSerializer
 import org.apache.spark.shuffle.memory.MemoryShuffleManager
@@ -94,7 +94,7 @@ class BlockManagerSuite extends FunSuite with Matchers with BeforeAndAfterEach
   private def makeBlockManager(
       maxMem: Long,
       name: String = SparkContext.DRIVER_IDENTIFIER): BlockManager = {
-    val transfer = new NioBlockTransferService(conf, securityMgr)
+    val transfer = new NettyBlockTransferService(conf, securityMgr, 0)
     val manager = new BlockManager(
       name,
       actorSystem,

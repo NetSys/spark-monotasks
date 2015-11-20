@@ -15,6 +15,22 @@
  * limitations under the License.
  */
 
+/*
+ * Copyright 2015 The Regents of The University California
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package org.apache.spark
 
 import java.net.{Authenticator, PasswordAuthentication}
@@ -92,7 +108,7 @@ import org.apache.spark.util.Utils
  *            Authenticator installed in the SecurityManager to how it does the authentication
  *            and in this case gets the user name and password from the request.
  *
- *  - BlockTransferService -> The Spark BlockTransferServices uses java nio to asynchronously
+ *  - BlockTransferService -> The Spark BlockTransferServices uses Netty to asynchronously
  *            exchange messages.  For this we use the Java SASL
  *            (Simple Authentication and Security Layer) API and again use DIGEST-MD5
  *            as the authentication mechanism. This means the shared secret is not passed
@@ -105,15 +121,6 @@ import org.apache.spark.util.Utils
  *            SPARK could support in the future to allow the user to specify the quality
  *            of protection they want. If we support those, the messages will also have to
  *            be wrapped and unwrapped via the SaslServer/SaslClient.wrap/unwrap API's.
- *
- *            Since the NioBlockTransferService does asynchronous messages passing, the SASL
- *            authentication is a bit more complex. A ConnectionManager can be both a client
- *            and a Server, so for a particular connection it has to determine what to do.
- *            A ConnectionId was added to be able to track connections and is used to
- *            match up incoming messages with connections waiting for authentication.
- *            The ConnectionManager tracks all the sendingConnections using the ConnectionId,
- *            waits for the response from the server, and does the handshake before sending
- *            the real message.
  *
  *            The NettyBlockTransferService ensures that SASL authentication is performed
  *            synchronously prior to any other communication on a connection. This is done in

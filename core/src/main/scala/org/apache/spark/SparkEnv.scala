@@ -50,7 +50,6 @@ import org.apache.spark.metrics.MetricsSystem
 import org.apache.spark.monotasks.LocalDagScheduler
 import org.apache.spark.network.BlockTransferService
 import org.apache.spark.network.netty.NettyBlockTransferService
-import org.apache.spark.network.nio.NioBlockTransferService
 import org.apache.spark.scheduler.{OutputCommitCoordinator, LiveListenerBus}
 import org.apache.spark.scheduler.OutputCommitCoordinator.OutputCommitCoordinatorActor
 import org.apache.spark.serializer.Serializer
@@ -321,13 +320,7 @@ object SparkEnv extends Logging {
 
     val shuffleMemoryManager = new ShuffleMemoryManager(conf)
 
-    val blockTransferService =
-      conf.get("spark.shuffle.blockTransferService", "netty").toLowerCase match {
-        case "netty" =>
-          new NettyBlockTransferService(conf, securityManager, numUsableCores)
-        case "nio" =>
-          new NioBlockTransferService(conf, securityManager)
-      }
+    val blockTransferService = new NettyBlockTransferService(conf, securityManager, numUsableCores)
 
     val blockManagerMaster = new BlockManagerMaster(registerOrLookup(
       "BlockManagerMaster",

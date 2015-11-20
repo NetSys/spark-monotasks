@@ -49,7 +49,7 @@ import org.scalatest.concurrent.Eventually._
 
 import org.apache.spark._
 import org.apache.spark.monotasks.LocalDagScheduler
-import org.apache.spark.network.nio.NioBlockTransferService
+import org.apache.spark.network.netty.NettyBlockTransferService
 import org.apache.spark.scheduler.LiveListenerBus
 import org.apache.spark.serializer.KryoSerializer
 import org.apache.spark.shuffle.memory.MemoryShuffleManager
@@ -100,7 +100,7 @@ class ReceivedBlockHandlerSuite extends FunSuite with BeforeAndAfter with Matche
       conf,
       mapOutputTracker,
       shuffleManager,
-      new NioBlockTransferService(conf, securityMgr),
+      new NettyBlockTransferService(conf, securityMgr, 0),
       blockFileManager,
       localDagScheduler)
     blockManager.initialize("app-id")
