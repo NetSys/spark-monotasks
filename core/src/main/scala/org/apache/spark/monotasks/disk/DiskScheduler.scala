@@ -16,7 +16,6 @@
 
 package org.apache.spark.monotasks.disk
 
-import java.io.FileNotFoundException
 import java.nio.channels.ClosedByInterruptException
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.atomic.AtomicInteger
@@ -25,7 +24,7 @@ import scala.collection.mutable.HashMap
 import scala.util.control.NonFatal
 
 import org.apache.spark.{Logging, SparkEnv, SparkException}
-import org.apache.spark.monotasks.{SubmitMonotask, TaskSuccess}
+import org.apache.spark.monotasks.TaskSuccess
 import org.apache.spark.storage.BlockFileManager
 import org.apache.spark.util.{SparkUncaughtExceptionHandler, Utils}
 
