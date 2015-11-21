@@ -16,6 +16,7 @@
 
 package org.apache.spark.monotasks.network
 
+import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.atomic.AtomicLong
 
 import org.apache.spark.Logging
@@ -25,8 +26,28 @@ private[spark] class NetworkScheduler() extends Logging {
   /** Number of bytes that this executor is currently waiting to receive over the network. */
   private var currentOutstandingBytes = new AtomicLong(0)
 
-  def submitTask(monotask: NetworkMonotask) {
-    monotask.execute(NetworkScheduler.this)
+  /**
+   * Queue of monotasks waiting to be executed. submitMonotask() puts monotasks in this queue,
+   * and a separate thread executes them, so that launching network monotasks doesn't happen
+   * in the main scheduler thread (network monotasks are asynchronous, but launching a large
+   * number of them can still take a non-negligible amount of time in aggregate).
+   */
+  private val monotaskQueue = new LinkedBlockingQueue[NetworkMonotask]()
+
+  // Start a thread responsible for executing the network monotasks in monotaskQueue.
+  private val monotaskLaunchThread = new Thread(new Runnable() {
+    override def run(): Unit = {
+      while (true) {
+        monotaskQueue.take().execute(NetworkScheduler.this)
+      }
+    }
+  })
+  monotaskLaunchThread.setDaemon(true)
+  monotaskLaunchThread.setName("Network monotask launch thread")
+  monotaskLaunchThread.start()
+
+  def submitTask(monotask: NetworkMonotask): Unit = {
+    monotaskQueue.put(monotask)
   }
 
   /**
