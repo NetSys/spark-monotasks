@@ -55,7 +55,12 @@ object MemorySortJob {
       unsortedRdd.cache()
       unsortedRdd.count()
 
+      val numExecutors = spark.getExecutorStorageStatus.size
       (0 until numShuffles).foreach { i =>
+        // Force a GC to happen, in order to try to avoid a GC in the middle of the job.
+        spark.parallelize(1 to numExecutors, numExecutors).foreach { i =>
+          System.gc()
+        }
         sortRdd(unsortedRdd, numReduceTasks)
       }
     } finally {
