@@ -98,6 +98,7 @@ private[spark] class Executor(
     localDagScheduler.getNumRunningComputeMonotasks,
     localDagScheduler.getDiskNameToNumRunningAndQueuedDiskMonotasks,
     localDagScheduler.getNumRunningMacrotasks,
+    localDagScheduler.getNumLocalRunningMacrotasks,
     localDagScheduler.getNumMacrotasksInCompute,
     localDagScheduler.getNumMacrotasksInDisk,
     localDagScheduler.getNumMacrotasksInNetwork,

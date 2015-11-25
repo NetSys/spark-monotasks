@@ -38,6 +38,7 @@ private[spark] class ContinuousMonitor(
     getNumRunningComputeMonotasks: () => Int,
     getDiskNameToNumRunningAndQueuedDiskMonotasks: () => HashMap[String, Int],
     getNumRunningMacrotasks: () => Int,
+    getNumLocalRunningMacrotasks: () => Int,
     getNumMacrotasksInCompute: () => Long,
     getNumMacrotasksInDisk: () => Long,
     getNumMacrotasksInNetwork: () => Long,
@@ -87,6 +88,7 @@ private[spark] class ContinuousMonitor(
     ("Running Disk Monotasks" ->
       getDiskNameToCountsJson(getDiskNameToNumRunningAndQueuedDiskMonotasks())) ~
     ("Running Macrotasks" -> getNumRunningMacrotasks()) ~
+    ("Local Running Macrotasks" -> getNumLocalRunningMacrotasks()) ~
     ("Macrotasks In Compute" -> getNumMacrotasksInCompute()) ~
     ("Macrotasks In Disk" -> getNumMacrotasksInDisk()) ~
     ("Macrotasks In Network" -> getNumMacrotasksInNetwork()) ~
