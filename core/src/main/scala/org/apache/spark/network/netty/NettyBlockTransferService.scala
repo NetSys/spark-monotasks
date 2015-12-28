@@ -51,13 +51,11 @@ class NettyBlockTransferService(conf: SparkConf, securityManager: SecurityManage
   private[this] var transportContext: TransportContext = _
   private[this] var server: TransportServer = _
   private[this] var clientFactory: TransportClientFactory = _
-  private[this] var appId: String = _
 
   override def init(blockManager: BlockManager): Unit = {
     transportContext = new TransportContext(transportConf, blockManager)
     clientFactory = transportContext.createClientFactory()
     server = transportContext.createServer(conf.getInt("spark.blockManager.port", 0))
-    appId = conf.getAppId
     logInfo("Server created on " + server.getPort)
   }
 
