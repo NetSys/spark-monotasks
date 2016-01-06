@@ -16,6 +16,7 @@
 
 import collections
 import logging
+import random
 from xml.dom import minidom
 
 import task_constructs
@@ -128,7 +129,21 @@ class SimulationConf(object):
     """
     monotask_type = SimulationConf.__parse_string(monotask_dom, "type")
     if monotask_type == "compute":
-      compute_time_ms = SimulationConf.__parse_float(monotask_dom, "compute_time_ms")
+      average_compute_time_ms = SimulationConf.__parse_float(monotask_dom, "compute_time_ms")
+
+      compute_variation_elements = monotask_dom.getElementsByTagName("compute_variation")
+      if len(compute_variation_elements) > 0:
+        compute_variation = float(compute_variation_elements[0].firstChild.data)
+      else:
+        compute_variation = 0
+
+      if (compute_variation < 0) or (compute_variation >= 1):
+        raise Exception("The compute_variation parameter must be in the range [0, 1), otherwise " +
+          "it is possible for compute monotasks to take an unrealistic amount of time to run.")
+
+      compute_time_ms = random.uniform(
+        average_compute_time_ms * (1 - compute_variation),
+        average_compute_time_ms * (1 + compute_variation))
 
       # NetworkMonotasks are specified implicitly by defining a shuffle dependency. We cannot
       # explicitly specify NetworkMonotasks because we do not know where the shuffle data is

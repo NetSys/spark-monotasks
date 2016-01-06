@@ -75,10 +75,21 @@
               <type>compute</type>
 
               <!--
-                  Required if type == compute. The amount of time (in ms) that this monotask will
-                  use one CPU core.
+                  Required if type == compute. A float specifying the amount of time (in ms) that
+                  this monotask will use one CPU core.
               -->
               <compute_time_ms>10000</compute_time_ms>
+
+              <!--
+                  Optional, and only applies when type == compute. A float in the range [0, 1). If
+                  present, the compute time to be used will be chosen uniformly at random from the
+                  range:
+                    [
+                      compute_time_ms * (1 - compute_variation),
+                      compute_time_ms * (1 + compute_variation)
+                    ]
+              -->
+              <compute_variation>0.25</compute_variation>
 
               <!-- Optional -->
               <dependency_dag_ids>

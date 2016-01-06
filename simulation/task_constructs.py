@@ -191,10 +191,11 @@ class ComputeMonotask(Monotask):
 
   def __repr__(self):
     return (
-      ("(ComputeMonotask | id: %s | macrotask: %s | shuffle bytes to read: %s | " +
-        "is shuffle data on disk: %s)") % (
+      ("(ComputeMonotask | id: %s | macrotask: %s | compute time: %s ms | " +
+        "shuffle bytes to read: %s | is shuffle data on disk: %s)") % (
       self.monotask_id,
       self.macrotask.macrotask_id,
+      self.compute_time_ms,
       self.shuffle_bytes_to_read,
       self.is_shuffle_data_on_disk))
 
