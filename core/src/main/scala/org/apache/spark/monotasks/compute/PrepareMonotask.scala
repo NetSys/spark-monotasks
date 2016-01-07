@@ -49,7 +49,13 @@ private[spark] class PrepareMonotask(context: TaskContextImpl, val serializedTas
 
     SparkEnv.get.mapOutputTracker.updateEpoch(macrotask.epoch)
 
-    SparkEnv.get.localDagScheduler.post(SubmitMonotasks(macrotask.getMonotasks(context)))
+    val monotasks = macrotask.getMonotasks(context)
+
+    // Set this PrepareMonotask as a dependency, to facilitate correct tracking of which resource
+    // the macrotask is using.
+    monotasks.foreach(_.addDependency(this))
+
+    SparkEnv.get.localDagScheduler.post(SubmitMonotasks(monotasks))
     None
   }
 }

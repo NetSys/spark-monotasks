@@ -65,6 +65,13 @@ private[spark] class CoarseGrainedExecutorBackend(
   var executor: Executor = null
   var driver: ActorSelection = null
 
+  /**
+   * The epoch in the most recent messages from the master. This epoch is included when sending
+   * messages back to the master, so that the master can ignore delayed messages that were for
+   * previous (and thus no longer relevant) epochs.
+   */
+  private var epoch = 0
+
   override def preStart() {
     logInfo("Connecting to driver: " + driverUrl)
     driver = context.actorSelection(driverUrl)
@@ -93,14 +100,15 @@ private[spark] class CoarseGrainedExecutorBackend(
       logError("Slave registration failed: " + message)
       System.exit(1)
 
-    case LaunchTask(data) =>
+    case LaunchTask(newEpoch, data) =>
       if (executor == null) {
         logError("Received LaunchTask command but executor was null")
         System.exit(1)
       } else {
+        epoch = newEpoch
         val ser = env.closureSerializer.newInstance()
         val taskDesc = ser.deserialize[TaskDescription](data.value)
-        logInfo("Got assigned task " + taskDesc.taskId)
+        logInfo(s"Got assigned task ${taskDesc.taskId} (epoch: $newEpoch)")
         executor.launchTask(taskAttemptId = taskDesc.taskId, attemptNumber = taskDesc.attemptNumber,
           taskDesc.name, taskDesc.serializedTask)
       }
@@ -130,6 +138,11 @@ private[spark] class CoarseGrainedExecutorBackend(
 
   override def statusUpdate(taskId: Long, state: TaskState, data: ByteBuffer) {
     driver ! StatusUpdate(executorId, taskId, state, data)
+  }
+
+  override def requestTasks(numTasks: Int) {
+    logInfo(s"Requesting $numTasks from the driver using epoch $epoch")
+    driver ! RequestTasks(epoch, executorId, numTasks)
   }
 }
 

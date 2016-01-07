@@ -40,7 +40,10 @@ import org.apache.spark.util.{EventLoop, SparkUncaughtExceptionHandler}
  * loop.  The only exception to this is monitoring functions (to get the number of running tasks,
  * for example), which are not processed by the event loop.
  */
-private[spark] class LocalDagScheduler(blockFileManager: BlockFileManager, conf: SparkConf)
+private[spark] class LocalDagScheduler(
+    blockFileManager: BlockFileManager,
+    conf: SparkConf,
+    private val numCores: Int = Runtime.getRuntime().availableProcessors())
   extends EventLoop[LocalDagSchedulerEvent]("local-dag-scheduler-event-loop") with Logging {
 
   /**
@@ -51,11 +54,11 @@ private[spark] class LocalDagScheduler(blockFileManager: BlockFileManager, conf:
 
   /**
    * Backend to send notifications to when macrotasks complete successfully. Set by
-   * setExecutorBackend().
+   * initialize().
    */
   private var executorBackend: Option[ExecutorBackend] = None
 
-  private val computeScheduler = new ComputeScheduler
+  private val computeScheduler = new ComputeScheduler(numCores)
   private val networkScheduler = new NetworkScheduler(conf)
   private val diskScheduler = new DiskScheduler(blockFileManager, conf)
 
@@ -112,6 +115,10 @@ private[spark] class LocalDagScheduler(blockFileManager: BlockFileManager, conf:
   /** Returns the number of disks on the worker. */
   def getNumDisks(): Int = {
     diskScheduler.diskIds.size
+  }
+
+  def getNumCores(): Int = {
+    return numCores
   }
 
   def getNumRunningComputeMonotasks(): Int = {
@@ -201,6 +208,7 @@ private[spark] class LocalDagScheduler(blockFileManager: BlockFileManager, conf:
     logDebug(s"Submitting monotask $monotask (id: ${monotask.taskId}) for macrotask $taskAttemptId")
     runningMacrotaskAttemptIds += taskAttemptId
 
+
     if (monotask.context.taskIsRunningRemotely) {
       remoteMacrotaskAttemptIdToRemainingMonotasks.put(
         taskAttemptId,
@@ -264,24 +272,14 @@ private[spark] class LocalDagScheduler(blockFileManager: BlockFileManager, conf:
       completedMonotask: Monotask,
       serializedTaskResult: Option[ByteBuffer] = None): Unit = {
     val taskAttemptId = completedMonotask.context.taskAttemptId
-    logDebug(s"Monotask $completedMonotask (id: ${completedMonotask.taskId}) for " +
+    logInfo(s"Monotask $completedMonotask (id: ${completedMonotask.taskId}) for " +
       s"macrotask $taskAttemptId has completed.")
     completedMonotask.cleanup()
     updateMetricsForFinishedMonotask(completedMonotask)
 
     if (runningMacrotaskAttemptIds.contains(taskAttemptId)) {
-      // If the macrotask has not failed, schedule any newly-ready monotasks.
-      completedMonotask.dependents.foreach { monotask =>
-        if (monotask.dependenciesSatisfied()) {
-          if (waitingMonotasks.contains(monotask)) {
-            scheduleMonotask(monotask)
-          } else {
-            logWarning(s"Monotask $monotask (id ${monotask.taskId}) is no longer in " +
-              "waitingMonotasks, but it should not have been run yet, because one of its " +
-              s"dependencies ($completedMonotask, id ${completedMonotask.taskId}) just finished.")
-          }
-        }
-      }
+      val scheduledMonotasks = scheduleReadyMonotasks(completedMonotask)
+      completedMonotask.context.updateQueueTracking(completedMonotask, scheduledMonotasks)
 
       serializedTaskResult.map { result =>
         // Tell the executorBackend that the macrotask finished.
@@ -312,6 +310,31 @@ private[spark] class LocalDagScheduler(blockFileManager: BlockFileManager, conf:
     }
     runningMonotasks.remove(completedMonotask)
     runningPrepareMonotasks.remove(completedMonotask.taskId)
+  }
+
+  /**
+   * Schedules any monotasks that can be run now that the given monotask has completed.
+   * Returns the monotasks that were scheduled.
+   */
+  private def scheduleReadyMonotasks(completedMonotask: Monotask): HashSet[Monotask] = {
+    completedMonotask.dependents.flatMap { monotask =>
+      logDebug(s"$monotask is a dependent of completed monotask $completedMonotask")
+      if (monotask.dependenciesSatisfied()) {
+        if (waitingMonotasks.contains(monotask)) {
+          logInfo(s"Scheduling $monotask now that $completedMonotask has finished")
+          scheduleMonotask(monotask)
+          Some(monotask)
+        } else {
+          logWarning(s"Monotask $monotask (id ${monotask.taskId}) is no longer in " +
+            "waitingMonotasks, but it should not have been run yet, because one of its " +
+            s"dependencies ($completedMonotask, id ${completedMonotask.taskId}) just finished.")
+          None
+        }
+      } else {
+        logDebug(s"Dependent $monotask doesn't have all dependencies satisfied")
+        None
+      }
+    }
   }
 
   /**

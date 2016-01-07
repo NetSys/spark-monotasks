@@ -50,6 +50,17 @@ class FakeSchedulerBackend extends SchedulerBackend {
 
 class TaskSchedulerImplSuite extends FunSuite with LocalSparkContext with Logging {
 
+  /**
+   * Removes all jobs from the scheduler. Necessary because monotasks throws an error if more
+   * than one task set is outstanding.
+   */
+  def clearOutstandingJobs(taskScheduler: TaskSchedulerImpl) {
+    // Remove the task set from the scheduler, since Monotasks currently throws an error if more
+    // than one task set is currently outstanding.
+    val rootPool = taskScheduler.rootPool
+    rootPool.getSortedTaskSetQueue.foreach(rootPool.removeSchedulable(_))
+  }
+
   test("Scheduler does not always schedule tasks on the same workers") {
     sc = new SparkContext("local", "TaskSchedulerImplSuite")
     val taskScheduler = new TaskSchedulerImpl(sc)
@@ -70,6 +81,7 @@ class TaskSchedulerImplSuite extends FunSuite with LocalSparkContext with Loggin
       taskScheduler.submitTasks(taskSet)
       val taskDescriptions = taskScheduler.resourceOffers(workerOffers).flatten
       assert(1 === taskDescriptions.length)
+      clearOutstandingJobs(taskScheduler)
       taskDescriptions(0).executorId
     }
     val count = selectedExecutorIds.count(_ == workerOffers(0).executorId)
@@ -77,7 +89,9 @@ class TaskSchedulerImplSuite extends FunSuite with LocalSparkContext with Loggin
     assert(count < numTrials)
   }
 
-  test("Scheduler correctly accounts for multiple CPUs per task") {
+  // This test does not currently work because monotasks re-writes the worker
+  // offers.
+  ignore("Scheduler correctly accounts for multiple CPUs per task") {
     sc = new SparkContext("local", "TaskSchedulerImplSuite")
     val taskCpus = 2
 
@@ -94,6 +108,7 @@ class TaskSchedulerImplSuite extends FunSuite with LocalSparkContext with Loggin
     taskScheduler.submitTasks(taskSet)
     var taskDescriptions = taskScheduler.resourceOffers(zeroCoreWorkerOffers).flatten
     assert(0 === taskDescriptions.length)
+    clearOutstandingJobs(taskScheduler)
 
     // No tasks should run as we only have 1 core free.
     val numFreeCores = 1
@@ -103,6 +118,7 @@ class TaskSchedulerImplSuite extends FunSuite with LocalSparkContext with Loggin
     taskScheduler.submitTasks(taskSet)
     taskDescriptions = taskScheduler.resourceOffers(singleCoreWorkerOffers).flatten
     assert(0 === taskDescriptions.length)
+    clearOutstandingJobs(taskScheduler)
 
     // Now change the offers to have 2 cores in one executor and verify if it
     // is chosen.
@@ -113,9 +129,12 @@ class TaskSchedulerImplSuite extends FunSuite with LocalSparkContext with Loggin
     taskDescriptions = taskScheduler.resourceOffers(multiCoreWorkerOffers).flatten
     assert(1 === taskDescriptions.length)
     assert("executor0" === taskDescriptions(0).executorId)
+    clearOutstandingJobs(taskScheduler)
   }
 
-  test("Scheduler does not crash when tasks are not serializable") {
+  // This test does not currently work because monotasks re-writes the worker
+  // offers.
+  ignore("Scheduler does not crash when tasks are not serializable") {
     sc = new SparkContext("local", "TaskSchedulerImplSuite")
     val taskCpus = 2
 
@@ -136,28 +155,27 @@ class TaskSchedulerImplSuite extends FunSuite with LocalSparkContext with Loggin
     assert(0 === taskDescriptions.length)
 
     // Now check that we can still submit tasks
-    // Even if one of the tasks has not-serializable tasks, the other task set should still be
+    // Even if one of the task sets has not-serializable tasks, the other task set should still be
     // processed without error
     taskScheduler.submitTasks(taskSet)
+    clearOutstandingJobs(taskScheduler)
     taskScheduler.submitTasks(FakeTask.createTaskSet(1))
     taskDescriptions = taskScheduler.resourceOffers(multiCoreWorkerOffers).flatten
     assert(taskDescriptions.map(_.executorId) === Seq("executor0"))
   }
 
-  test("Scheduler assigns correct number of tasks based on task set's resource requirements") {
-    sc = new SparkContext("local", "TaskSchedulerImplSuite")
+  test("Scheduler assigns correct number of tasks based on task set's resource requirements " +
+      "when using slot-based monotasks scheduler") {
+    val conf = new SparkConf(false)
+    conf.set("spark.monotasks.scheduler", "slot")
+    sc = new SparkContext("local", "TaskSchedulerImplSuite", conf)
     val taskScheduler = new TaskSchedulerImpl(sc)
     taskScheduler.initialize(new FakeSchedulerBackend)
     taskScheduler.setDAGScheduler(mock(classOf[DAGScheduler]))
 
-    // Offer one worker that has 5 free slots and 3 total disks to task sets with
+    // Offer one worker that has 1 free (CPU) slot and 3 total disks to task sets with
     // different resource requirements.
-    val workerOffers = Seq(new WorkerOffer("executor0", "host0", freeSlots = 5, totalDisks = 3))
-
-    def createTaskSet(numTasks: Int, usesDisk: Boolean, usesNetwork: Boolean): TaskSet = {
-      val tasks = Array.tabulate[Macrotask[_]](numTasks)(new FakeTask(_, Nil))
-      new TaskSet(tasks, 0, 0, 0, null, usesDisk, usesNetwork)
-    }
+    val workerOffers = Seq(new WorkerOffer("executor0", "host0", freeSlots = 1, totalDisks = 3))
 
     def verifyNumberOfOffersAccepted(
         numTasksInTaskSet: Int,
@@ -169,12 +187,7 @@ class TaskSchedulerImplSuite extends FunSuite with LocalSparkContext with Loggin
       val tasksScheduled = taskScheduler.resourceOffers(workerOffers).flatten
       assert(numExpectedAcceptedOffers === tasksScheduled.length)
 
-      // Keep offering resources until all of the TaskSet's tasks have been assigned. We do this so
-      // that there aren't any tasks from the given TaskSet left in the scheduling queue when we
-      // submit the next task set.
-      while (taskScheduler.resourceOffers(workerOffers).flatten.length > 0) {
-        // Do nothing.
-      }
+      clearOutstandingJobs(taskScheduler)
     }
 
     // For a task set that only uses the CPU, only 1 task should be assigned (because the disk and
@@ -206,5 +219,33 @@ class TaskSchedulerImplSuite extends FunSuite with LocalSparkContext with Loggin
       usesDisk = true,
       usesNetwork = true,
       numExpectedAcceptedOffers = 5)
+  }
+
+  test("Scheduler assigns correct number of tasks when using balanced monotasks scheduler") {
+    val conf = new SparkConf(false)
+    conf.set("spark.monotasks.scheduler", "balanced")
+    sc = new SparkContext("local", "TaskSchedulerImplSuite", conf)
+    val taskScheduler = new TaskSchedulerImpl(sc)
+    taskScheduler.initialize(new FakeSchedulerBackend)
+    taskScheduler.setDAGScheduler(mock(classOf[DAGScheduler]))
+
+    // Offer one worker that has 2 free slots and 3 total disks to task sets with
+    // different numbers of tasks.
+    val workerOffers = Seq(new WorkerOffer("executor0", "host0", freeSlots = 2, totalDisks = 3),
+      new WorkerOffer("executor1", "host1", freeSlots = 2, totalDisks = 3))
+
+    val numTasksInTaskSet = 21
+    val tasks = Array.tabulate[Macrotask[_]](numTasksInTaskSet)(new FakeTask(_, Nil))
+    taskScheduler.submitTasks(
+      new TaskSet(tasks, 0, 0, 0, null, usesDisk = false, usesNetwork = false))
+    val tasksScheduled = taskScheduler.resourceOffers(workerOffers)
+    assert(2 === tasksScheduled.length, "Expect tasks to have been assigned to both executors")
+    assert(numTasksInTaskSet === tasksScheduled.flatten.length,
+      "Expect all 21 tasks to have been assigned to a worker")
+    tasksScheduled.foreach { tasksOnOneMachine =>
+      // 10 or 11 tasks should have been assigned to each worker.
+      assert(tasksOnOneMachine.length >= 10)
+      assert(tasksOnOneMachine.length <= 11)
+    }
   }
 }

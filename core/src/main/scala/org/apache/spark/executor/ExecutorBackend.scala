@@ -26,5 +26,8 @@ import org.apache.spark.TaskState.TaskState
  */
 private[spark] trait ExecutorBackend {
   def statusUpdate(taskId: Long, state: TaskState, data: ByteBuffer)
+
+  /** Request more macrotasks from the master. */
+  def requestTasks(numTasks: Int)
 }
 
