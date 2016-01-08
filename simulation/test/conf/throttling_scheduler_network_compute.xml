@@ -1,26 +1,20 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <simulator>
   <!--
-      A configuration that describes a 2-worker cluster executing a two-stage job where all input,
-      shuffle, and output data is stored in memory. This job illustrates a problem with the basic
-      scheduling algorithm, where when two resources are neck-and-neck (here, compute and network),
-      no resource is fully utilized.
+      A configuration that describes a 2-worker cluster executing a two-stage in-memory shuffle job.
+      The CPU is the bottleneck.
   -->
-
   <num_workers>2</num_workers>
   <scheduling_mode>throttling</scheduling_mode>
-  <throttling_scheduler_macrotask_buffer_size>6</throttling_scheduler_macrotask_buffer_size>
-  <num_cores_per_worker>8</num_cores_per_worker>
+  <num_cores_per_worker>1</num_cores_per_worker>
   <worker_network_bandwidth_Mbps>1000</worker_network_bandwidth_Mbps>
-  <worker_network_bandwidth_variance>0.5</worker_network_bandwidth_variance>
   <worker_network_latency_ms>1</worker_network_latency_ms>
 
   <jobs>
     <job>
       <stages>
         <stage>
-          <!-- 2 workers * (8 compute slots + 1 network slot) * 8 waves = 144 partitions -->
-          <num_partitions>144</num_partitions>
+          <num_partitions>4</num_partitions>
           <monotasks_per_partition>
             <monotask>
               <dag_id>A</dag_id>
@@ -31,16 +25,15 @@
         </stage>
 
         <stage>
-          <num_partitions>144</num_partitions>
+          <num_partitions>4</num_partitions>
           <monotasks_per_partition>
             <monotask>
               <dag_id>A</dag_id>
               <type>compute</type>
               <compute_time_ms>1000</compute_time_ms>
-              <compute_variation>0.25</compute_variation>
 
               <shuffle_dependency>
-                <total_size_bytes>4000000000</total_size_bytes>
+                <total_size_bytes>400000000</total_size_bytes>
                 <is_on_disk>False</is_on_disk>
               </shuffle_dependency>
             </monotask>

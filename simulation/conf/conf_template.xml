@@ -8,6 +8,15 @@
   <!-- The number of worker nodes in the simulated cluster. -->
   <num_workers>2</num_workers>
 
+  <!-- The macrotask scheduling mode to use. See scheduler.py for more information. -->
+  <scheduling_mode>fixed-slots</scheduling_mode>
+
+  <!--
+      Optional, and only applies when scheduling_mode == throttling. The number of extra macrotasks
+      to allow to be requested from the master node.
+  -->
+  <throttling_scheduler_macrotask_buffer_size>6</throttling_scheduler_macrotask_buffer_size>
+
   <!-- The number of CPU cores on each worker. -->
   <num_cores_per_worker>8</num_cores_per_worker>
 

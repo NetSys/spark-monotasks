@@ -15,7 +15,6 @@
 #
 
 import collections
-import copy
 import logging
 from os import path
 import random
@@ -23,6 +22,7 @@ import sets
 
 import continuous_monitor
 import events
+import scheduler
 import task_constructs
 
 
@@ -59,12 +59,11 @@ class Worker(object):
     # The index of the next disk id to be assigned to a disk write Monotask.
     self.next_disk_id_index = 0
 
-    # The maximum number of Macrotask slots is equal to the maximum number of concurrent
-    # ComputeMonotasks plus the maximum number of concurrent DiskMonotasks plus 1, to allow for a
-    # NetworkMonotask.
-    self.max_macrotasks = self.conf.num_cores + len(self.disks) + 1
-    self.num_running_macrotasks = 0
-
+    # Used by the Simulator to keep track of how many Macrotasks have been assigned to this Worker.
+    # This many be larger than the number of currently running Macrotasks if a Macrotask that has
+    # been assigned either has not arrived at the Worker yet or has just completed.
+    self.num_assigned_macrotasks = 0
+    self.scheduler = scheduler.Scheduler.get_scheduler_for_mode(self.conf.scheduling_mode, self)
     # Monotasks that cannot execute because their dependencies have not finished yet.
     self.not_runnable_monotasks = []
 
@@ -109,30 +108,36 @@ class Worker(object):
 
     disk_infos = ", ".join(
       [format_disk_info(disk_info) for disk_info in self.conf.disks.iteritems()])
-    logging.info("Created Worker with %s cores and disks: [%s]", self.conf.num_cores, disk_infos)
+    logging.info(
+      "Created Worker with %s cores and disks: [%s] using scheduling mode: %s",
+      self.conf.num_cores,
+      disk_infos,
+      self.conf.scheduling_mode)
 
-  def validate_bytes_sent_and_received(self):
-    """
-    If the shuffle data is evenly distributed, then the number of bytes sent should be equal to the
-    number of bytes received.
-    """
-    logging.info("Validating the number of bytes sent and received for %s", self)
-    assert self.total_bytes_sent == self.total_bytes_received, \
-      ("%s: total bytes sent (%s) does not equal total bytes received (%s)" %
-      (self, self.total_bytes_sent, self.total_bytes_received))
+  def handle_macrotask_start(self, current_time_ms, macrotask):
+    """Starts executing the provided Macrotask on this Worker.
 
-  def submit_monotasks(self, current_time_ms, monotasks):
+    Creates any Monotasks required to read shuffle data, informs this Worker's Scheduler that the
+    Macrotask has arrived, and submits the Macrotask's Monotasks for execution.
+
+    Returns:
+      MonotaskEnd Events for any Monotasks that started executing.
+    """
+    # Create any Monotasks necessary for reading shuffle data before telling the Scheduler about the
+    # Macrotask so that it sees all of the Monotasks.
+    for monotask in macrotask.monotasks:
+      if isinstance(monotask, task_constructs.ComputeMonotask):
+        # Since this is a ComputeMonotask, it might have a shuffle dependency.
+        monotask.create_monotasks_for_shuffle(current_time_ms, self.simulator.workers)
+
+    self.scheduler.handle_macrotask_start(macrotask)
+    return self.submit_monotasks(current_time_ms, macrotask.monotasks)
+
+  def submit_monotasks(self, current_time_ms, monotasks_to_submit):
     """
     Submits the provided Monotasks for scheduling, returning a list of MonotaskEnd Events for any
     Monotasks that were able to start executing.
     """
-    monotasks_to_submit = copy.copy(monotasks)
-    for monotask in monotasks:
-      if isinstance(monotask, task_constructs.ComputeMonotask):
-        # Since this is a ComputeMonotask, it might have a shuffle dependency.
-        monotasks_to_submit.extend(
-          monotask.create_monotasks_for_shuffle(current_time_ms, self, self.simulator.workers))
-
     new_events = []
     for monotask in monotasks_to_submit:
       logging.debug(
@@ -212,9 +217,6 @@ class Worker(object):
       network_response_monotask.add_dependency(disk_read_monotask)
       new_monotasks.append(disk_read_monotask)
 
-    # Add the newly created Monotasks to their Macrotask's list of remaining Monotasks.
-    for new_monotask in new_monotasks:
-      macrotask.monotasks.append(new_monotask)
     return self.submit_monotasks(current_time_ms, new_monotasks)
 
   def schedule_network_response(self, current_time_ms, network_response_monotask):
@@ -229,7 +231,7 @@ class Worker(object):
     for packet in network_response_monotask.get_packets(current_time_ms):
       transmit_end_ms = transmit_start_ms + (float(packet.data_size_bytes) / network_bandwidth_Bpms)
 
-      new_events.append((transmit_end_ms, events.PacketDeparture(self, packet)))
+      new_events.append((transmit_end_ms, events.PacketDeparture(packet)))
       transmit_start_ms = transmit_end_ms
 
     self.network_output_queue_end_ms = transmit_end_ms
@@ -252,7 +254,7 @@ class Worker(object):
     transmit_end_ms = transmit_start_ms + (
       float(packet_size_bytes) / packet.network_response_monotask.network_bandwidth_Bpms)
     dst_worker.network_input_queue_end_ms = transmit_end_ms
-    new_events = [(transmit_end_ms, events.PacketArrival(dst_worker, packet))]
+    new_events = [(transmit_end_ms, events.PacketArrival(packet))]
 
     if packet.is_last:
       new_events.append(
@@ -321,8 +323,7 @@ class Worker(object):
 
     if packet.is_last:
       network_request_monotask = packet.network_response_monotask.network_request_monotask
-      return [(current_time_ms,
-        events.MonotaskEnd(network_request_monotask.src_worker, network_request_monotask))]
+      return [(current_time_ms, events.MonotaskEnd(self, network_request_monotask))]
     else:
       return []
 
@@ -364,17 +365,26 @@ class Worker(object):
     else:
       return []
 
-  def update_dag_for_finished_monotask(self, current_time_ms, completed_monotask):
+  def handle_finished_monotask(self, current_time_ms, completed_monotask):
     """
-    Updates the Macrotask to reflect that the provided Monotask has completed. Returns a
+    Updates the Macrotask and its Scheduler to reflect that the provided Monotask has completed.
+    Possibly returns MonotaskEnd Events, a NotifyMasterOfMacrotaskEnd Event, and/or a
+    MacrotaskRequest Event.
+    """
+    new_events = self.__update_dag_for_finished_monotask(current_time_ms, completed_monotask)
+    new_events.extend(self.scheduler.handle_monotask_end(current_time_ms, completed_monotask))
+    return new_events
+
+  def __update_dag_for_finished_monotask(self, current_time_ms, completed_monotask):
+    """
+    Submits for scheduling any of the newly finished Monotask's dependents that are now eligible to
+    be executed. Returns MonotaskEnd Events for any dependents that started executing. Returns a
     NotifyMasterOfMacrotaskEnd Event if all of the Monotasks for the Macrotask have completed.
-    Otherwise, returns MonotaskEnd Events for any dependents that started executing.
     """
     macrotask = completed_monotask.macrotask
     if macrotask.all_monotasks_finished():
-      self.num_running_macrotasks -= 1
       arrival_time_ms = current_time_ms + self.conf.network_latency_ms
-      return [(arrival_time_ms, events.NotifyMasterOfMacrotaskEnd(self.simulator, macrotask))]
+      return [(arrival_time_ms, events.NotifyMasterOfMacrotaskEnd(macrotask))]
     else:
       # If the Macrotask has not finished, then the completed Monotask may have dependents that need
       # to be updated to reflect that it finished.
@@ -424,7 +434,8 @@ class Worker(object):
     return disk_utils
 
   def get_num_running_macrotasks(self):
-    return self.num_running_macrotasks
+    return (self.get_num_macrotasks_in_compute() + self.get_num_macrotasks_in_network() +
+      self.get_num_macrotasks_in_disk())
 
   def get_num_macrotasks_in_compute(self):
     macrotask_ids = sets.Set()

@@ -54,6 +54,21 @@ class JobStart(Event):
     return self.simulator.start_job(current_time_ms, self.job)
 
 
+class MacrotaskRequest(Event):
+  """
+  Event that notifies the Monotasks master node that a Worker requires an additional Macrotask.
+  """
+
+  def __init__(self, worker):
+    self.worker = worker
+
+  def __repr__(self):
+    return "MacrotaskRequest Event from %s" % self.worker
+
+  def run(self, current_time_ms):
+    return self.worker.simulator.send_macrotask_to_worker(current_time_ms, self.worker)
+
+
 class NotifyMasterOfMacrotaskEnd(Event):
   """
   Event that notifies the simulated Monotasks master node that a Macrotask has completed. This logic
@@ -62,8 +77,7 @@ class NotifyMasterOfMacrotaskEnd(Event):
   Macrotask has completed.
   """
 
-  def __init__(self, simulator, macrotask):
-    self.simulator = simulator
+  def __init__(self, macrotask):
     self.macrotask = macrotask
 
   def __repr__(self):
@@ -71,22 +85,21 @@ class NotifyMasterOfMacrotaskEnd(Event):
 
   def run(self, current_time_ms):
     logging.info("%s: Macrotask completed: %s", current_time_ms, self.macrotask)
-    return self.simulator.finish_macrotask(current_time_ms, self.macrotask)
+    return self.macrotask.worker.simulator.finish_macrotask(current_time_ms, self.macrotask)
 
 
 class MacrotaskStart(Event):
   """ Event that notifies a Worker that a Macrotask has arrived. """
 
-  def __init__(self, worker, macrotask):
-    self.worker = worker
+  def __init__(self, macrotask):
     self.macrotask = macrotask
 
   def __repr__(self):
-    return "MacrotaskStart Event for %s on %s" % (self.macrotask, self.worker)
+    return "MacrotaskStart Event for %s on %s" % (self.macrotask, self.macrotask.worker)
 
   def run(self, current_time_ms):
-    logging.info("%s: %s starting on %s", current_time_ms, self.macrotask, self.worker)
-    return self.worker.submit_monotasks(current_time_ms, self.macrotask.monotasks)
+    logging.info("%s: %s starting on %s", current_time_ms, self.macrotask, self.macrotask.worker)
+    return self.macrotask.worker.handle_macrotask_start(current_time_ms, self.macrotask)
 
 
 class MonotaskEnd(Event):
@@ -103,9 +116,7 @@ class MonotaskEnd(Event):
     logging.info("%s: Monotask completed: %s", current_time_ms, self.monotask)
     # Get Events created by freeing resources.
     new_events = self.monotask.end(current_time_ms, self.worker)
-    # Get Events resulting from removing the completed Monotask from its Macrotask's DAG of
-    # Monotasks.
-    new_events.extend(self.worker.update_dag_for_finished_monotask(current_time_ms, self.monotask))
+    new_events.extend(self.worker.handle_finished_monotask(current_time_ms, self.monotask))
     return new_events
 
 
@@ -130,15 +141,15 @@ class PacketDeparture(Event):
   has sent.
   """
 
-  def __init__(self, src_worker, packet):
-    self.src_worker = src_worker
+  def __init__(self, packet):
     self.packet = packet
 
   def __repr__(self):
     return "PacketDeparture Event for %s" % self.packet
 
   def run(self, current_time_ms):
-    return self.src_worker.handle_packet_departure(current_time_ms, self.packet)
+    return self.packet.network_response_monotask.src_worker.handle_packet_departure(
+      current_time_ms, self.packet)
 
 
 class PacketArrival(Event):
@@ -148,15 +159,15 @@ class PacketArrival(Event):
   it has received.
   """
 
-  def __init__(self, dst_worker, packet):
-    self.dst_worker = dst_worker
+  def __init__(self, packet):
     self.packet = packet
 
   def __repr__(self):
     return "PacketArrival Event for %s" % self.packet
 
   def run(self, current_time_ms):
-    return self.dst_worker.handle_packet_arrival(current_time_ms, self.packet)
+    return self.packet.network_response_monotask.dst_worker.handle_packet_arrival(
+      current_time_ms, self.packet)
 
 
 class LogContinuousMonitors(Event):

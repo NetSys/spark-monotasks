@@ -6,6 +6,7 @@
   -->
 
   <num_workers>2</num_workers>
+  <scheduling_mode>fixed-slots</scheduling_mode>
   <num_cores_per_worker>1</num_cores_per_worker>
   <worker_network_bandwidth_Mbps>1000</worker_network_bandwidth_Mbps>
   <worker_network_latency_ms>1</worker_network_latency_ms>

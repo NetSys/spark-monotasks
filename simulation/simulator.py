@@ -27,6 +27,7 @@ import random
 
 import events
 import simulation_conf
+import task_constructs
 import worker
 
 
@@ -126,11 +127,41 @@ class Simulator(object):
     # Create a log entry recording the final state of the Simulator.
     log_continuous_monitors_event.run(current_time_ms)
 
-    for worker_node in self.workers:
-      worker_node.validate_bytes_sent_and_received()
     logging.info("Simulation complete!")
-
+    self.__validate_bytes_sent_and_received()
+    self.__log_macrotask_distribution()
     self.__log_jcts()
+
+  def __validate_bytes_sent_and_received(self):
+    """Verifies that the Workers sent and received the correct number of bytes over the network.
+
+    The total number of bytes sent by all Workers should be equal to the total number of bytes
+    received by all Workers.
+    """
+    total_bytes_sent = sum([worker_node.total_bytes_sent for worker_node in self.workers])
+    total_bytes_received = sum([worker_node.total_bytes_received for worker_node in self.workers])
+
+    logging.info("Validating the total number of bytes sent and received...")
+    assert abs(total_bytes_sent - total_bytes_received) < 1, \
+      ("The total number of bytes sent (%s) does not equal the total number of bytes " +
+        "received (%s)") % (total_bytes_sent, total_bytes_received)
+
+  def __log_macrotask_distribution(self):
+    """Logs the number of Macrotasks assigned to each Worker.
+
+    For each Stage of each Job, reports how many Macrotasks from that Stage were allocated to each
+    Worker.
+    """
+    message = "Macrotask Distribution:"
+    for job in self.jobs:
+      message += "\n  %s:" % job
+      for stage in job.stages:
+        message += "\n    %s:" % stage
+        for worker_node in self.workers:
+          num_macrotasks = len(
+            [macrotask for macrotask in stage.macrotasks if macrotask.worker is worker_node])
+          message += "\n      %s: %s" % (worker_node, num_macrotasks)
+    logging.info(message)
 
   def __log_jcts(self):
     """
@@ -208,31 +239,16 @@ class Simulator(object):
       # Start the next Stage.
       self.current_stage = next_stage
       logging.info("%s: Starting %s", current_time_ms, self.current_stage)
-      return self.__schedule_macrotasks(current_time_ms)
+      return self.__schedule_initial_macrotasks(current_time_ms)
 
-  def finish_macrotask(self, current_time_ms, macrotask):
-    """Registers that the provided Macrotask completed.
+  def __schedule_initial_macrotasks(self, current_time_ms):
+    """Sends each Worker its desired initial number of Macrotasks.
 
-    Potentially starts one or more new Macrotasks. This may involve starting a new Stage or Job.
+    Called when a Stage starts. Load balances the Macrotasks in the current Stage across the Workers
+    without sending any Worker more than its desired initial number of Macrotasks.
 
     Returns:
-      MacrotaskStart Events for any Macrotasks that were accepted by Workers, or a JobStart Event if
-      the provided Macrotask is the last in its Job and there are more Jobs.
-    """
-    macrotask.master_knows_is_finished = True
-    if self.current_stage.is_finished():
-      # There are no more Macrotasks in the current Stage, so it has finished. Try to start the next
-      # Stage.
-      logging.info("%s: No more Macrotasks in %s", current_time_ms, self.current_stage)
-      self.current_stage = None
-      return self.__start_next_stage(current_time_ms)
-    else:
-      return self.__schedule_macrotasks(current_time_ms)
-
-  def __schedule_macrotasks(self, current_time_ms):
-    """
-    Attempts to distribute the remaining Macrotasks for the current Stage amongst the Workers.
-    Returns MacrotaskStart Events for any Macrotasks that were accepted by Workers.
+      MacrotaskStart Events for any Macrotasks that were accepted by Workers.
     """
     macrotask_scheduled_in_last_iteration = True
     new_events = []
@@ -242,28 +258,68 @@ class Simulator(object):
     while macrotask_scheduled_in_last_iteration:
       macrotask_scheduled_in_last_iteration = False
       for worker_node in self.workers:
-        macrotask_to_submit = self.current_stage.get_next_macrotask()
-        if macrotask_to_submit is None:
-          return new_events
-
-        if worker_node.num_running_macrotasks < worker_node.max_macrotasks:
-          logging.info("%s: %s accepted by %s", current_time_ms, macrotask_to_submit, worker_node)
-          worker_node.num_running_macrotasks += 1
-          macrotask_to_submit.assigned_to_worker = True
-
-          # Since a Worker accepted a Macrotask, we signal that we should try another iteration in
-          # case this Worker can accept another Macrotask. We do not immediately try to assign
-          # another Macrotask to this Worker because we want to load balance the Macrotasks across
-          # the Workers.
-          macrotask_scheduled_in_last_iteration = True
-
-          # Create a MacrotaskStart Event to signal that the Macrotask itself has arrived at the
-          # Worker.
-          arrival_time_ms = current_time_ms + worker_node.conf.network_latency_ms
-          new_events.append(
-            (arrival_time_ms, events.MacrotaskStart(worker_node, macrotask_to_submit)))
+        if (worker_node.num_assigned_macrotasks <
+            worker_node.scheduler.get_num_initial_macrotasks(self.current_stage)):
+          new_event = self.send_macrotask_to_worker(current_time_ms, worker_node)
+          if len(new_event) == 1:
+            # Since a Worker accepted a Macrotask, we signal that we should try another iteration in
+            # case this Worker can accept another Macrotask. We do not immediately try to assign
+            # another Macrotask to this Worker because we want to load balance the Macrotasks across
+            # the Workers.
+            macrotask_scheduled_in_last_iteration = True
+            new_events.extend(new_event)
 
     return new_events
+
+  def send_macrotask_to_worker(self, current_time_ms, worker_node):
+    """
+    If there are unassigned Macrotasks in the current Stage, then this method sends one to the given
+    Worker.
+
+    Returns:
+      A list containing a MacrotaskStart Event for when a Macrotask will arrive at the specified
+      Worker, or an empty list if there are no more Macrotasks in the current Stage.
+    """
+    macrotask_to_assign = self.current_stage.get_next_macrotask()
+    if macrotask_to_assign is None:
+      # All Macrotasks for this Stage have been scheduled, so we do nothing.
+      logging.info(
+        "%s: All Macrotasks in %s have been assigned to Workers.",
+        current_time_ms,
+        self.current_stage)
+      return []
+    else:
+      macrotask_to_assign.worker = worker_node
+      worker_node.num_assigned_macrotasks += 1
+      logging.info("%s: %s accepted by %s", current_time_ms, macrotask_to_assign, worker_node)
+
+      # Create a MacrotaskStart Event to signal that the Macrotask has arrived at the Worker.
+      arrival_time_ms = current_time_ms + worker_node.conf.network_latency_ms
+      return [(arrival_time_ms, events.MacrotaskStart(macrotask_to_assign))]
+
+  def finish_macrotask(self, current_time_ms, macrotask):
+    """Registers that the provided Macrotask completed.
+
+    Only schedules a new Macrotask if the current Stage has finished and a new Stage should start.
+    This may require starting a new Job, if there are more Jobs remaining. Scheduling new Macrotasks
+    while a Stage is running is done via MacrotaskRequest Events.
+
+    Returns:
+      A list containing MacrotaskStart Events if a new Stage starts or a JobStart Event if a new Job
+      starts, or an empty list if there are no more Stages or Jobs remaining.
+    """
+    macrotask.worker.num_assigned_macrotasks -= 1
+    macrotask.master_knows_is_finished = True
+    if self.current_stage.is_finished():
+      # There are no more Macrotasks in the current Stage, so it has finished. Try to start the next
+      # Stage.
+      logging.info("%s: No more Macrotasks in %s", current_time_ms, self.current_stage)
+      self.current_stage = None
+      return self.__start_next_stage(current_time_ms)
+    else:
+      # We do not start a new Macrotask because once a Stage has started, Macrotasks are pulled by
+      # the Workers.
+      return []
 
   def cleanup(self):
     """ Closes all of the Workers' ContinuousMonitors. """

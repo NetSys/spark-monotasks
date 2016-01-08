@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<simulator>
+  <!--
+      A configuration that describes a 1-worker cluster that does not have any jobs to execute. This
+      is used in the test_scheduler.py/test_fixed_slots_scheduler_handle_monotask_end test case,
+      which creates monotasks and macrotasks itself.
+  -->
+  <num_workers>1</num_workers>
+  <scheduling_mode>fixed-slots</scheduling_mode>
+  <num_cores_per_worker>1</num_cores_per_worker>
+  <worker_network_bandwidth_Mbps>1000</worker_network_bandwidth_Mbps>
+  <worker_network_latency_ms>1</worker_network_latency_ms>
+
+  <jobs>
+  </jobs>
+</simulator>

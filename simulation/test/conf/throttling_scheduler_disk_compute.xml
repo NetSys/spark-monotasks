@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<simulator>
+  <!--
+      A configuration that describes a 1-worker cluster executing a one-stage job that reads input
+      data from disk and then computes on it. The CPU is the bottleneck.
+  -->
+  <num_workers>1</num_workers>
+  <scheduling_mode>throttling</scheduling_mode>
+  <num_cores_per_worker>4</num_cores_per_worker>
+  <worker_network_bandwidth_Mbps>1000</worker_network_bandwidth_Mbps>
+  <worker_network_latency_ms>1</worker_network_latency_ms>
+
+  <disks_per_worker>
+    <disk>
+      <id>xvdb</id>
+      <write_throughput_MBps>100</write_throughput_MBps>
+      <read_throughput_MBps>100</read_throughput_MBps>
+    </disk>
+
+    <disk>
+      <id>xvdf</id>
+      <write_throughput_MBps>100</write_throughput_MBps>
+      <read_throughput_MBps>100</read_throughput_MBps>
+    </disk>
+  </disks_per_worker>
+
+  <jobs>
+    <job>
+      <stages>
+        <stage>
+          <num_partitions>10</num_partitions>
+          <monotasks_per_partition>
+            <monotask>
+              <dag_id>A</dag_id>
+              <type>disk</type>
+              <is_write>False</is_write>
+              <data_size_bytes>1000</data_size_bytes>
+            </monotask>
+
+            <monotask>
+              <dag_id>B</dag_id>
+              <type>compute</type>
+              <compute_time_ms>1000</compute_time_ms>
+
+              <dependency_dag_ids>
+                <dependency_dag_id>A</dependency_dag_id>
+              </dependency_dag_ids>
+            </monotask>
+          </monotasks_per_partition>
+        </stage>
+      </stages>
+    </job>
+  </jobs>
+</simulator>

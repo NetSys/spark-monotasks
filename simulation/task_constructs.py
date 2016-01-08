@@ -68,11 +68,11 @@ class Stage(object):
 
   __next_id = 0
 
-  def __init__(self, macrotasks):
+  def __init__(self):
     self.stage_id = Stage.__new_id()
     # A list of the Macrotasks that make up this Stage. Macrotasks are executed in parallel by
-    # Workers.
-    self.macrotasks = macrotasks
+    # Workers. Populated by Macrotasks as they are created.
+    self.macrotasks = []
 
   def __repr__(self):
     return "(Stage | id: %s)" % self.stage_id
@@ -99,8 +99,7 @@ class Stage(object):
       A Macrotask in this Stage that has not been assigned to a Worker, or None if all Macrotasks
       have been assigned to Workers.
     """
-    return next(
-      (macrotask for macrotask in self.macrotasks if not macrotask.assigned_to_worker), None)
+    return next((macrotask for macrotask in self.macrotasks if macrotask.worker is None), None)
 
   def calculate_ideal_completion_time_ms(self, conf):
     """Calculates the time that this Stage should take to finish in an ideal system.
@@ -167,13 +166,17 @@ class Macrotask(object):
 
   __next_id = 0
 
-  def __init__(self):
+  def __init__(self, stage):
     self.macrotask_id = Macrotask.__new_id()
-    # A list of the Monotasks that make up this Macrotask. Must be populated later by the code that
-    # creates this Macrotask.
+    # The Stage to which this Macrotask belongs.
+    self.stage = stage
+    self.stage.macrotasks.append(self)
+    # A list of the Monotasks that make up this Macrotask. Populated by Monotasks as they are
+    # created.
     self.monotasks = []
-    # Whether this Macrotask has been assigned to a Worker yet.
-    self.assigned_to_worker = False
+    # The Worker to which this Macrotask has been assigned, or None if this Macrotask has not been
+    # assigned to a Worker yet.
+    self.worker = None
     # Whether the master node has been notified that this Macrotask has finished.
     self.master_knows_is_finished = False
 
@@ -223,6 +226,21 @@ class Macrotask(object):
     return (total_compute_time_ms, total_network_bytes, total_disk_write_bytes,
       total_disk_read_bytes)
 
+  def get_previous_stage(self):
+    """
+    Returns the Stage before the Stage to which this Macrotask belongs, or None if it is part of the
+    first Stage in its Job.
+    """
+    all_stages = self.worker.simulator.current_job.stages
+    for i in xrange(len(all_stages)):
+      if all_stages[i] is self.stage:
+        if i == 0:
+          return None
+        else:
+          return all_stages[i - 1]
+
+    raise Exception("Cannot find %s in the current Job" % self.stage)
+
 
 class Monotask(object):
   """
@@ -235,6 +253,7 @@ class Monotask(object):
     self.monotask_id = Monotask.__new_id()
     # The Macrotask to which this Monotask belongs.
     self.macrotask = macrotask
+    self.macrotask.monotasks.append(self)
     # A list of Monotasks that must complete before this Monotask can be executed. Populated by
     # add_dependency().
     self.dependencies = []
@@ -337,25 +356,35 @@ class ComputeMonotask(Monotask):
   def update_worker(self, current_time_ms, worker):
     return worker.compute_monotask_end(current_time_ms, self)
 
-  def create_monotasks_for_shuffle(self, current_time_ms, local_worker, all_workers):
+  def create_monotasks_for_shuffle(self, current_time_ms, all_workers):
     """
-    If this ComputeMonotask has a shuffle dependency, returns a DiskMonotask to read shuffle data
+    If this ComputeMonotask has a shuffle dependency, creates a DiskMonotask to read shuffle data
     from the local machine (if the shuffle data is stored on disk) and NetworkRequestMonotasks to
-    fetch shuffle data from the remote workers.
+    fetch shuffle data from the remote workers. Adds any new Monotasks to the appropriate
+    Macrotask's list of Monotasks. Does not return anything.
     """
     if self.shuffle_bytes_to_read == 0:
       # This ComputeMonotask does not have a shuffle dependency.
       return []
 
-    # The amount of shuffle data read from each Worker is equal to the total amount of shuffle data
-    # required by this ComputeMonotask divided by the number of Workers.
-    shuffle_bytes_per_worker = float(self.shuffle_bytes_to_read) / len(all_workers)
-    new_monotasks = []
+    previous_stage_macrotasks = self.macrotask.get_previous_stage().macrotasks
+    num_macrotasks_in_previous_stage = len(previous_stage_macrotasks)
+    local_worker = self.macrotask.worker
+
     for remote_worker in all_workers:
+      num_macrotasks_assigned_to_worker_in_previous_stage = len([macrotask
+        for macrotask in previous_stage_macrotasks
+        if macrotask.worker is remote_worker])
+      # The amount of shuffle data to read from each Worker depends on the number of Macrotasks that
+      # were assigned to that Worker in the previous Stage.
+      shuffle_bytes_on_worker = self.shuffle_bytes_to_read * (
+        float(num_macrotasks_assigned_to_worker_in_previous_stage) /
+          num_macrotasks_in_previous_stage)
+
       if remote_worker is local_worker:
         if self.is_shuffle_data_on_disk:
           # Create a DiskMonotask to read the shuffle data from the local disk.
-          new_monotask = DiskMonotask(self.macrotask, shuffle_bytes_per_worker, is_write=False)
+          new_monotask = DiskMonotask(self.macrotask, shuffle_bytes_on_worker, is_write=False)
           # TODO: We need a way to track which disk the block is on. For now, we just pick a disk
           #       uniformly at random.
           new_monotask.disk_id = random.choice(local_worker.disks.keys())
@@ -369,16 +398,17 @@ class ComputeMonotask(Monotask):
           self.macrotask,
           local_worker,
           remote_worker,
-          shuffle_bytes_per_worker,
+          shuffle_bytes_on_worker,
           self.is_shuffle_data_on_disk)
 
       if new_monotask is not None:
         logging.info(
-          "%s: Created %s to read shuffle data for %s", current_time_ms, new_monotask, self)
+          "%s: %s created %s to read shuffle data for %s",
+          current_time_ms,
+          local_worker,
+          new_monotask,
+          self)
         self.add_dependency(new_monotask)
-        self.macrotask.monotasks.append(new_monotask)
-        new_monotasks.append(new_monotask)
-    return new_monotasks
 
 
 class NetworkRequestMonotask(Monotask):

@@ -33,6 +33,11 @@ class SimulationConf(object):
     simulator_dom = dom.getElementsByTagName("simulator")[0]
 
     self.num_workers = self.__parse_int(simulator_dom, "num_workers")
+
+    self.scheduling_mode = self.__parse_string(simulator_dom, "scheduling_mode")
+    self.throttling_scheduler_macrotask_buffer_size = SimulationConf.__parse_optional(
+      simulator_dom, "throttling_scheduler_macrotask_buffer_size", int, 0)
+
     self.num_cores = self.__parse_int(simulator_dom, "num_cores_per_worker")
 
     network_bandwidth_Mbps = self.__parse_float(simulator_dom, "worker_network_bandwidth_Mbps")
@@ -85,20 +90,21 @@ class SimulationConf(object):
     for stage_dom in stages_dom.getElementsByTagName("stage"):
       num_partitions = SimulationConf.__parse_int(stage_dom, "num_partitions")
       monotasks_dom = stage_dom.getElementsByTagName("monotasks_per_partition")[0]
-      macrotasks = SimulationConf.__parse_macrotasks(monotasks_dom, num_partitions, disk_ids)
-      stages.append(task_constructs.Stage(macrotasks))
+      stage = task_constructs.Stage()
+      SimulationConf.__parse_macrotasks(stage, num_partitions, monotasks_dom, disk_ids)
+      stages.append(stage)
     return stages
 
   @staticmethod
-  def __parse_macrotasks(monotasks_dom, num_partitions, disk_ids):
-    """ Returns num_partitions Macrotasks created using the template in monotasks_dom. """
+  def __parse_macrotasks(stage, num_partitions, monotasks_dom, disk_ids):
+    """
+    Creates num_partitions Macrotasks for the provided Stage using the template in monotasks_dom.
+    """
     monotask_doms = monotasks_dom.getElementsByTagName("monotask")
-    macrotasks = []
     for _ in xrange(num_partitions):
-      macrotask = task_constructs.Macrotask()
+      macrotask = task_constructs.Macrotask(stage)
       dag_id_to_monotask = {}
       monotask_to_dependency_dag_ids = {}
-
       # Reparse all of the monotasks for each Macrotask so that if the Macrotask contains disk
       # read monotasks, they are not all configured to read from the same disks.
       for monotask_dom in monotask_doms:
@@ -124,10 +130,6 @@ class SimulationConf(object):
           for dependency_dag_id in dependency_dag_ids]
         logging.info("Adding dependencies to %s: %s", monotask, dependencies)
         monotask.add_dependencies(dependencies)
-
-        macrotask.monotasks.append(monotask)
-      macrotasks.append(macrotask)
-    return macrotasks
 
   @staticmethod
   def __parse_monotask(monotask_dom, macrotask, num_partitions, disk_ids):
@@ -240,16 +242,23 @@ class SimulationConf(object):
     provided default value. Raises an exception with the provided error message if the variance is
     not in the range [0, 1).
     """
-    elements = dom.getElementsByTagName(tag)
-    if len(elements) > 0:
-      variance = float(elements[0].firstChild.data)
-    else:
-      variance = default_value
-
+    variance = SimulationConf.__parse_optional(dom, tag, float, default_value)
     if (variance < 0) or (variance >= 1):
       raise Exception(("The %s parameter must be in the range [0, 1), otherwise it is possible " +
         "for %s.") % (tag, error_message))
     return variance
+
+  @staticmethod
+  def __parse_optional(dom, tag, type_cast, default_value):
+    """
+    Extracts the value corresponding to the given tag from the provided DOM and casts it to the
+    specified type, or returns the given default value if the tag cannot be found.
+    """
+    elements = dom.getElementsByTagName(tag)
+    if len(elements) > 0:
+      return type_cast(elements[0].firstChild.data)
+    else:
+      return default_value
 
   def get_throughput_Bpms_for_disk(self, disk_id, is_write):
     """

@@ -15,16 +15,12 @@
 #
 """Contains integration tests of the Monotasks Simulator.
 
-Run the tests in this file by executing the command "py.test integration_tests.py" from the
-containing directoy.
+Run the tests in this file by executing the command "py.test test_end_to_end.py" from the containing
+directory.
 """
 
-from datetime import datetime
 import logging
-import os
 from os import path
-import pytest
-import shutil
 
 from simulation import simulation_conf
 from simulation import simulator
@@ -33,43 +29,21 @@ from simulation import task_constructs
 # Set the logging level to INFO so that logs are printed if a test fails.
 logging.basicConfig(level=logging.INFO)
 
-CONTINUOUS_MONITOR_PREFIX = "continuous_monitor_logs"
 
-
-@pytest.fixture(scope="function")
-def cleanup(request):
-  """
-  This fixture adds a teardown function that deletes continuous monitor logs from the current
-  working directory after each test case is run.
-  """
-  def delete_continuous_monitor_logs():
-    current_dir = os.getcwd()
-    for filename in os.listdir(current_dir):
-      if CONTINUOUS_MONITOR_PREFIX in filename:
-        shutil.rmtree(os.path.join(current_dir, filename))
-
-  request.addfinalizer(delete_continuous_monitor_logs)
-  return None
-
-
-def run_with_conf_and_verify(conf_filename, verification_func):
+def run_with_conf_and_verify(tmpdir, conf_filename, verification_func):
   """Verifies that a workload simulation executes correctly.
 
   Args:
+    tmpdir: The path to a temporary directory where the Scheduler's Worker can store its
+      continuous monitor file. The caller is responsible for cleaning up this directory.
     conf_filename: The path to a configuration file defining the workload to simulate. Assumed to
       be contained within a "conf" directory that is colocated with this file.
     verification_func: A function that accepts a SimulationConf object and a finished Simulator and
-      verifies that the simulator correctly simulated the workload defined in the SimulationConf.
+      verifies that the Simulator correctly simulated the workload defined in the SimulationConf.
   """
-  log_dir = "%s_%s" % (CONTINUOUS_MONITOR_PREFIX, datetime.now())
-  if path.exists(log_dir):
-    raise Exception("Continuous monitor log directory already exists: %s" % log_dir)
-  else:
-    os.makedirs(log_dir)
-
-  conf_path = path.join("conf", conf_filename)
+  conf_path = path.join(path.dirname(path.realpath(__file__)), "conf", conf_filename)
   conf = simulation_conf.SimulationConf(conf_path)
-
+  log_dir = str(tmpdir)
   sim = simulator.Simulator(conf, log_dir)
   try:
     sim.run(log_interval_ms=10)
@@ -79,7 +53,7 @@ def run_with_conf_and_verify(conf_filename, verification_func):
   verification_func(conf, sim)
 
 
-def test_two_workers_all_data_on_disk_with_shuffle(cleanup):
+def test_two_workers_all_data_on_disk_with_shuffle(tmpdir):
   """A pytest test case that validates a simple on-disk shuffle Job.
 
   Verifies that the Simulator operates correctly for a cluster with two Workers executing a
@@ -87,10 +61,11 @@ def test_two_workers_all_data_on_disk_with_shuffle(cleanup):
   ideal Job completion time calculations for Jobs that are bottlenecked on the disk.
 
   Args:
-    cleanup: A fixture that registers a cleanup function that removes the continuous monitor log
-      files after the test case has finished.
+    tmpdir: A built-in pytest fixture used to create a temporary directory in which to store
+      continuous monitor files.
   """
-  run_with_conf_and_verify("on_disk_shuffle.xml", verify_two_workers_all_data_on_disk_with_shuffle)
+  run_with_conf_and_verify(
+    tmpdir, "on_disk_shuffle.xml", verify_two_workers_all_data_on_disk_with_shuffle)
 
 
 def verify_two_workers_all_data_on_disk_with_shuffle(conf, sim):
@@ -226,7 +201,7 @@ def verify_two_workers_all_data_on_disk_with_shuffle(conf, sim):
   verify_balanced_shuffle(conf, sim)
 
 
-def test_two_workers_all_data_in_memory_with_shuffle(cleanup):
+def test_two_workers_all_data_in_memory_with_shuffle(tmpdir):
   """A pytest test case that validates a simple in-memory shuffle.
 
   Verifies that the Simulator operates correctly for a cluster with two Workers executing a
@@ -234,11 +209,11 @@ def test_two_workers_all_data_in_memory_with_shuffle(cleanup):
   ideal Job completion time calculations for Jobs that are bottlenecked on the CPU.
 
   Args:
-    cleanup: A fixture that registers a cleanup function that removes the continuous monitor log
-      files after the test case has finished.
+    tmpdir: A built-in pytest fixture used to create a temporary directory in which to store
+      continuous monitor files.
   """
   run_with_conf_and_verify(
-    "in_memory_shuffle.xml", verify_two_workers_all_data_in_memory_with_shuffle)
+    tmpdir, "in_memory_shuffle.xml", verify_two_workers_all_data_in_memory_with_shuffle)
 
 
 def verify_two_workers_all_data_in_memory_with_shuffle(conf, sim):
@@ -305,17 +280,18 @@ def verify_two_workers_all_data_in_memory_with_shuffle(conf, sim):
   verify_balanced_shuffle(conf, sim)
 
 
-def test_ideal_jct_two_workers_network_is_bottleneck(cleanup):
+def test_ideal_jct_two_workers_network_is_bottleneck(tmpdir):
   """A pytest test case that validates the ideal JCT when the network is the bottleneck.
 
   Verifies that the Simulator calculates the correct ideal Job completion time for a Job that is
   bottlenecked on the network.
 
   Args:
-    cleanup: A fixture that registers a cleanup function that removes the continuous monitor log
-      files after the test case has finished.
+    tmpdir: A built-in pytest fixture used to create a temporary directory in which to store
+      continuous monitor files.
   """
   run_with_conf_and_verify(
+    tmpdir,
     "in_memory_shuffle_network_is_bottleneck.xml",
     verify_ideal_jct_two_workers_network_is_bottleneck)
 
