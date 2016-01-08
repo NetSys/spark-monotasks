@@ -44,7 +44,7 @@ class DiskSchedulerSuite extends FunSuite with BeforeAndAfter with Timeouts {
   val numBlocks = 10
 
   before {
-    DummyDiskMonotask.clearTimes()
+    DiskMonotaskTestHelper.clearTimes()
 
     // Pass in false to the SparkConf constructor so that the same configuration is loaded
     // regardless of the system properties.
@@ -81,7 +81,7 @@ class DiskSchedulerSuite extends FunSuite with BeforeAndAfter with Timeouts {
     initializeDiskScheduler(1)
 
     val monotasks = (1 to numBlocks).map(i =>
-      new DummyDiskMonotask(taskContext, new TestBlockId(i.toString), 100))
+      new DummyDiskWriteMonotask(taskContext, new TestBlockId(i.toString), 100))
     assert(submitTasksAndWaitForCompletion(monotasks, timeoutMillis))
   }
 
@@ -89,7 +89,7 @@ class DiskSchedulerSuite extends FunSuite with BeforeAndAfter with Timeouts {
     initializeDiskScheduler(2)
 
     val monotasks = (1 to numBlocks).map(i =>
-      new DummyDiskMonotask(taskContext, new TestBlockId(i.toString), 100))
+      new DummyDiskWriteMonotask(taskContext, new TestBlockId(i.toString), 100))
     assert(submitTasksAndWaitForCompletion(monotasks, timeoutMillis))
   }
 
@@ -97,19 +97,19 @@ class DiskSchedulerSuite extends FunSuite with BeforeAndAfter with Timeouts {
     initializeDiskScheduler(1)
 
     val monotasks = (1 to numBlocks).map(i =>
-      new DummyDiskMonotask(taskContext, new TestBlockId(i.toString), 100))
+      new DummyDiskWriteMonotask(taskContext, new TestBlockId(i.toString), 100))
     assert(submitTasksAndWaitForCompletion(monotasks, timeoutMillis))
 
     val ids = monotasks.map(monotask => monotask.taskId)
-    // Sort the tasks by start time, and extract the taskIds.
-    val timesArray = DummyDiskMonotask.taskTimes.entrySet.toArray(Array[Entry[Long, Long]]())
+    // Sort the tasks by end time, and extract the taskIds.
+    val timesArray = DiskMonotaskTestHelper.taskTimes.entrySet.toArray(Array[Entry[Long, Long]]())
     val sortedIds = timesArray.sortWith((a, b) => b.getValue() >= a.getValue()).map(a => a.getKey())
     assert(ids.sameElements(sortedIds))
   }
 
   test("the LocalDagScheduler is notified when a DiskMonotask completes successfully") {
     initializeDiskScheduler(1)
-    val monotask = new DummyDiskMonotask(taskContext, mock(classOf[BlockId]), 0L)
+    val monotask = new DummyDiskWriteMonotask(taskContext, mock(classOf[BlockId]), 0L)
     diskScheduler.submitTask(monotask)
     verify(localDagScheduler, timeout(timeoutMillis)).post(TaskSuccess(monotask, None))
   }
@@ -167,11 +167,49 @@ class DiskSchedulerSuite extends FunSuite with BeforeAndAfter with Timeouts {
     otherMonotasks.foreach(monotask => assert(!idsOfStartedMonotasks.contains(monotask.taskId)))
   }
 
+  test("diskWriteMonotasks are scheduled based on the next available disk") {
+    initializeDiskScheduler(2)
+    val disk0 = diskScheduler.diskIds(0)
+    val disk1 = diskScheduler.diskIds(1)
+    val longMonotask = new DummyDiskReadMonotask(taskContext, mock(classOf[BlockId]), disk0, 300)
+    val shortMonotask = new DummyDiskReadMonotask(taskContext, mock(classOf[BlockId]), disk1, 100)
+    val writeMonotask = new DummyDiskWriteMonotask(taskContext, mock(classOf[BlockId]), 400)
+    val shortWrite1 = new DummyDiskWriteMonotask(taskContext, mock(classOf[BlockId]), 50)
+    val shortWrite2 = new DummyDiskWriteMonotask(taskContext, mock(classOf[BlockId]), 50)
+
+    // Since disk1 will be available first, the writeMonotask should be assigned to disk1.
+    // Then the two short writes should be assigned to disk0, which will become available while
+    // the writeMonotask is running.
+    val monotasks = Seq(longMonotask, shortMonotask, writeMonotask, shortWrite1, shortWrite2)
+    submitTasksAndWaitForCompletion(monotasks, 1000)
+
+    assert(writeMonotask.diskId.isDefined)
+    assert(shortWrite1.diskId.isDefined)
+    assert(shortWrite2.diskId.isDefined)
+    assert(writeMonotask.diskId.get === disk1)
+    assert(shortWrite1.diskId.get === disk0)
+    assert(shortWrite1.diskId.get === disk0)
+  }
+
+  test("diskAccessors count 0 monotasks in queue after all diskWriteMonotasks have finished") {
+    initializeDiskScheduler(2)
+    val writeMonotask1 = new DummyDiskWriteMonotask(taskContext, mock(classOf[BlockId]), 100)
+    val writeMonotask2 = new DummyDiskWriteMonotask(taskContext, mock(classOf[BlockId]), 100)
+
+    val monotasks = Seq(writeMonotask1, writeMonotask2)
+    submitTasksAndWaitForCompletion(monotasks, 1000)
+
+    val diskNames = diskScheduler.diskIds.map(BlockFileManager.getDiskNameFromPath(_))
+    for (diskName <- diskNames) {
+      assert(diskScheduler.getDiskNameToNumRunningAndQueuedDiskMonotasks(diskName) === 0)
+    }
+  }
+
   private def submitTasksAndWaitForCompletion(
-      monotasks: Seq[DummyDiskMonotask], timeoutMillis: Long): Boolean = {
+      monotasks: Seq[DiskMonotask], timeoutMillis: Long): Boolean = {
     monotasks.foreach { diskScheduler.submitTask(_) }
     val finishTime = System.currentTimeMillis + timeoutMillis
-    while (monotasks.count(!_.isFinished) > 0) {
+    while (monotasks.size > DiskMonotaskTestHelper.taskTimes.size) {
       if (System.currentTimeMillis > finishTime) {
         return false
       }

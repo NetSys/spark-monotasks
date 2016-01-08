@@ -43,8 +43,6 @@ private[spark] class DiskScheduler(blockFileManager: BlockFileManager) extends L
    * the user-defined list of Spark local directories (spark.local.dirs or SPARK_LOCAL_DIRS, if it
    * is set) describes a separate physical disk. */
   val diskIds = blockFileManager.localDirs.keySet.toArray
-  // An index into diskIds indicating which disk to use for the next write task.
-  private var nextDisk = 0
   /**
    * Queue of HdfsWriteMonotasks that have been submitted to the scheduler but haven't yet been
    * submitted to a disk thread, because we first need to determine which disk the monotask will
@@ -121,10 +119,8 @@ private[spark] class DiskScheduler(blockFileManager: BlockFileManager) extends L
     // Extract the identifier of the disk on which this task will operate.
     val diskId = task match {
       case write: DiskWriteMonotask =>
-        // If the task is a write, then a new disk identifier must be chosen.
-        val id = getNextDiskId()
-        write.diskId = Some(id)
-        id
+        diskIds.foreach(addToDiskQueue(task, _))
+        return
 
       case read: DiskReadMonotask =>
         read.diskId
@@ -156,16 +152,6 @@ private[spark] class DiskScheduler(blockFileManager: BlockFileManager) extends L
         s"an invalid diskId: $diskId. Valid diskIds are: ${diskIds.mkString(", ")}")
       monotask.handleException(exception)
     }
-  }
-
-  /**
-   *  Returns the diskId of the disk that should be used for the next write operation. Uses a
-   *  round-robin disk scheduling strategy.
-   */
-  def getNextDiskId(): String = {
-    val diskId = diskIds(nextDisk)
-    nextDisk = (nextDisk + 1) % diskIds.length
-    diskId
   }
 
   private def addShutdownHook() {
@@ -246,6 +232,8 @@ private[spark] class DiskScheduler(blockFileManager: BlockFileManager) extends L
       numRunningAndQueuedDiskMonotasks.incrementAndGet()
     }
 
+    // TODO: Write monotasks get put in the queue for all disks, so this
+    //       includes some monotasks that are also queued on other disks. Fix this.
     def getNumRunningAndQueuedDiskMonotasks: Int = numRunningAndQueuedDiskMonotasks.get()
 
     /** Continuously executes DiskMonotasks from the task queue. */
@@ -256,8 +244,16 @@ private[spark] class DiskScheduler(blockFileManager: BlockFileManager) extends L
       try {
         while (!currentThread.isInterrupted()) {
           val diskMonotask = taskQueue.take()
-          diskMonotask.context.taskMetrics.incDiskWaitNanos(diskMonotask.getQueueTime())
-          executeMonotask(diskMonotask)
+          val monotaskAssigned = diskMonotask match {
+            case write: DiskWriteMonotask =>
+              write.assignToDisk(diskId)
+            case _ =>
+              true
+            }
+          if (monotaskAssigned) {
+            diskMonotask.context.taskMetrics.incDiskWaitNanos(diskMonotask.getQueueTime())
+            executeMonotask(diskMonotask)
+          }
           numRunningAndQueuedDiskMonotasks.decrementAndGet()
         }
       } catch {

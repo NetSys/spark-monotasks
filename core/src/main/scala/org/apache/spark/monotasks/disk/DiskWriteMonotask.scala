@@ -36,6 +36,18 @@ private[spark] class DiskWriteMonotask(
   // Identifies the disk on which this DiskWriteMonotask will operate. Set by the DiskScheduler.
   var diskId: Option[String] = None
 
+  /**
+   * Attempts to assign this monotask to the given disk.  If the monotask was already assigned to a
+   * disk, returns false; otherwise, sets the monotasks disk ID to the given ID and returns true.
+   */
+  def assignToDisk(potentialDiskId: String): Boolean = synchronized {
+    val monotaskNotAssigned = diskId.isEmpty
+    if (monotaskNotAssigned) {
+      diskId = Some(potentialDiskId)
+    }
+    monotaskNotAssigned
+  }
+
   override def execute(): Unit = {
     val rawDiskId = diskId.getOrElse(throw new IllegalStateException(
       s"Writing block $blockId to disk failed because the diskId parameter was not set."))

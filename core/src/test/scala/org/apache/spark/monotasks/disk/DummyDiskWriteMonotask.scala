@@ -16,48 +16,22 @@
 
 package org.apache.spark.monotasks.disk
 
-import java.util.concurrent.ConcurrentHashMap
-
-import scala.collection.mutable.HashSet
-
 import org.apache.spark.TaskContextImpl
 import org.apache.spark.storage.BlockId
 
 /**
  * A simplified DiskMonotask class that keeps track of which disks are currently being accessed and
- * the time at which each instance's execution started. DummyDiskMonotask is a subclass of
+ * the time at which each instance's execution started. DummyDiskWriteMonotask is a subclass of
  * DiskWriteMonotask so that it does not require a diskId to be known in advance. This class does no
  * meaningful work, so it should only be used for testing purposes.
  */
-private[spark] class DummyDiskMonotask(
+private[spark] class DummyDiskWriteMonotask(
     taskContext: TaskContextImpl,
     blockId: BlockId,
     val taskTime: Long)
   extends DiskWriteMonotask(taskContext, blockId, null) {
 
-  @volatile var isFinished = false
-
   override def execute(): Unit = {
-    DummyDiskMonotask.taskTimes.put(taskId, System.currentTimeMillis())
-
-    val disksInUse = DummyDiskMonotask.disksInUse
-    val disk = diskId.get
-    disksInUse.synchronized {
-      assert(!disksInUse.contains(disk))
-      disksInUse += disk
-    }
-
-    Thread.sleep(taskTime)
-    disksInUse.synchronized(disksInUse.remove(disk))
-    isFinished = true
+    DiskMonotaskTestHelper.executeTaskOnDisk(taskId, diskId.get, taskTime)
   }
-}
-
-private[spark] object DummyDiskMonotask {
-  // The disks on which DummyDiskMonotasks are currently executing.
-  val disksInUse = new HashSet[String]()
-  // Maps taskId to start time.
-  val taskTimes = new ConcurrentHashMap[Long, Long]()
-
-  def clearTimes() = taskTimes.clear()
 }
