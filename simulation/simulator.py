@@ -23,6 +23,7 @@ containing directory for instructions on running the Monotasks simulator.
 import argparse
 import logging
 import Queue
+import random
 
 import events
 import simulation_conf
@@ -36,6 +37,10 @@ def main():
   logging.info("Starting Simulator using configuration file: %s", args.conf_file)
   logging.info("Using log level: %s", args.log_level)
   logging.info("Saving continuous monitor logs to directory: %s", args.continuous_monitor_dir)
+
+  # Initialize the "random" module's seed value to 0 so that multiple runs of the Simulator use the
+  # same pseudo-random numbers.
+  random.seed(0)
 
   simulator = Simulator(simulation_conf.SimulationConf(args.conf_file), args.continuous_monitor_dir)
   try:

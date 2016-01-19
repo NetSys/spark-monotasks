@@ -21,6 +21,17 @@ import logging
 class Event(object):
   """ Abstract class representing simulation Events. """
 
+  def __cmp__(self, other):
+    my_value = str(self)
+    other_value = str(other)
+
+    if my_value < other_value:
+      return -1
+    elif my_value == other_value:
+      return 0
+    else:
+      return 1
+
   @abc.abstractmethod
   def run(self, current_time_ms):
     """
