@@ -46,7 +46,6 @@ class Worker(object):
     # A FIFO queue of waiting ComputeMonotasks.
     self.compute_queue = collections.deque()
 
-    self.network_bandwidth_Bpms = self.conf.get_network_bandwidth_Bpms()
     # A list of in-progess NetworkRequestMonotasks.
     self.outstanding_network_requests = []
     self.network_output_queue_end_ms = 0
@@ -225,11 +224,11 @@ class Worker(object):
     queue, and returns the corresponding PacketDeparture Events.
     """
     transmit_start_ms = max(current_time_ms, self.network_output_queue_end_ms)
+    network_bandwidth_Bpms = network_response_monotask.network_bandwidth_Bpms
     new_events = []
 
     for packet in network_response_monotask.get_packets(current_time_ms):
-      transmit_end_ms = (transmit_start_ms +
-        (float(packet.data_size_bytes) / self.network_bandwidth_Bpms))
+      transmit_end_ms = transmit_start_ms + (float(packet.data_size_bytes) / network_bandwidth_Bpms)
 
       new_events.append((transmit_end_ms, events.PacketDeparture(self, packet)))
       transmit_start_ms = transmit_end_ms
@@ -250,7 +249,8 @@ class Worker(object):
     dst_worker = packet.network_response_monotask.network_request_monotask.dst_worker
     transmit_start_ms = max(
       current_time_ms + self.conf.network_latency_ms, dst_worker.network_input_queue_end_ms)
-    transmit_end_ms = transmit_start_ms + (float(packet_size_bytes) / self.network_bandwidth_Bpms)
+    transmit_end_ms = transmit_start_ms + (
+      float(packet_size_bytes) / packet.network_response_monotask.network_bandwidth_Bpms)
     dst_worker.network_input_queue_end_ms = transmit_end_ms
     return [(transmit_end_ms, events.PacketArrival(dst_worker, packet))]
 

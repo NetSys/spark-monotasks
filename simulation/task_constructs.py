@@ -292,6 +292,13 @@ class NetworkResponseMonotask(Monotask):
     self.src_worker = network_request_monotask.dst_worker
     self.dst_worker = network_request_monotask.src_worker
 
+    conf = self.src_worker.conf
+    average_network_bandwidth_Bpms = conf.network_bandwidth_Bpms
+    network_bandwidth_variance = conf.network_bandwidth_variance
+    self.network_bandwidth_Bpms = random.uniform(
+      average_network_bandwidth_Bpms * (1 - network_bandwidth_variance),
+      average_network_bandwidth_Bpms * (1 + network_bandwidth_variance))
+
   def __repr__(self):
     return ("(NetworkResponseMonotask | id: %s | macrotask: %s | request id: %s | " +
       "src, dst: %s, %s | data: %s bytes)") % (

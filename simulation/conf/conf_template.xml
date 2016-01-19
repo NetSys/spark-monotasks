@@ -14,6 +14,16 @@
   <!-- The bandwidth (in Mb/s) of the network edge links. This is treated as full duplex. -->
   <worker_network_bandwidth_Mbps>1000</worker_network_bandwidth_Mbps>
 
+  <!--
+      Optional, a float in the range [0, 1). If present, the network bandwidth used to calculate
+      the transmission time of each packet will be chosen uniformly at random from the range:
+        [
+          worker_network_bandwidth_Mbps * (1 - worker_network_bandwidth_variance),
+          worker_network_bandwidth_Mbps * (1 + worker_network_bandwidth_variance)
+        ]
+  -->
+  <worker_network_bandwidth_variance>0.25</worker_network_bandwidth_variance>
+
   <!-- The latency (in ms) between any two machines in the network. -->
   <worker_network_latency_ms>1</worker_network_latency_ms>
 

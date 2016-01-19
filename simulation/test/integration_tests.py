@@ -174,8 +174,8 @@ def verify_two_workers_all_data_on_disk_with_shuffle(conf, sim):
     largest_packet_size_bytes = shuffle_bytes_per_worker
   else:
     largest_packet_size_bytes = max_packet_size_bytes
-  shuffle_transmission_ms = (float(shuffle_bytes_per_worker + largest_packet_size_bytes) /
-    conf.get_network_bandwidth_Bpms())
+  shuffle_transmission_ms = ((shuffle_bytes_per_worker + largest_packet_size_bytes) /
+    conf.network_bandwidth_Bpms)
 
   # Calculate the duration of the shuffle phase. Since we control the parameters of this test case,
   # we can make certain guarantees about when Monotasks are executed. Since there is only one Job
@@ -259,8 +259,8 @@ def verify_two_workers_all_data_in_memory_with_shuffle(conf, sim):
     largest_packet_size_bytes = shuffle_bytes_per_worker
   else:
     largest_packet_size_bytes = max_packet_size_bytes
-  shuffle_transmission_ms = (float(shuffle_bytes_per_worker + largest_packet_size_bytes) /
-    conf.get_network_bandwidth_Bpms())
+  shuffle_transmission_ms = ((shuffle_bytes_per_worker + largest_packet_size_bytes) /
+    conf.network_bandwidth_Bpms)
 
   network_latency_ms = conf.network_latency_ms
   # Time to fetch shuffle data from the remote Worker.

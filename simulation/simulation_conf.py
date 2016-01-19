@@ -35,7 +35,15 @@ class SimulationConf(object):
 
     self.num_workers = self.__parse_int(simulator_dom, "num_workers")
     self.num_cores = self.__parse_int(simulator_dom, "num_cores_per_worker")
-    self.network_bandwidth_Mbps = self.__parse_float(simulator_dom, "worker_network_bandwidth_Mbps")
+
+    network_bandwidth_Mbps = self.__parse_float(simulator_dom, "worker_network_bandwidth_Mbps")
+    self.network_bandwidth_Bpms = network_bandwidth_Mbps * 1000 / 8
+
+    self.network_bandwidth_variance = SimulationConf.__parse_variance(
+      simulator_dom,
+      tag="worker_network_bandwidth_variance",
+      default_value=0,
+      error_message="packets to be transmitted at unrealistic rates")
     self.network_latency_ms = self.__parse_float(simulator_dom, "worker_network_latency_ms")
 
     # Maps disk id to a tuple of (write throughput MB/s, read throughput MB/s)
@@ -131,16 +139,11 @@ class SimulationConf(object):
     if monotask_type == "compute":
       average_compute_time_ms = SimulationConf.__parse_float(monotask_dom, "compute_time_ms")
 
-      compute_variation_elements = monotask_dom.getElementsByTagName("compute_variation")
-      if len(compute_variation_elements) > 0:
-        compute_variation = float(compute_variation_elements[0].firstChild.data)
-      else:
-        compute_variation = 0
-
-      if (compute_variation < 0) or (compute_variation >= 1):
-        raise Exception("The compute_variation parameter must be in the range [0, 1), otherwise " +
-          "it is possible for compute monotasks to take an unrealistic amount of time to run.")
-
+      compute_variation = SimulationConf.__parse_variance(
+        monotask_dom,
+        tag="compute_variation",
+        default_value=0,
+        error_message="compute monotasks to take an unrealistic amount of time to run")
       compute_time_ms = random.uniform(
         average_compute_time_ms * (1 - compute_variation),
         average_compute_time_ms * (1 + compute_variation))
@@ -218,9 +221,23 @@ class SimulationConf(object):
     except IndexError:
       raise Exception("No element with tag: %s" % tag)
 
-  def get_network_bandwidth_Bpms(self):
-    """ Returns the network bandwidth in B/ms. """
-    return float(self.network_bandwidth_Mbps * 1000) / 8
+  @staticmethod
+  def __parse_variance(dom, tag, default_value, error_message):
+    """
+    Extracts the variance value corresponding to the given tag, if it exists, otherwise returns the
+    provided default value. Raises an exception with the provided error message if the variance is
+    not in the range [0, 1).
+    """
+    elements = dom.getElementsByTagName(tag)
+    if len(elements) > 0:
+      variance = float(elements[0].firstChild.data)
+    else:
+      variance = default_value
+
+    if (variance < 0) or (variance >= 1):
+      raise Exception(("The %s parameter must be in the range [0, 1), otherwise it is possible " +
+        "for %s.") % (tag, error_message))
+    return variance
 
   def get_throughput_Bpms_for_disk(self, disk_id, is_write):
     """
