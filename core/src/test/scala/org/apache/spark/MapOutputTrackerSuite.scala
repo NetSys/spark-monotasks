@@ -72,7 +72,7 @@ class MapOutputTrackerSuite extends FunSuite {
         Array(10000L, 1000L)))
     val statuses = tracker.getMapStatusesByExecutorId(10, 0)
     assert(statuses.toSet ===
-      Seq((BlockManagerId("a", "hostA", 1000), ArrayBuffer((ShuffleBlockId(10, 0, 0), size1000))),
+      Set((BlockManagerId("a", "hostA", 1000), ArrayBuffer((ShuffleBlockId(10, 0, 0), size1000))),
           (BlockManagerId("b", "hostB", 1000), ArrayBuffer((ShuffleBlockId(10, 1, 0), size10000)))))
     tracker.stop()
     actorSystem.shutdown()
