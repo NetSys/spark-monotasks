@@ -58,6 +58,10 @@ class Job(object):
     """
     return next((stage for stage in self.stages if not stage.is_finished()), None)
 
+  def calculate_ideal_completion_time_ms(self, conf):
+    """ Returns the ideal completion time of this Job (in ms). """
+    return sum([stage.calculate_ideal_completion_time_ms(conf) for stage in self.stages])
+
 
 class Stage(object):
   """ A Stage consists of multiple Macrotasks that are executed in parallel by many Workers. """
@@ -98,6 +102,65 @@ class Stage(object):
     return next(
       (macrotask for macrotask in self.macrotasks if not macrotask.assigned_to_worker), None)
 
+  def calculate_ideal_completion_time_ms(self, conf):
+    """Calculates the time that this Stage should take to finish in an ideal system.
+
+    Returns:
+      The ideal completion time of this Stage (in ms).
+    """
+    total_compute_time_ms = 0
+    total_network_bytes = 0
+    total_disk_write_bytes = 0
+    total_disk_read_bytes = 0
+
+    for macrotask in self.macrotasks:
+      (macrotask_compute_time_ms,
+        macrotask_network_bytes,
+        macrotask_disk_write_bytes,
+        macrotask_disk_read_bytes) = macrotask.get_resource_usage()
+      total_compute_time_ms += macrotask_compute_time_ms
+      total_network_bytes += macrotask_network_bytes
+      total_disk_write_bytes += macrotask_disk_write_bytes
+      total_disk_read_bytes += macrotask_disk_read_bytes
+
+    num_workers = conf.num_workers
+    total_cores = num_workers * conf.num_cores
+    # Ideally, the total compute time will be distributed evenly across all of the cores in the
+    # cluster.
+    parallel_compute_time_ms = total_compute_time_ms / total_cores
+
+    # Ideally, the responsibility of sending shuffle data will be distributed evenly across the
+    # Workers in the cluster.
+    network_bytes_per_worker = total_network_bytes / num_workers
+    max_packet_size_bytes = Packet.max_size_bytes
+    if network_bytes_per_worker < max_packet_size_bytes:
+      largest_packet_size_bytes = network_bytes_per_worker
+    else:
+      largest_packet_size_bytes = max_packet_size_bytes
+    # Since we model the links connecting each Worker to the network separately, we need to add the
+    # time to transmit one Packet in order to account for the fact that Packets traverse two links
+    # when traveling between Workers.
+    parallel_network_time_ms = ((network_bytes_per_worker + largest_packet_size_bytes) /
+      conf.network_bandwidth_Bpms)
+
+    # Compute the total disk write and read capabilities of the cluster.
+    total_disk_write_throughput_Bpms = total_disk_read_throughput_Bpms = 0
+    for disk_write_throughput_Bpms, disk_read_throughput_Bpms in conf.disks.itervalues():
+      total_disk_write_throughput_Bpms += num_workers * disk_write_throughput_Bpms
+      total_disk_read_throughput_Bpms += num_workers * disk_read_throughput_Bpms
+    # Ideally, moving data to and from disk will be load balanced across the disks in the cluster.
+    if total_disk_write_throughput_Bpms == 0:
+      parallel_disk_write_time_ms = 0
+    else:
+      parallel_disk_write_time_ms = total_disk_write_bytes / total_disk_write_throughput_Bpms
+    if total_disk_read_throughput_Bpms == 0:
+      parallel_disk_read_time_ms = 0
+    else:
+      parallel_disk_read_time_ms = total_disk_read_bytes / total_disk_read_throughput_Bpms
+    parallel_disk_time_ms = parallel_disk_write_time_ms + parallel_disk_read_time_ms
+
+    return max(parallel_compute_time_ms, parallel_network_time_ms, parallel_disk_time_ms)
+
 
 class Macrotask(object):
   """ A Macrotask consists of a DAG of Monotasks that are all executed by the same Worker. """
@@ -127,6 +190,38 @@ class Macrotask(object):
   def all_monotasks_finished(self):
     """ Returns True if all of this Macrotask's Monotasks have finished, or False otherwise. """
     return all(monotask.is_finished for monotask in self.monotasks)
+
+  def get_resource_usage(self):
+    """Retrieves information about how much this Macrotask used each system resource.
+
+    Returns:
+      This Macrotask's total compute time (in ms), total bytes read over the network, total bytes
+      written to disk, and total bytes read from disk.
+    """
+    total_compute_time_ms = 0
+    total_network_bytes = 0
+    total_disk_write_bytes = 0
+    total_disk_read_bytes = 0
+
+    for monotask in self.monotasks:
+      if isinstance(monotask, ComputeMonotask):
+        total_compute_time_ms += monotask.compute_time_ms
+      elif isinstance(monotask, NetworkRequestMonotask):
+        # NetworkRequestMonotasks do not use any system resources.
+        continue
+      elif isinstance(monotask, NetworkResponseMonotask):
+        total_network_bytes += monotask.data_size_bytes
+      elif isinstance(monotask, DiskMonotask):
+        data_size_bytes = monotask.data_size_bytes
+        if monotask.is_write:
+          total_disk_write_bytes += data_size_bytes
+        else:
+          total_disk_read_bytes += data_size_bytes
+      else:
+        raise Exception("Unknown monotask type: %s" % monotask)
+
+    return (total_compute_time_ms, total_network_bytes, total_disk_write_bytes,
+      total_disk_read_bytes)
 
 
 class Monotask(object):

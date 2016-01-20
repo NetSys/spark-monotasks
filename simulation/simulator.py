@@ -85,19 +85,22 @@ class Simulator(object):
   """
 
   def __init__(self, conf, continuous_monitor_dir):
-    num_workers = conf.num_workers
+    self.conf = conf
+    num_workers = self.conf.num_workers
     logging.debug("Creating Simulator with %s Worker(s)", num_workers)
 
-    self.workers = [worker.Worker(self, conf, continuous_monitor_dir) for _ in xrange(num_workers)]
+    self.workers = [
+      worker.Worker(self, self.conf, continuous_monitor_dir) for _ in xrange(num_workers)]
     # The Event queue contains elements of the form (Event time ms, Event object) and is serviced
     # in increasing order of Event time.
     self.event_queue = Queue.PriorityQueue()
     # A list of the Jobs that this Simulator will execute. Jobs must be executed sequentially.
-    self.jobs = conf.jobs
+    self.jobs = self.conf.jobs
     self.current_job = None
     self.current_stage = None
-    # A mapping from Job ID to Job completion time. For testing purposes.
-    self.jcts = {}
+    # A mapping from Job to a tuple of (ideal Job completion time (in ms), actual Job completion
+    # time (in ms)).
+    self.job_to_jcts = {}
 
   def run(self, log_interval_ms):
     """ Continuously pops Events from the Event queue and processes them. """
@@ -126,6 +129,22 @@ class Simulator(object):
     for worker_node in self.workers:
       worker_node.validate_bytes_sent_and_received()
     logging.info("Simulation complete!")
+
+    self.__log_jcts()
+
+  def __log_jcts(self):
+    """
+    Logs the ideal and actual Job completion time (in ms), as well as their percent difference, for
+    each Job that this Simulator has finished executing so far.
+    """
+    job_descriptions = [
+      ("  %s:\n    Ideal JCT: %.2f ms\n    Actual JCT: %.2f ms\n    Difference: %.2f%%" % (
+        job,
+        ideal_jct_ms,
+        actual_jct_ms,
+        float(actual_jct_ms - ideal_jct_ms) / ideal_jct_ms * 100))
+      for job, (ideal_jct_ms, actual_jct_ms) in self.job_to_jcts.iteritems()]
+    logging.info("Job Statistics:\n%s", "\n".join(job_descriptions))
 
   def __is_finished(self):
     """Determines whether the simulation is complete.
@@ -172,7 +191,10 @@ class Simulator(object):
     if next_stage is None:
       # There are no more Stages in the current Job, so it has finished. Try to start the next Job.
       logging.info("%s: No more Stages in %s", current_time_ms, self.current_job)
-      self.jcts[self.current_job.job_id] = current_time_ms - self.current_job.start_time_ms
+
+      self.job_to_jcts[self.current_job] = (
+        self.current_job.calculate_ideal_completion_time_ms(self.conf),
+        current_time_ms - self.current_job.start_time_ms)
       self.current_job = None
 
       next_job = self.__get_next_job()

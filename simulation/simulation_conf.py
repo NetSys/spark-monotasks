@@ -45,7 +45,7 @@ class SimulationConf(object):
       error_message="packets to be transmitted at unrealistic rates")
     self.network_latency_ms = self.__parse_float(simulator_dom, "worker_network_latency_ms")
 
-    # Maps disk id to a tuple of (write throughput MB/s, read throughput MB/s)
+    # Maps disk id to a tuple of (write throughput B/ms, read throughput B/ms)
     self.disks = self.__parse_disks(simulator_dom.getElementsByTagName("disks_per_worker"))
     self.jobs = self.__parse_jobs(simulator_dom.getElementsByTagName("jobs")[0], self.disks.keys())
 
@@ -64,7 +64,8 @@ class SimulationConf(object):
       disk_id = SimulationConf.__parse_string(disk_dom, "id")
       write_throughput_MBps = SimulationConf.__parse_float(disk_dom, "write_throughput_MBps")
       read_throughput_MBps = SimulationConf.__parse_float(disk_dom, "read_throughput_MBps")
-      disks[disk_id] = (write_throughput_MBps, read_throughput_MBps)
+      # Multiply by 1000 to convert from MB/s to B/ms.
+      disks[disk_id] = (write_throughput_MBps * 1000, read_throughput_MBps * 1000)
     return disks
 
   @staticmethod
@@ -151,7 +152,7 @@ class SimulationConf(object):
       # explicitly specify NetworkMonotasks because we do not know where the shuffle data is
       # located.
       total_shuffle_bytes, is_shuffle_data_on_disk = (
-        SimulationConf.__parse_shuffle_dependency_info(monotask_dom))
+        SimulationConf.__parse_shuffle_dependency_info(monotask_dom, disk_ids))
 
       # The amount of shuffle data read by each reduce task is equal to the total amount of shuffle
       # data divided by the number of reduce tasks.
@@ -164,6 +165,7 @@ class SimulationConf(object):
         is_shuffle_data_on_disk,
         num_partitions)
     elif monotask_type == "disk":
+      SimulationConf.__verify_disks_exist(disk_ids)
       is_write = SimulationConf.__parse_bool(monotask_dom, "is_write")
       data_size_bytes = SimulationConf.__parse_int(monotask_dom, "data_size_bytes")
       disk_monotask = task_constructs.DiskMonotask(macrotask, data_size_bytes, is_write)
@@ -177,7 +179,15 @@ class SimulationConf(object):
       raise Exception("Unknown monotask type: %s" % monotask_type)
 
   @staticmethod
-  def __parse_shuffle_dependency_info(monotask_dom):
+  def __verify_disks_exist(disk_ids):
+    """
+    Verifies that disk accesses are possible by checking if the provided list of disks is nonempty.
+    """
+    if len(disk_ids) == 0:
+      raise Exception("Cannot perform a disk access if no disks are specified!")
+
+  @staticmethod
+  def __parse_shuffle_dependency_info(monotask_dom, disk_ids):
     """
     Returns a tuple of (total shuffle data size bytes, is on disk?) extracted from the shuffle
     dependency info in the provided Monotask DOM, or (0, False) if the Monotask does not have a
@@ -190,6 +200,9 @@ class SimulationConf(object):
     shuffle_dependency_element = shuffle_dependency_elements[0]
     total_size_bytes = SimulationConf.__parse_long(shuffle_dependency_element, "total_size_bytes")
     is_on_disk = SimulationConf.__parse_bool(shuffle_dependency_element, "is_on_disk")
+
+    if is_on_disk:
+      SimulationConf.__verify_disks_exist(disk_ids)
     return (total_size_bytes, is_on_disk)
 
   @staticmethod
@@ -243,6 +256,5 @@ class SimulationConf(object):
     If is_write is True, returns the write throughput of the specified disk, otherwise returns the
     disk's read throughput. Return values are in B/ms.
     """
-    write_throughput, read_throughput = self.disks[disk_id]
-    throughput_MBps = write_throughput if is_write else read_throughput
-    return throughput_MBps * 1000
+    write_throughput_Bpms, read_throughput_Bpms = self.disks[disk_id]
+    return write_throughput_Bpms if is_write else read_throughput_Bpms

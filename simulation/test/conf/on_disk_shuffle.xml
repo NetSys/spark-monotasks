@@ -2,7 +2,7 @@
 <simulator>
   <!--
       A configuration that describes a 2-worker cluster executing a two-stage job where all input,
-      shuffle, and output data is stored on disk.
+      shuffle, and output data is stored on disk. Both stages are bottlenecked on the disk.
   -->
 
   <num_workers>2</num_workers>

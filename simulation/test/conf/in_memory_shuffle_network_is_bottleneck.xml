@@ -2,7 +2,8 @@
 <simulator>
   <!--
       A configuration that describes a 2-worker cluster executing a two-stage job where all input,
-      shuffle, and output data is stored in memory. Both stages are bottlenecked on the CPU.
+      shuffle, and output data is stored in memory. The first stage is bottlenecked on the CPU and
+      the second is bottlenecked on the network.
   -->
 
   <num_workers>2</num_workers>
@@ -33,7 +34,7 @@
               <compute_time_ms>1000</compute_time_ms>
 
               <shuffle_dependency>
-                <total_size_bytes>400000000</total_size_bytes>
+                <total_size_bytes>500000000</total_size_bytes>
                 <is_on_disk>False</is_on_disk>
               </shuffle_dependency>
             </monotask>

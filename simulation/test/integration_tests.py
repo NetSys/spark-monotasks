@@ -83,7 +83,8 @@ def test_two_workers_all_data_on_disk_with_shuffle(cleanup):
   """A pytest test case that validates a simple on-disk shuffle Job.
 
   Verifies that the Simulator operates correctly for a cluster with two Workers executing a
-  two-Stage Job where all input, shuffle, and output data is stored on disk.
+  two-Stage Job where all input, shuffle, and output data is stored on disk. Also validates the
+  ideal Job completion time calculations for Jobs that are bottlenecked on the disk.
 
   Args:
     cleanup: A fixture that registers a cleanup function that removes the continuous monitor log
@@ -97,7 +98,8 @@ def verify_two_workers_all_data_on_disk_with_shuffle(conf, sim):
 
   Verifies that the provided Simulator reported the correct Job completion time for the Job
   specified by the provided SimulationConf. Also verifies that the simulation shuffled the correct
-  amount of data. Assumes that the shuffle data was evenly distributed.
+  amount of data. Assumes that the shuffle data was evenly distributed. Also verifies that the
+  Simulator computed the correct ideal Job completion time.
   """
   # Extract the Stage 0 Monotasks.
   stage_0_disk_read_monotask = get_disk_read_monotask_for_stage_from_conf(conf, stage_num=0)
@@ -211,9 +213,16 @@ def verify_two_workers_all_data_on_disk_with_shuffle(conf, sim):
     stage_1_expected_ms,
     expected_jct_ms)
 
-  actual_jct_ms = sim.jcts[conf.jobs[0].job_id]
+  ideal_jct_ms, actual_jct_ms = get_jcts_ms_from_job_id(sim, conf.jobs[0].job_id)
   # Round both the actual and expected results to get rid of floating point rounding errors.
   assert abs(actual_jct_ms - expected_jct_ms) < 0.0000001
+
+  # This Job is designed to be bottlenecked on the disks, so the ideal JCT is the sum of the disk
+  # times for the two Stages. We count the shuffle read twice because each Worker must read its own
+  # shuffle data and the shuffle data that it will send to the other Worker.
+  assert ideal_jct_ms == (stage_0_disk_read_ms + stage_0_disk_write_ms +
+    (2 * shuffle_disk_read_ms) + stage_1_disk_write_ms)
+
   verify_balanced_shuffle(conf, sim)
 
 
@@ -221,7 +230,8 @@ def test_two_workers_all_data_in_memory_with_shuffle(cleanup):
   """A pytest test case that validates a simple in-memory shuffle.
 
   Verifies that the Simulator operates correctly for a cluster with two Workers executing a
-  two-Stage Job where all input, shuffle, and output data is stored in memory.
+  two-Stage Job where all input, shuffle, and output data is stored in memory. Also validates the
+  ideal Job completion time calculations for Jobs that are bottlenecked on the CPU.
 
   Args:
     cleanup: A fixture that registers a cleanup function that removes the continuous monitor log
@@ -236,7 +246,8 @@ def verify_two_workers_all_data_in_memory_with_shuffle(conf, sim):
 
   Verifies that the provided Simulator reported the correct Job completion time for the Job
   specified by the provided SimulationConf. Also verifies that the simulation shuffled the correct
-  amount of data. Assumes that the shuffle data was evenly distributed.
+  amount of data. Assumes that the shuffle data was evenly distributed. Also verifies that the
+  Simulator computed the correct ideal Job completion time.
   """
   # Extract the Stage 0 Monotasks.
   stage_0_compute_monotask = get_compute_monotask_for_stage_from_conf(conf, 0)
@@ -283,10 +294,53 @@ def verify_two_workers_all_data_in_memory_with_shuffle(conf, sim):
     stage_1_expected_ms,
     expected_jct_ms)
 
-  actual_jct_ms = sim.jcts[conf.jobs[0].job_id]
+  ideal_jct_ms, actual_jct_ms = get_jcts_ms_from_job_id(sim, conf.jobs[0].job_id)
   # Round both the actual and expected results to get rid of floating point rounding errors.
   assert abs(actual_jct_ms - expected_jct_ms) < 0.0000001
+
+  # This Job is designed to be bottlenecked on the CPU, so the ideal JCT is the sum of the compute
+  # times of the two Stages.
+  assert ideal_jct_ms == stage_0_compute_ms + stage_1_compute_ms
+
   verify_balanced_shuffle(conf, sim)
+
+
+def test_ideal_jct_two_workers_network_is_bottleneck(cleanup):
+  """A pytest test case that validates the ideal JCT when the network is the bottleneck.
+
+  Verifies that the Simulator calculates the correct ideal Job completion time for a Job that is
+  bottlenecked on the network.
+
+  Args:
+    cleanup: A fixture that registers a cleanup function that removes the continuous monitor log
+      files after the test case has finished.
+  """
+  run_with_conf_and_verify(
+    "in_memory_shuffle_network_is_bottleneck.xml",
+    verify_ideal_jct_two_workers_network_is_bottleneck)
+
+
+def verify_ideal_jct_two_workers_network_is_bottleneck(conf, sim):
+  """Validates the results of the "test_ideal_jct_two_workers_network_is_bottleneck" test case.
+
+  Verifies that the Simulator computed the correct ideal Job completion time.
+  """
+  stage_0_compute_monotask = get_compute_monotask_for_stage_from_conf(conf, stage_num=0)
+  stage_0_compute_ms = stage_0_compute_monotask.compute_time_ms
+
+  # Each Worker needs to request 125MB (1Gb) of shuffle data from the other Worker over a 1Gb/s
+  # link, so the transmission time should be 1s (1000ms). See the transmission time calculation
+  # comment in verify_two_workers_all_data_on_disk_with_shuffle() for why we need to add the time to
+  # send one Packet.
+  shuffle_transmission_ms = 1000 + (
+    float(task_constructs.Packet.max_size_bytes) / conf.network_bandwidth_Bpms)
+
+  ideal_jct_ms, _ = get_jcts_ms_from_job_id(sim, conf.jobs[0].job_id)
+
+  # Since all shuffle data is stored in memory, the only resource that the first Stage uses is the
+  # CPU. The second Stage is bottlenecked on the network. Therefore, the ideal JCT is the sum of the
+  # first Stage's compute time and the shuffle transmission time.
+  assert ideal_jct_ms == stage_0_compute_ms + shuffle_transmission_ms
 
 
 def verify_balanced_shuffle(conf, sim):
@@ -357,6 +411,17 @@ def get_disk_write_monotask_for_stage_from_conf(conf, stage_num):
     for monotask in get_monotasks_for_stage_from_conf(conf, stage_num)
     if isinstance(monotask, task_constructs.DiskMonotask) and monotask.is_write][0]
 
+def get_jcts_ms_from_job_id(finished_simulator, job_id):
+  """Extracts the ideal and actual Job completion time for the specified Job.
+
+  Returns:
+    The ideal and actual JCTs (in ms) for the Job with the specified ID, as executed by the provided
+    Simulator, which is assumed to have finished executing.
+  """
+  for job, jcts_ms in finished_simulator.job_to_jcts.iteritems():
+    if job.job_id == job_id:
+      return jcts_ms
+  raise KeyError("Cannot find Job with id %s" % job_id)
 
 def get_num_macrotasks_in_stage(conf, stage_num):
   """Finds the number of Macrotasks in a Stage.
