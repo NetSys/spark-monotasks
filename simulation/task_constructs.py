@@ -26,10 +26,8 @@ class Job(object):
 
   def __init__(self, stages):
     self.job_id = Job.__new_id()
-    # A deque of the Stages that make up this Job. Uses a deque instead of a list because
-    # Stages in a Job are executed sequentially and once a Stage is finished we do not need to keep
-    # its data structures around.
-    self.waiting_stages = stages
+    # A list of the Stages that make up this Job. Stages must be executed sequentially.
+    self.stages = stages
     # The time (in ms) at which this Job started executing. Set by the Simulator. Used by the
     # Simulator to calculate Job completion time.
     self.start_time_ms = 0
@@ -44,6 +42,22 @@ class Job(object):
     Job.__next_id += 1
     return old_id
 
+  def is_finished(self):
+    """Checks if this Job has finished.
+
+    Returns:
+      True if all of the Stages in this Job have finished, or False otherwise.
+    """
+    return self.get_next_stage() is None
+
+  def get_next_stage(self):
+    """Retrieves the next Stage to execute.
+
+    Returns:
+      The first Stage in this Job that has not finished, or None if all Stages have finished.
+    """
+    return next((stage for stage in self.stages if not stage.is_finished()), None)
+
 
 class Stage(object):
   """ A Stage consists of multiple Macrotasks that are executed in parallel by many Workers. """
@@ -52,8 +66,9 @@ class Stage(object):
 
   def __init__(self, macrotasks):
     self.stage_id = Stage.__new_id()
-    # A list of Macrotasks that make up this Stage and are waiting to be assigned to Workers.
-    self.waiting_macrotasks = macrotasks
+    # A list of the Macrotasks that make up this Stage. Macrotasks are executed in parallel by
+    # Workers.
+    self.macrotasks = macrotasks
 
   def __repr__(self):
     return "(Stage | id: %s)" % self.stage_id
@@ -65,6 +80,24 @@ class Stage(object):
     Stage.__next_id += 1
     return old_id
 
+  def is_finished(self):
+    """Checks if this Stage has finished.
+
+    Returns:
+      True if all of the Macrotasks in this Stage have finished, or False otherwise.
+    """
+    return all(macrotask.master_knows_is_finished for macrotask in self.macrotasks)
+
+  def get_next_macrotask(self):
+    """Retrieves the next Macrotask to execute.
+
+    Returns:
+      A Macrotask in this Stage that has not been assigned to a Worker, or None if all Macrotasks
+      have been assigned to Workers.
+    """
+    return next(
+      (macrotask for macrotask in self.macrotasks if not macrotask.assigned_to_worker), None)
+
 
 class Macrotask(object):
   """ A Macrotask consists of a DAG of Monotasks that are all executed by the same Worker. """
@@ -73,11 +106,13 @@ class Macrotask(object):
 
   def __init__(self):
     self.macrotask_id = Macrotask.__new_id()
-    # A list of Monotasks that make up this Macrotask and are either currently executing or waiting
-    # to be executed. Must be populated later by the code that creates this Macrotask.
-    self.remaining_monotasks = []
+    # A list of the Monotasks that make up this Macrotask. Must be populated later by the code that
+    # creates this Macrotask.
+    self.monotasks = []
     # Whether this Macrotask has been assigned to a Worker yet.
     self.assigned_to_worker = False
+    # Whether the master node has been notified that this Macrotask has finished.
+    self.master_knows_is_finished = False
 
   def __repr__(self):
     return "(Macrotask | id: %s)" % self.macrotask_id
@@ -89,24 +124,9 @@ class Macrotask(object):
     Macrotask.__next_id += 1
     return old_id
 
-  def register_completed_monotask(self, current_time_ms, completed_monotask):
-    """
-    Updates this Macrotask's internal data structures to reflect that the provided Monotask has
-    completed.
-    """
-    logging.debug(
-      "%s: Removing %s from %s", current_time_ms, completed_monotask, self.remaining_monotasks)
-    if completed_monotask in self.remaining_monotasks:
-      self.remaining_monotasks.remove(completed_monotask)
-    else:
-      raise Exception("%s was removed from its Macrotask's list of Monotasks before it completed." %
-        completed_monotask)
-
-  def is_finished(self):
-    """
-    Returns True if all of the Monotasks in this Macrotask have completed, or False otherwise.
-    """
-    return len(self.remaining_monotasks) == 0
+  def all_monotasks_finished(self):
+    """ Returns True if all of this Macrotask's Monotasks have finished, or False otherwise. """
+    return all(monotask.is_finished for monotask in self.monotasks)
 
 
 class Monotask(object):
@@ -122,10 +142,11 @@ class Monotask(object):
     self.macrotask = macrotask
     # A list of Monotasks that must complete before this Monotask can be executed. Populated by
     # add_dependency().
-    self.remaining_dependencies = []
+    self.dependencies = []
     # A list of Monotasks that cannot be executed until this Monotask completes. Populated by
     # add_dependency().
     self.dependents = []
+    self.is_finished = False
 
   @staticmethod
   def __new_id():
@@ -142,7 +163,7 @@ class Monotask(object):
     Adds the provided Monotask as a dependency of this Monotask, and this Monotask as a dependent of
     the provided Monotask.
     """
-    self.remaining_dependencies.append(new_dependency)
+    self.dependencies.append(new_dependency)
     new_dependency.dependents.append(self)
 
   def add_dependencies(self, new_dependencies):
@@ -153,6 +174,14 @@ class Monotask(object):
     for new_dependency in new_dependencies:
       self.add_dependency(new_dependency)
 
+  def dependencies_have_finished(self):
+    """Checks if this Monotask can be executed.
+
+    Returns:
+      True if all of this Monotask's dependencies have finished executing, or False otherwise.
+    """
+    return all(dependency.is_finished for dependency in self.dependencies)
+
   @abc.abstractmethod
   def schedule(self, current_time_ms, worker):
     """
@@ -160,8 +189,16 @@ class Monotask(object):
     MonotaskEnd Event if this Monotask started executing.
     """
 
-  @abc.abstractmethod
   def end(self, current_time_ms, worker):
+    """
+    Marks this Monotask as having finished. Also, notifies the provided Worker that this Monotask
+    finished executing. Returns a MonotaskEnd Event if another Monotask started executing.
+    """
+    self.is_finished = True
+    return self.update_worker(current_time_ms, worker)
+
+  @abc.abstractmethod
+  def update_worker(self, current_time_ms, worker):
     """
     Notifies the provided Worker that this Monotask finished executing. Returns a MonotaskEnd Event
     if another Monotask started executing.
@@ -202,7 +239,7 @@ class ComputeMonotask(Monotask):
   def schedule(self, current_time_ms, worker):
     return worker.schedule_compute(current_time_ms, self)
 
-  def end(self, current_time_ms, worker):
+  def update_worker(self, current_time_ms, worker):
     return worker.compute_monotask_end(current_time_ms, self)
 
   def create_monotasks_for_shuffle(self, current_time_ms, local_worker, all_workers):
@@ -244,7 +281,7 @@ class ComputeMonotask(Monotask):
         logging.info(
           "%s: Created %s to read shuffle data for %s", current_time_ms, new_monotask, self)
         self.add_dependency(new_monotask)
-        self.macrotask.remaining_monotasks.append(new_monotask)
+        self.macrotask.monotasks.append(new_monotask)
         new_monotasks.append(new_monotask)
     return new_monotasks
 
@@ -273,16 +310,15 @@ class NetworkRequestMonotask(Monotask):
     self.log_start(current_time_ms, worker)
     return worker.schedule_network_request(current_time_ms, self)
 
-  def end(self, current_time_ms, worker):
+  def update_worker(self, current_time_ms, worker):
     return worker.requested_data_received(self)
 
 
 class NetworkResponseMonotask(Monotask):
   """
   A Monotask that transfers data from one Worker to another. Will be broken into Packets for
-  transmission over the network. NetworkResponseMonotasks are not given MonotaskEnd Events. When,
-  all Packets have arrived at the destination Worker, the MonotaskEnd Event for the corresponding
-  NetworkRequestMonotask is created instead.
+  transmission over the network. A NetworkResponseMonotask is considered finished when its last
+  Packet departs its source Worker.
   """
 
   def __init__(self, macrotask, data_size_bytes, network_request_monotask):
@@ -313,10 +349,10 @@ class NetworkResponseMonotask(Monotask):
     self.log_start(current_time_ms, worker)
     return worker.schedule_network_response(current_time_ms, self)
 
-  def end(self, current_time_ms, worker):
-    raise NotImplementedError("NetworkResponseMonotasks do not support end(). When a " +
-      "NetworkResponseMonotask has completed, create a MonotaskEnd Event for the associated " +
-      "NetworkRequestMonotask instead.")
+  def update_worker(self, current_time_ms, worker):
+    # NetworkResponseMonotasks do not need to inform either their source or destination Worker that
+    # they completed.
+    return []
 
   def get_packets(self, current_time_ms):
     """
@@ -363,7 +399,7 @@ class DiskMonotask(Monotask):
   def schedule(self, current_time_ms, worker):
     return worker.schedule_disk(current_time_ms, self)
 
-  def end(self, current_time_ms, worker):
+  def update_worker(self, current_time_ms, worker):
     return worker.disk_monotask_end(current_time_ms, self)
 
 

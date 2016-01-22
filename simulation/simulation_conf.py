@@ -14,7 +14,6 @@
 # limitations under the License.
 #
 
-import collections
 import logging
 import random
 from xml.dom import minidom
@@ -25,7 +24,7 @@ import task_constructs
 class SimulationConf(object):
   """Contains Simulator setup parameters and Job information.
 
-  Extracts simulation parameters from an XML configuration file. Creates a deque of Jobs for a
+  Extracts simulation parameters from an XML configuration file. Creates a list of Jobs for a
   Simulator to execute.
   """
 
@@ -70,8 +69,8 @@ class SimulationConf(object):
 
   @staticmethod
   def __parse_jobs(jobs_dom, disk_ids):
-    """ Returns a deque of Job objects parsed from the provided DOM. """
-    jobs = collections.deque()
+    """ Returns a list of Job objects parsed from the provided DOM. """
+    jobs = []
     for job_dom in jobs_dom.getElementsByTagName("job"):
       stages = SimulationConf.__parse_stages(job_dom.getElementsByTagName("stages")[0], disk_ids)
       jobs.append(task_constructs.Job(stages))
@@ -80,8 +79,8 @@ class SimulationConf(object):
 
   @staticmethod
   def __parse_stages(stages_dom, disk_ids):
-    """ Returns a deque of Stage objects parsed from the provided DOM. """
-    stages = collections.deque()
+    """ Returns a list of Stage objects parsed from the provided DOM. """
+    stages = []
     for stage_dom in stages_dom.getElementsByTagName("stage"):
       num_partitions = SimulationConf.__parse_int(stage_dom, "num_partitions")
       monotasks_dom = stage_dom.getElementsByTagName("monotasks_per_partition")[0]
@@ -125,7 +124,7 @@ class SimulationConf(object):
         logging.info("Adding dependencies to %s: %s", monotask, dependencies)
         monotask.add_dependencies(dependencies)
 
-        macrotask.remaining_monotasks.append(monotask)
+        macrotask.monotasks.append(monotask)
       macrotasks.append(macrotask)
     return macrotasks
 

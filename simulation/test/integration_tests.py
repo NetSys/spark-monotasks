@@ -19,7 +19,6 @@ Run the tests in this file by executing the command "py.test integration_tests.p
 containing directoy.
 """
 
-import copy
 from datetime import datetime
 import logging
 import os
@@ -69,18 +68,15 @@ def run_with_conf_and_verify(conf_filename, verification_func):
     os.makedirs(log_dir)
 
   conf_path = path.join("conf", conf_filename)
-  conf_for_test = simulation_conf.SimulationConf(conf_path)
-  # Copy conf_for_test for use during the verification stage because the internal data structures in
-  # conf_for_test will be cleared while running the Simulator.
-  conf_for_verification = copy.deepcopy(conf_for_test)
+  conf = simulation_conf.SimulationConf(conf_path)
 
-  sim = simulator.Simulator(conf_for_test, log_dir)
+  sim = simulator.Simulator(conf, log_dir)
   try:
     sim.run(log_interval_ms=10)
   finally:
     sim.cleanup()
 
-  verification_func(conf_for_verification, sim)
+  verification_func(conf, sim)
 
 
 def test_two_workers_all_data_on_disk_with_shuffle(cleanup):
@@ -323,7 +319,7 @@ def get_monotasks_for_stage_from_conf(conf, stage_num):
     A list of Monotasks for one Macrotask from the Stage with the provided index, extracted from the
     provided SimulatorConf.
   """
-  return conf.jobs[0].waiting_stages[stage_num].waiting_macrotasks[0].remaining_monotasks
+  return conf.jobs[0].stages[stage_num].macrotasks[0].monotasks
 
 
 def get_compute_monotask_for_stage_from_conf(conf, stage_num):
@@ -369,4 +365,4 @@ def get_num_macrotasks_in_stage(conf, stage_num):
     The number of Macrotasks in the Stage with the provided index, extracted from the provided
     SimulatorConf.
   """
-  return len(conf.jobs[0].waiting_stages[stage_num].waiting_macrotasks)
+  return len(conf.jobs[0].stages[stage_num].macrotasks)

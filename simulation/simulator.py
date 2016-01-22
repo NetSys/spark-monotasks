@@ -92,10 +92,8 @@ class Simulator(object):
     # The Event queue contains elements of the form (Event time ms, Event object) and is serviced
     # in increasing order of Event time.
     self.event_queue = Queue.PriorityQueue()
-    # A deque of Jobs waiting to be executed. Uses a deque instead of a list because Jobs are
-    # executed sequentially and once a Job is finished we do not need to keep its data structures
-    # around.
-    self.waiting_jobs = conf.jobs
+    # A list of the Jobs that this Simulator will execute. Jobs must be executed sequentially.
+    self.jobs = conf.jobs
     self.current_job = None
     self.current_stage = None
     # A mapping from Job ID to Job completion time. For testing purposes.
@@ -103,13 +101,14 @@ class Simulator(object):
 
   def run(self, log_interval_ms):
     """ Continuously pops Events from the Event queue and processes them. """
-    if len(self.waiting_jobs) == 0:
+    first_job = self.__get_next_job()
+    if first_job is None:
       return
 
     current_time_ms = 0.0
     log_continuous_monitors_event = events.LogContinuousMonitors(self.workers, log_interval_ms)
     self.event_queue.put((current_time_ms, log_continuous_monitors_event))
-    self.event_queue.put((current_time_ms, events.JobStart(self, self.waiting_jobs.popleft())))
+    self.event_queue.put((current_time_ms, events.JobStart(self, first_job)))
 
     while not self.__is_finished():
       current_time_ms, event = self.event_queue.get(block=False)
@@ -139,6 +138,13 @@ class Simulator(object):
     """
     return self.event_queue.qsize() == 1
 
+  def __get_next_job(self):
+    """Retrieves the next Job to execute.
+
+    Returns:
+      The first unfinished Job, or None if all Jobs have finished. """
+    return next((job for job in self.jobs if not job.is_finished()), None)
+
   def start_job(self, current_time_ms, job):
     """Starts the first Stage in the provided Job.
 
@@ -162,21 +168,23 @@ class Simulator(object):
       Stages in the current Job and there are more Jobs remaining, returns a JobStart Event for the
       next Job.
     """
-    if len(self.current_job.waiting_stages) == 0:
-      # There are no more Stages in the current Job, so it is finished.
+    next_stage = self.current_job.get_next_stage()
+    if next_stage is None:
+      # There are no more Stages in the current Job, so it has finished. Try to start the next Job.
       logging.info("%s: No more Stages in %s", current_time_ms, self.current_job)
       self.jcts[self.current_job.job_id] = current_time_ms - self.current_job.start_time_ms
       self.current_job = None
 
-      if len(self.waiting_jobs) == 0:
+      next_job = self.__get_next_job()
+      if next_job is None:
         logging.info("%s: No more Jobs", current_time_ms)
         return []
       else:
         # Start the next Job.
-        return [(current_time_ms, events.JobStart(self, self.waiting_jobs.popleft()))]
+        return [(current_time_ms, events.JobStart(self, next_job))]
     else:
       # Start the next Stage.
-      self.current_stage = self.current_job.waiting_stages.popleft()
+      self.current_stage = next_stage
       logging.info("%s: Starting %s", current_time_ms, self.current_stage)
       return self.__schedule_macrotasks(current_time_ms)
 
@@ -189,14 +197,10 @@ class Simulator(object):
       MacrotaskStart Events for any Macrotasks that were accepted by Workers, or a JobStart Event if
       the provided Macrotask is the last in its Job and there are more Jobs.
     """
-    if macrotask in self.current_stage.waiting_macrotasks:
-      self.current_stage.waiting_macrotasks.remove(macrotask)
-    else:
-      raise Exception("Macrotask %s was removed from %s's list of Macrotasks before it completed." %
-        (macrotask, self.current_stage))
-
-    if len(self.current_stage.waiting_macrotasks) == 0:
-      # There are no more Macrotasks in the current Stage, so it is finished. Start the next Stage.
+    macrotask.master_knows_is_finished = True
+    if self.current_stage.is_finished():
+      # There are no more Macrotasks in the current Stage, so it has finished. Try to start the next
+      # Stage.
       logging.info("%s: No more Macrotasks in %s", current_time_ms, self.current_stage)
       self.current_stage = None
       return self.__start_next_stage(current_time_ms)
@@ -208,9 +212,6 @@ class Simulator(object):
     Attempts to distribute the remaining Macrotasks for the current Stage amongst the Workers.
     Returns MacrotaskStart Events for any Macrotasks that were accepted by Workers.
     """
-    unscheduled_macrotasks = [macrotask for macrotask in self.current_stage.waiting_macrotasks
-      if not macrotask.assigned_to_worker]
-
     macrotask_scheduled_in_last_iteration = True
     new_events = []
     # Cycle through the Workers in round robin order, attempting to assign one Macrotask to each
@@ -219,15 +220,14 @@ class Simulator(object):
     while macrotask_scheduled_in_last_iteration:
       macrotask_scheduled_in_last_iteration = False
       for worker_node in self.workers:
-        if len(unscheduled_macrotasks) == 0:
+        macrotask_to_submit = self.current_stage.get_next_macrotask()
+        if macrotask_to_submit is None:
           return new_events
 
-        macrotask_to_submit = unscheduled_macrotasks[0]
         if worker_node.num_running_macrotasks < worker_node.max_macrotasks:
           logging.info("%s: %s accepted by %s", current_time_ms, macrotask_to_submit, worker_node)
           worker_node.num_running_macrotasks += 1
           macrotask_to_submit.assigned_to_worker = True
-          unscheduled_macrotasks.remove(macrotask_to_submit)
 
           # Since a Worker accepted a Macrotask, we signal that we should try another iteration in
           # case this Worker can accept another Macrotask. We do not immediately try to assign

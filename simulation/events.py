@@ -86,7 +86,7 @@ class MacrotaskStart(Event):
 
   def run(self, current_time_ms):
     logging.info("%s: %s starting on %s", current_time_ms, self.macrotask, self.worker)
-    return self.worker.submit_monotasks(current_time_ms, self.macrotask.remaining_monotasks)
+    return self.worker.submit_monotasks(current_time_ms, self.macrotask.monotasks)
 
 
 class MonotaskEnd(Event):

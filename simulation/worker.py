@@ -139,9 +139,8 @@ class Worker(object):
         "%s: Submitting %s with dependency ids: %s",
         current_time_ms,
         monotask,
-        [dependency.monotask_id for dependency in monotask.remaining_dependencies])
-      if len(monotask.remaining_dependencies) == 0:
-        # The Monotask has no dependencies, so we can pass it to the resource scheduling logic.
+        [dependency.monotask_id for dependency in monotask.dependencies])
+      if monotask.dependencies_have_finished():
         new_events.extend(monotask.schedule(current_time_ms, self))
       else:
         self.not_runnable_monotasks.append(monotask)
@@ -215,7 +214,7 @@ class Worker(object):
 
     # Add the newly created Monotasks to their Macrotask's list of remaining Monotasks.
     for new_monotask in new_monotasks:
-      macrotask.remaining_monotasks.append(new_monotask)
+      macrotask.monotasks.append(new_monotask)
     return self.submit_monotasks(current_time_ms, new_monotasks)
 
   def schedule_network_response(self, current_time_ms, network_response_monotask):
@@ -240,7 +239,8 @@ class Worker(object):
     """
     Updates this Worker's metadata to reflect that the specified Packet has been completely
     transmitted. Returns a PacketArrival Event for when the Packet will arrive at its destination
-    Worker.
+    Worker. If this is the last Packet in a NetworkResponseMonotask, then this method also returns a
+    MonotaskEnd Event for the NetworkResponseMonotask.
     """
     logging.debug("%s: %s completely sent by %s", current_time_ms, packet, self)
     packet_size_bytes = packet.data_size_bytes
@@ -252,7 +252,12 @@ class Worker(object):
     transmit_end_ms = transmit_start_ms + (
       float(packet_size_bytes) / packet.network_response_monotask.network_bandwidth_Bpms)
     dst_worker.network_input_queue_end_ms = transmit_end_ms
-    return [(transmit_end_ms, events.PacketArrival(dst_worker, packet))]
+    new_events = [(transmit_end_ms, events.PacketArrival(dst_worker, packet))]
+
+    if packet.is_last:
+      new_events.append(
+        (current_time_ms, events.MonotaskEnd(self, packet.network_response_monotask)))
+    return new_events
 
   def schedule_disk(self, current_time_ms, disk_monotask):
     """
@@ -315,11 +320,7 @@ class Worker(object):
     self.total_bytes_received += packet.data_size_bytes
 
     if packet.is_last:
-      # Remove the Packet's NetworkResponseMonotask from its Macrotask's list of remaining Monotasks
-      # and create a MonotaskEnd Event for the corresponding NetworkRequestMonotask.
-      network_response_monotask = packet.network_response_monotask
-      self.update_dag_for_finished_monotask(current_time_ms, network_response_monotask)
-      network_request_monotask = network_response_monotask.network_request_monotask
+      network_request_monotask = packet.network_response_monotask.network_request_monotask
       return [(current_time_ms,
         events.MonotaskEnd(network_request_monotask.src_worker, network_request_monotask))]
     else:
@@ -367,26 +368,19 @@ class Worker(object):
     """
     Updates the Macrotask to reflect that the provided Monotask has completed. Returns a
     NotifyMasterOfMacrotaskEnd Event if all of the Monotasks for the Macrotask have completed.
-    Otherwise, removes the provided Monotask from all of its dependents' dependencies and returns
-    MonotaskEnd Events for any dependents that started executing.
+    Otherwise, returns MonotaskEnd Events for any dependents that started executing.
     """
     macrotask = completed_monotask.macrotask
-    macrotask.register_completed_monotask(current_time_ms, completed_monotask)
-
-    if macrotask.is_finished():
+    if macrotask.all_monotasks_finished():
       self.num_running_macrotasks -= 1
       arrival_time_ms = current_time_ms + self.conf.network_latency_ms
-      return [(
-        arrival_time_ms,
-        events.NotifyMasterOfMacrotaskEnd(self.simulator, completed_monotask.macrotask))]
+      return [(arrival_time_ms, events.NotifyMasterOfMacrotaskEnd(self.simulator, macrotask))]
     else:
       # If the Macrotask has not finished, then the completed Monotask may have dependents that need
       # to be updated to reflect that it finished.
       new_events = []
       for dependent in completed_monotask.dependents:
-        dependent.remaining_dependencies.remove(completed_monotask)
-
-        if len(dependent.remaining_dependencies) == 0:
+        if dependent.dependencies_have_finished():
           self.not_runnable_monotasks.remove(dependent)
           new_events.extend(dependent.schedule(current_time_ms, self))
 
