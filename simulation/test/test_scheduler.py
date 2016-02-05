@@ -407,7 +407,7 @@ def get_scheduler_for_conf(tmpdir, conf_filename):
     configured to know about a Simulator instance.
   """
   conf_path = path.join(path.dirname(path.realpath(__file__)), "conf", conf_filename)
-  sim = simulator.Simulator(simulation_conf.SimulationConf(conf_path), str(tmpdir))
+  sim = simulator.Simulator(simulation_conf.XMLSimulationConf(conf_path), str(tmpdir))
 
   if len(sim.jobs) > 0:
     sim.current_job = sim.jobs[0]

@@ -23,6 +23,7 @@ import sets
 import continuous_monitor
 import events
 import scheduler
+import simulation_conf
 import task_constructs
 
 
@@ -101,17 +102,10 @@ class Worker(object):
 
   def __log_params(self):
     """ Logs the parameters used to configure this Worker. """
-    def format_disk_info(disk_info):
-      (disk_id, (write_throughput, read_throughput)) = disk_info
-      return ("%s: (write: %s MB/s, read: %s MB/s)" %
-        (str(disk_id), write_throughput, read_throughput))
-
-    disk_infos = ", ".join(
-      [format_disk_info(disk_info) for disk_info in self.conf.disks.iteritems()])
     logging.info(
       "Created Worker with %s cores and disks: [%s] using scheduling mode: %s",
       self.conf.num_cores,
-      disk_infos,
+      simulation_conf.SimulationConf.format_disk_info(self.conf.disks, separator=", "),
       self.conf.scheduling_mode)
 
   def handle_macrotask_start(self, current_time_ms, macrotask):

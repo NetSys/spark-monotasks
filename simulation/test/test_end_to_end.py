@@ -42,7 +42,7 @@ def run_with_conf_and_verify(tmpdir, conf_filename, verification_func):
       verifies that the Simulator correctly simulated the workload defined in the SimulationConf.
   """
   conf_path = path.join(path.dirname(path.realpath(__file__)), "conf", conf_filename)
-  conf = simulation_conf.SimulationConf(conf_path)
+  conf = simulation_conf.XMLSimulationConf(conf_path)
   log_dir = str(tmpdir)
   sim = simulator.Simulator(conf, log_dir)
   try:

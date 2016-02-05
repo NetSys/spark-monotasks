@@ -43,7 +43,9 @@ def main():
   # same pseudo-random numbers.
   random.seed(0)
 
-  simulator = Simulator(simulation_conf.SimulationConf(args.conf_file), args.continuous_monitor_dir)
+  conf = simulation_conf.XMLSimulationConf(args.conf_file)
+  logging.debug("Simulating configuration:\n%s", conf)
+  simulator = Simulator(conf, args.continuous_monitor_dir)
   try:
     simulator.run(args.log_interval_ms)
   finally:
