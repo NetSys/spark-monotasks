@@ -45,7 +45,7 @@ def test_fixed_slots_scheduler_handle_monotask_end(tmpdir):
   scheduler = get_scheduler_for_conf(tmpdir, conf_filename="fixed_slots_scheduler.xml")
 
   current_time_ms = 0L
-  macrotask = task_constructs.Macrotask(task_constructs.Stage())
+  macrotask = task_constructs.Macrotask(task_constructs.Stage(task_constructs.Job()))
   first_monotask = task_constructs.ComputeMonotask(
     macrotask,
     compute_time_ms=0,

@@ -24,10 +24,11 @@ class Job(object):
 
   __next_id = 0
 
-  def __init__(self, stages):
+  def __init__(self):
     self.job_id = Job.__new_id()
-    # A list of the Stages that make up this Job. Stages must be executed sequentially.
-    self.stages = stages
+    # A list of the Stages that make up this Job. Stages must be executed sequentially. Populated by
+    # Stages as they are created.
+    self.stages = []
     # The time (in ms) at which this Job started executing. Set by the Simulator. Used by the
     # Simulator to calculate Job completion time.
     self.start_time_ms = 0
@@ -68,8 +69,10 @@ class Stage(object):
 
   __next_id = 0
 
-  def __init__(self):
+  def __init__(self, job):
     self.stage_id = Stage.__new_id()
+    self.job = job
+    self.job.stages.append(self)
     # A list of the Macrotasks that make up this Stage. Macrotasks are executed in parallel by
     # Workers. Populated by Macrotasks as they are created.
     self.macrotasks = []
@@ -158,6 +161,9 @@ class Stage(object):
       parallel_disk_read_time_ms = total_disk_read_bytes / total_disk_read_throughput_Bpms
     parallel_disk_time_ms = parallel_disk_write_time_ms + parallel_disk_read_time_ms
 
+    logging.info("%s, %s:\n  ideal CPU time: %.2f ms\n  ideal network time: %.2f ms\n  " +
+      "ideal disk time: %.2f ms", self.job, self, parallel_compute_time_ms,
+      parallel_network_time_ms, parallel_disk_time_ms)
     return max(parallel_compute_time_ms, parallel_network_time_ms, parallel_disk_time_ms)
 
 

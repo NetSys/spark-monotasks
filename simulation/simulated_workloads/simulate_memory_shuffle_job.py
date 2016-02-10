@@ -156,8 +156,8 @@ def build_conf_and_simulate(
   conf.network_bandwidth_Bpms = NETWORK_BANDWIDTH_BPMS
   conf.network_bandwidth_variance = network_variance
   conf.network_latency_ms = 1.0
-  conf.jobs = __create_job(
-    num_partitions, compute_time_ms, reduce_stage_compute_variance, total_shuffle_size_bytes)
+  conf.jobs = [__create_job(
+    num_partitions, compute_time_ms, reduce_stage_compute_variance, total_shuffle_size_bytes)]
 
   return simulator.simulate(
     continuous_monitor_dir, continuous_monitor_interval_ms=10.0, conf=conf)
@@ -169,7 +169,8 @@ def __create_job(
     reduce_stage_compute_variance,
     total_shuffle_size_bytes):
   """ Returns an in-memory shuffle Job configured with the provided parameters. """
-  map_stage = task_constructs.Stage()
+  job = task_constructs.Job()
+  map_stage = task_constructs.Stage(job)
   for _ in xrange(num_partitions):
     __create_macrotask_for_stage(
       map_stage,
@@ -178,7 +179,7 @@ def __create_job(
       compute_variance=0.0,
       shuffle_bytes_per_macrotask=0.0)
 
-  reduce_stage = task_constructs.Stage()
+  reduce_stage = task_constructs.Stage(job)
   shuffle_bytes_per_macrotask = total_shuffle_size_bytes / num_partitions
   for _ in xrange(num_partitions):
     __create_macrotask_for_stage(
@@ -187,8 +188,7 @@ def __create_job(
       compute_time_ms,
       reduce_stage_compute_variance,
       shuffle_bytes_per_macrotask)
-
-  return [task_constructs.Job([map_stage, reduce_stage])]
+  return job
 
 
 def __create_macrotask_for_stage(

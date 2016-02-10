@@ -166,22 +166,20 @@ class XMLSimulationConf(SimulationConf):
     """ Returns a list of Job objects parsed from the provided DOM. """
     jobs = []
     for job_dom in jobs_dom.getElementsByTagName("job"):
-      stages = XMLSimulationConf.__parse_stages(job_dom.getElementsByTagName("stages")[0], disk_ids)
-      jobs.append(task_constructs.Job(stages))
+      job = task_constructs.Job()
+      XMLSimulationConf.__parse_stages(job_dom.getElementsByTagName("stages")[0], disk_ids, job)
+      jobs.append(job)
     logging.info("Found %s Job(s)", len(jobs))
     return jobs
 
   @staticmethod
-  def __parse_stages(stages_dom, disk_ids):
-    """ Returns a list of Stage objects parsed from the provided DOM. """
-    stages = []
+  def __parse_stages(stages_dom, disk_ids, job):
+    """ Creates Stages for the provided Job, parsed from the provided DOM. """
     for stage_dom in stages_dom.getElementsByTagName("stage"):
       num_partitions = XMLSimulationConf.__parse_int(stage_dom, "num_partitions")
       monotasks_dom = stage_dom.getElementsByTagName("monotasks_per_partition")[0]
-      stage = task_constructs.Stage()
+      stage = task_constructs.Stage(job)
       XMLSimulationConf.__parse_macrotasks(stage, num_partitions, monotasks_dom, disk_ids)
-      stages.append(stage)
-    return stages
 
   @staticmethod
   def __parse_macrotasks(stage, num_partitions, monotasks_dom, disk_ids):
