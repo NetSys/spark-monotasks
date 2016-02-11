@@ -86,6 +86,16 @@ class SimulationConf(object):
             description += "%s%s\n" % (5 * indent_level, monotask)
     return description
 
+  @staticmethod
+  def get_compute_time_ms(average_compute_time_ms, compute_variance):
+    """
+    Returns a compute time (in ms) chosen uniformly at random from within the specified variance
+    bounds of the provided average compute time.
+    """
+    return random.uniform(
+      average_compute_time_ms * (1 - compute_variance),
+      average_compute_time_ms * (1 + compute_variance))
+
   def get_throughput_Bpms_for_disk(self, disk_id, is_write):
     """
     If is_write is True, returns the write throughput of the specified disk, otherwise returns the
@@ -224,9 +234,8 @@ class XMLSimulationConf(SimulationConf):
         tag="compute_variation",
         default_value=0,
         error_message="compute monotasks to take an unrealistic amount of time to run")
-      compute_time_ms = random.uniform(
-        average_compute_time_ms * (1 - compute_variation),
-        average_compute_time_ms * (1 + compute_variation))
+      compute_time_ms = SimulationConf.get_compute_time_ms(
+        average_compute_time_ms, compute_variation)
 
       # NetworkMonotasks are specified implicitly by defining a shuffle dependency. We cannot
       # explicitly specify NetworkMonotasks because we do not know where the shuffle data is

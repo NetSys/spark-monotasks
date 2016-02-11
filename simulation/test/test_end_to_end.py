@@ -43,14 +43,10 @@ def run_with_conf_and_verify(tmpdir, conf_filename, verification_func):
   """
   conf_path = path.join(path.dirname(path.realpath(__file__)), "conf", conf_filename)
   conf = simulation_conf.XMLSimulationConf(conf_path)
-  log_dir = str(tmpdir)
-  sim = simulator.Simulator(conf, log_dir)
-  try:
-    sim.run(log_interval_ms=10)
-  finally:
-    sim.cleanup()
-
-  verification_func(conf, sim)
+  continuous_monitor_dir = str(tmpdir)
+  finished_simulator = simulator.simulate(
+    continuous_monitor_dir, continuous_monitor_interval_ms=10.0, conf=conf)
+  verification_func(conf, finished_simulator)
 
 
 def test_two_workers_all_data_on_disk_with_shuffle(tmpdir):

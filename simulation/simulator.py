@@ -37,19 +37,15 @@ def main():
   logging.basicConfig(level=args.log_level)
   logging.info("Starting Simulator using configuration file: %s", args.conf_file)
   logging.info("Using log level: %s", args.log_level)
-  logging.info("Saving continuous monitor logs to directory: %s", args.continuous_monitor_dir)
 
   # Initialize the "random" module's seed value to 0 so that multiple runs of the Simulator use the
   # same pseudo-random numbers.
   random.seed(0)
 
-  conf = simulation_conf.XMLSimulationConf(args.conf_file)
-  logging.debug("Simulating configuration:\n%s", conf)
-  simulator = Simulator(conf, args.continuous_monitor_dir)
-  try:
-    simulator.run(args.log_interval_ms)
-  finally:
-    simulator.cleanup()
+  simulate(
+    args.continuous_monitor_dir,
+    args.continuous_monitor_interval_ms,
+    simulation_conf.XMLSimulationConf(args.conf_file))
 
 
 def parse_args():
@@ -72,11 +68,29 @@ def parse_args():
     help="The verbosity of standard logging. See the \"logging\" package for more information.")
   parser.add_argument(
     "-i",
-    "--log-interval-ms",
+    "--continuous-monitor-interval-ms",
     default=50.0,
     help="The interval (in ms) between continuous monitor log entries.",
     type=float)
   return parser.parse_args()
+
+
+def simulate(continuous_monitor_dir, continuous_monitor_interval_ms, conf):
+  """Simulates the provided configuration.
+
+  Records continuous monitor log entries in the provided directory at the provided frequency.
+
+  Returns:
+    The finished Simulator.
+  """
+  logging.debug("Simulating configuration:\n%s", conf)
+  simulator = Simulator(conf, continuous_monitor_dir)
+  try:
+    simulator.run(continuous_monitor_interval_ms)
+  finally:
+    # Make sure that the continuous monitor files are always closed.
+    simulator.cleanup()
+  return simulator
 
 
 class Simulator(object):
@@ -88,6 +102,8 @@ class Simulator(object):
   """
 
   def __init__(self, conf, continuous_monitor_dir):
+    logging.info("Saving continuous monitor logs to directory: %s", continuous_monitor_dir)
+
     self.conf = conf
     num_workers = self.conf.num_workers
     logging.debug("Creating Simulator with %s Worker(s)", num_workers)
@@ -143,7 +159,10 @@ class Simulator(object):
     total_bytes_sent = sum([worker_node.total_bytes_sent for worker_node in self.workers])
     total_bytes_received = sum([worker_node.total_bytes_received for worker_node in self.workers])
 
-    logging.info("Validating the total number of bytes sent and received...")
+    logging.info(
+      "Validating the total number of bytes sent (%s) and received (%s)",
+      total_bytes_sent,
+      total_bytes_received)
     assert abs(total_bytes_sent - total_bytes_received) < 1, \
       ("The total number of bytes sent (%s) does not equal the total number of bytes " +
         "received (%s)") % (total_bytes_sent, total_bytes_received)
