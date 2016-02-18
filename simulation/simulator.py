@@ -22,6 +22,7 @@ containing directory for instructions on running the Monotasks simulator.
 
 import argparse
 import logging
+from os import path
 import Queue
 import random
 
@@ -121,6 +122,10 @@ class Simulator(object):
     # time (in ms)).
     self.job_to_jcts = {}
 
+    # A log file in which to record simulation configuration info and results.
+    self.info_file = open(path.join(continuous_monitor_dir, "simulation_info.txt"), "w")
+    self.info_file.write("%s\n" % str(self.conf))
+
   def run(self, log_interval_ms):
     """ Continuously pops Events from the Event queue and processes them. """
     first_job = self.__get_next_job()
@@ -147,8 +152,8 @@ class Simulator(object):
 
     logging.info("Simulation complete!")
     self.__validate_bytes_sent_and_received()
-    self.__log_macrotask_distribution()
-    self.__log_jcts()
+    self.__record_simulation_info()
+
 
   def __validate_bytes_sent_and_received(self):
     """Verifies that the Workers sent and received the correct number of bytes over the network.
@@ -167,27 +172,37 @@ class Simulator(object):
       ("The total number of bytes sent (%s) does not equal the total number of bytes " +
         "received (%s)") % (total_bytes_sent, total_bytes_received)
 
-  def __log_macrotask_distribution(self):
-    """Logs the number of Macrotasks assigned to each Worker.
+  def __record_simulation_info(self):
+    """ Saves the macrotask distribution and JCT info to the simulation info log file. """
+    macrotask_distribution_info = self.__get_macrotask_distribution_info()
+    logging.info(macrotask_distribution_info)
+    self.info_file.write("%s\n\n" % macrotask_distribution_info)
+
+    jct_info = self.__get_jct_info()
+    logging.info(jct_info)
+    self.info_file.write(jct_info)
+
+  def __get_macrotask_distribution_info(self):
+    """Returns a string describing the number of Macrotasks assigned to each Worker.
 
     For each Stage of each Job, reports how many Macrotasks from that Stage were allocated to each
     Worker.
     """
-    message = "Macrotask Distribution:"
+    macrotask_distribution_info = "Macrotask Distribution:"
     for job in self.jobs:
-      message += "\n  %s:" % job
+      macrotask_distribution_info += "\n  %s:" % job
       for stage in job.stages:
-        message += "\n    %s:" % stage
+        macrotask_distribution_info += "\n    %s:" % stage
         for worker_node in self.workers:
           num_macrotasks = len(
             [macrotask for macrotask in stage.macrotasks if macrotask.worker is worker_node])
-          message += "\n      %s: %s" % (worker_node, num_macrotasks)
-    logging.info(message)
+          macrotask_distribution_info += "\n      %s: %s" % (worker_node, num_macrotasks)
+    return macrotask_distribution_info
 
-  def __log_jcts(self):
+  def __get_jct_info(self):
     """
-    Logs the ideal and actual Job completion time (in ms), as well as their percent difference, for
-    each Job that this Simulator has finished executing so far.
+    Returns a string describing the ideal and actual Job completion time (in ms), as well as their
+    percent difference, for each Job that this Simulator has finished executing so far.
     """
     job_descriptions = [
       ("  %s:\n    Ideal JCT: %.2f ms\n    Actual JCT: %.2f ms\n    Difference: %.2f%%" % (
@@ -196,7 +211,7 @@ class Simulator(object):
         actual_jct_ms,
         float(actual_jct_ms - ideal_jct_ms) / ideal_jct_ms * 100))
       for job, (ideal_jct_ms, actual_jct_ms) in self.job_to_jcts.iteritems()]
-    logging.info("Job Statistics:\n%s", "\n".join(job_descriptions))
+    return "JCT Info:\n%s" % ("\n".join(job_descriptions))
 
   def __is_finished(self):
     """Determines whether the simulation is complete.
@@ -245,7 +260,7 @@ class Simulator(object):
       logging.info("%s: No more Stages in %s", current_time_ms, self.current_job)
 
       self.job_to_jcts[self.current_job] = (
-        self.current_job.calculate_ideal_completion_time_ms(self.conf),
+        self.current_job.calculate_ideal_completion_time_ms(self.conf, self.info_file),
         current_time_ms - self.current_job.start_time_ms)
       self.current_job = None
 
@@ -343,7 +358,8 @@ class Simulator(object):
       return []
 
   def cleanup(self):
-    """ Closes all of the Workers' ContinuousMonitors. """
+    """ Closes the simulation info log file and all of the Workers' ContinuousMonitors. """
+    self.info_file.close()
     for worker_node in self.workers:
       worker_node.continuous_monitor.close()
 

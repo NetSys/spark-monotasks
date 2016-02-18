@@ -59,9 +59,13 @@ class Job(object):
     """
     return next((stage for stage in self.stages if not stage.is_finished()), None)
 
-  def calculate_ideal_completion_time_ms(self, conf):
-    """ Returns the ideal completion time of this Job (in ms). """
-    return sum([stage.calculate_ideal_completion_time_ms(conf) for stage in self.stages])
+  def calculate_ideal_completion_time_ms(self, conf, output_file):
+    """
+    Returns the ideal completion time of this Job (in ms). Writes the ideal resources times of each
+    Stage to the provided file.
+    """
+    return sum(
+      [stage.calculate_ideal_completion_time_ms(conf, output_file) for stage in self.stages])
 
 
 class Stage(object):
@@ -104,8 +108,10 @@ class Stage(object):
     """
     return next((macrotask for macrotask in self.macrotasks if macrotask.worker is None), None)
 
-  def calculate_ideal_completion_time_ms(self, conf):
+  def calculate_ideal_completion_time_ms(self, conf, output_file):
     """Calculates the time that this Stage should take to finish in an ideal system.
+
+    Writes this Stage's ideal resource times to the provided file.
 
     Returns:
       The ideal completion time of this Stage (in ms).
@@ -161,9 +167,11 @@ class Stage(object):
       parallel_disk_read_time_ms = total_disk_read_bytes / total_disk_read_throughput_Bpms
     parallel_disk_time_ms = parallel_disk_write_time_ms + parallel_disk_read_time_ms
 
-    logging.info("%s, %s:\n  ideal CPU time: %.2f ms\n  ideal network time: %.2f ms\n  " +
-      "ideal disk time: %.2f ms", self.job, self, parallel_compute_time_ms,
-      parallel_network_time_ms, parallel_disk_time_ms)
+    message = (("%s, %s Ideal Resource Times:\n  ideal CPU time: %.2f ms\n  " +
+      "ideal network time: %.2f ms\n  ideal disk time: %.2f ms") % (self.job, self,
+        parallel_compute_time_ms, parallel_network_time_ms, parallel_disk_time_ms))
+    logging.info(message)
+    output_file.write("%s\n\n" % message)
     return max(parallel_compute_time_ms, parallel_network_time_ms, parallel_disk_time_ms)
 
 
