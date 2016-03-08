@@ -75,3 +75,21 @@ def copy_and_zip_all_logs(stringified_parameters, slaves):
   subprocess.check_call("tar czfv %s --directory=/mnt %s" % (tar_filename, log_subdirectory_name),
     shell=True)
 
+def check_if_hdfs_file_exists(hdfs_path):
+  """ Returns true if the given HDFS path exists, and false otherwise. """
+  command = "/root/ephemeral-hdfs/bin/hdfs dfs -ls %s" % hdfs_path
+  output = subprocess.Popen(command, stderr=subprocess.PIPE, shell=True).communicate()
+  index = (output[1].find("No such file"))
+  return (index == -1)
+
+def cleanup_sort_job():
+  """ Cleans up after a sort experiment by clearing the buffer cache and deleting sorted data. """
+  # Clear the buffer cache, to sidestep issue with machines dying.
+  subprocess.check_call("/root/ephemeral-hdfs/sbin/slaves.sh /root/spark-ec2/clear-cache.sh", shell=True)
+
+  try:
+    # Delete any existing sorted data.
+    subprocess.check_call("/root/ephemeral-hdfs/bin/hadoop dfs -rm -r ./*sorted*", shell=True)
+  except:
+    print "No sorted data found, so didn't delete anything"
+
