@@ -161,8 +161,8 @@ private[spark] class BlockManager(
       actorSystem,
       master,
       serializer,
-      BlockManager.getMaxHeapMemory(conf),
-      BlockManager.getMaxOffHeapMemory(conf),
+      BlockManager.getMaxHeapMemoryBytes(conf),
+      BlockManager.getMaxOffHeapMemoryBytes(conf),
       conf,
       mapOutputTracker,
       shuffleManager,
@@ -984,20 +984,23 @@ private[spark] class BlockManager(
 private[spark] object BlockManager extends Logging {
   private val ID_GENERATOR = new IdGenerator
 
+  /** The amount of off-heap memory to use when no value is specified. */
+  val DEFAULT_MAX_OFF_HEAP_MEMORY = "10g"
+
   /** Return the total amount of heap storage memory available. */
-  private def getMaxHeapMemory(conf: SparkConf): Long = {
+  private def getMaxHeapMemoryBytes(conf: SparkConf): Long = {
     val memoryFraction = conf.getDouble("spark.storage.memoryFraction", 0.6)
     val safetyFraction = conf.getDouble("spark.storage.safetyFraction", 0.9)
     (Runtime.getRuntime.maxMemory * memoryFraction * safetyFraction).toLong
   }
 
   /**
-   * Return the total amount of off-heap storage memory available, set manually by the
-   * spark.storage.offHeapMemory config variable. The default value here is arbitrarily set to be
-   * 1GB.
+   * Return the total amount of off-heap storage memory available (in bytes).
    */
-  private def getMaxOffHeapMemory(conf: SparkConf): Long = {
-    conf.getLong("spark.storage.offHeapMemory", Math.pow(1024, 3).toLong)
+  private def getMaxOffHeapMemoryBytes(conf: SparkConf): Long = {
+    val offHeapMemoryMb = Utils.memoryStringToMb(
+      conf.get("spark.storage.offHeapMemory", DEFAULT_MAX_OFF_HEAP_MEMORY))
+    offHeapMemoryMb * 1024 * 1024
   }
 
   /**
