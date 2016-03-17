@@ -45,7 +45,8 @@ private[spark] class MemoryShuffleManager(conf: SparkConf) extends ShuffleManage
       handle.asInstanceOf[BaseShuffleHandle[K, V, _]],
       mapId,
       context,
-      outputSingleBlock)
+      outputSingleBlock,
+      conf.getBoolean("spark.monotasks.separateShuffleCompression", false))
   }
 
   override def unregisterShuffle(shuffleId: Int): Boolean = {

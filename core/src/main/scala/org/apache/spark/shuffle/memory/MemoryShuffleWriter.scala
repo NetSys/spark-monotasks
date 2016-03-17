@@ -16,7 +16,6 @@
 
 package org.apache.spark.shuffle.memory
 
-import java.io.OutputStream
 import java.nio.ByteBuffer
 
 import org.apache.spark.{ShuffleDependency, SparkEnv, TaskContext}
@@ -34,13 +33,20 @@ import org.apache.spark.util.ByteArrayOutputStreamWithZeroCopyByteBuffer
  * The parameter `outputSingleBlock` specifies whether the shuffle data should be stored as a
  * single, off heap buffer (if set to true) or as a set of on-heap buffers, one corresponding to
  * the data for each reduce task (if set to false).
+ *
+ * If `separateCompression` is true, all of the data will be serialized, and after
+ * all of the serialization is finished, all of the data will be compressed.
+ * Otherwise, serialization and compression will be pipelined, so a single record
+ * is serialized and compressed, then the next record is serialized and compressed, and
+ * so on.
  */
 private[spark] class MemoryShuffleWriter[K, V](
     shuffleBlockManager: MemoryShuffleBlockManager,
     handle: BaseShuffleHandle[K, V, _],
     private val mapId: Int,
     context: TaskContext,
-    private val outputSingleBlock: Boolean) extends ShuffleWriter[K, V] {
+    private val outputSingleBlock: Boolean,
+    separateCompression: Boolean) extends ShuffleWriter[K, V] {
 
   private val dep = handle.dependency
 
@@ -49,7 +55,7 @@ private[spark] class MemoryShuffleWriter[K, V](
   private val numBuckets = dep.partitioner.numPartitions
   private val shuffleData = Array.tabulate[SerializedObjectWriter](numBuckets) {
     bucketId =>
-      new SerializedObjectWriter(blockManager, dep, mapId, bucketId)
+      new SerializedObjectWriter(blockManager, dep, mapId, bucketId, separateCompression)
   }
 
   private val shuffleWriteMetrics = new ShuffleWriteMetrics()
@@ -158,10 +164,14 @@ private[spark] class MemoryShuffleWriter[K, V](
 
 /** Serializes and optionally compresses data into an in-memory byte stream. */
 private[spark] class SerializedObjectWriter(
-    blockManager: BlockManager, dep: ShuffleDependency[_,_,_], partitionId: Int, bucketId: Int) {
+    blockManager: BlockManager,
+    dep: ShuffleDependency[_,_,_],
+    partitionId: Int,
+    bucketId: Int,
+    private val separateCompression: Boolean) {
 
   private val byteOutputStream = new ByteArrayOutputStreamWithZeroCopyByteBuffer()
-  private val ser = Serializer.getSerializer(dep.serializer.getOrElse(null))
+  private val ser = Serializer.getSerializer(dep.serializer.orNull)
   private val shuffleId = dep.shuffleId
   val blockId = ShuffleBlockId(shuffleId, partitionId, bucketId)
 
@@ -169,12 +179,16 @@ private[spark] class SerializedObjectWriter(
    * 16 bytes will always be written to the byteOutputStream (and those bytes will be unnecessarily
    * transferred to reduce tasks). */
   private var initialized = false
-  private var compressionStream: OutputStream = _
   private var serializationStream: SerializationStream = _
 
   def open() {
-    compressionStream = blockManager.wrapForCompression(blockId, byteOutputStream)
-    serializationStream = ser.newInstance().serializeStream(compressionStream)
+    val maybeCompressionStream = if (separateCompression) {
+      byteOutputStream
+    } else {
+      // Wrap the output stream so that each record is compressed as soon as it's serialized.
+      blockManager.wrapForCompression(blockId, byteOutputStream)
+    }
+    serializationStream = ser.newInstance().serializeStream(maybeCompressionStream)
     initialized = true
   }
 
@@ -192,6 +206,16 @@ private[spark] class SerializedObjectWriter(
     if (initialized) {
       serializationStream.flush()
       serializationStream.close()
+      if (separateCompression) {
+        // We didn't compress the data as it was being written to the output stream,
+        // so compress it all now.
+        val compressedOutputStream = new ByteArrayOutputStreamWithZeroCopyByteBuffer()
+        val compressionStream = blockManager.wrapForCompression(blockId, compressedOutputStream)
+        compressionStream.write(byteOutputStream.toByteArray)
+        compressionStream.flush()
+        compressionStream.close()
+        return compressedOutputStream.getByteBuffer()
+      }
     }
     byteOutputStream.getByteBuffer()
   }
