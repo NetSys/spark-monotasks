@@ -16,7 +16,7 @@
 
 package org.apache.spark.monotasks.compute
 
-import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.{LinkedBlockingDeque, LinkedBlockingQueue}
 import java.util.concurrent.atomic.AtomicInteger
 
 import org.apache.spark.Logging
@@ -30,10 +30,11 @@ private[spark] class ComputeScheduler(private val threads: Int) extends Logging 
   private var memoryStore: Option[MemoryStore] = None
 
   /**
-   * Queue of all monotasks that are waiting to be run. We currently just use a FIFO queue; we
-   * may want to implement a more sophisticated queueing mechanism in the future.
+   * Queue of all monotasks that are waiting to be run. This is a deque because prepare monotasks
+   * are added at the front, because they run quickly and running them can provide monotasks for
+   * other resources to run.
    */
-  private val monotaskQueue = new LinkedBlockingQueue[ComputeMonotask]
+  private val monotaskQueue = new LinkedBlockingDeque[ComputeMonotask]
 
   /**
    * Queue of monotasks that have been quarantined because they require memory to run, and when
@@ -75,7 +76,11 @@ private[spark] class ComputeScheduler(private val threads: Int) extends Logging 
         "ComputeScheduler has not been started yet; initialize() must be called to start the " +
         "ComputeScheduler before any tasks are launched.")
     }
-    monotaskQueue.put(monotask)
+    if (monotask.isInstanceOf[PrepareMonotask]) {
+      monotaskQueue.putFirst(monotask)
+    } else {
+      monotaskQueue.put(monotask)
+    }
     this.notify()
   }
 

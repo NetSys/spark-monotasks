@@ -50,4 +50,72 @@ class ComputeSchedulerSuite extends FunSuite {
     memoryStore.remove(blockId)
     verify(mockComputeMonotask, timeout(1000)).executeAndHandleExceptions()
   }
+
+  /**
+   * A ComputeMonotask that waits until its internal shouldFinish variable is set to true to
+   * finish.
+   */
+  private class WaitingComputeMonotask(context: TaskContextImpl) extends ComputeMonotask(context) {
+    @volatile var shouldFinish = false
+    @volatile var isStarted = false
+
+    override def executeAndHandleExceptions() = synchronized {
+      isStarted = true
+      while (!shouldFinish) {
+        this.wait()
+      }
+    }
+
+    /**
+     * Don't do anything in execute, which never gets called since we overrode
+     * executeAndHandleExceptions.
+     */
+    override def execute(): Option[ByteBuffer] = None
+  }
+
+  /** Ensures that PrepareMonotasks are run before other queued ComputeMonotasks. */
+  test("prepare monotasks jump the queue") {
+    // Make a memory store with available space.
+    val maxMemoryBytes = 300
+    val memoryStore = new MemoryStore(
+      mock(classOf[BlockManager]),
+      maxMemoryBytes,
+      targetMaxOffHeapMemory = 0)
+    val computeScheduler = new ComputeScheduler(threads = 2)
+    computeScheduler.initialize(memoryStore)
+
+    val taskContext = new TaskContextImpl(0, 0)
+
+    // Submit three compute monotasks. The first two should be run, and the third should be
+    // queued.
+    val computeMonotask1 = new WaitingComputeMonotask(taskContext)
+    val computeMonotask2 = new WaitingComputeMonotask(taskContext)
+    val computeMonotask3 = new WaitingComputeMonotask(taskContext)
+
+    computeScheduler.submitTask(computeMonotask1)
+    computeScheduler.submitTask(computeMonotask2)
+    computeScheduler.submitTask(computeMonotask3)
+
+    assert(computeMonotask1.isStarted)
+    assert(computeMonotask2.isStarted)
+    assert(!computeMonotask3.isStarted)
+
+    // Now submit a prepare monotask, and finish one of the other compute monotasks. The prepare
+    // monotask should run (and jump the queue in front of the other waiting compute monotask).
+    // Because it's a mock, it will execute instantaneously, and then computeMonotask3 will start
+    // (if computeMonotask3 was started first instead, the prepare monotask would never run,
+    // because computeMonotask3 will keep running until shouldFinish is set to true).
+    val mockPrepareMonotask = mock(classOf[PrepareMonotask])
+    when(mockPrepareMonotask.context).thenReturn(taskContext)
+    computeScheduler.submitTask(mockPrepareMonotask)
+
+    // Finish a compute monotask.
+    computeMonotask1.shouldFinish = true
+    computeMonotask1.synchronized {
+      computeMonotask1.notify()
+    }
+
+    verify(mockPrepareMonotask, timeout(1000)).executeAndHandleExceptions()
+    assert(computeMonotask3.isStarted)
+  }
 }
