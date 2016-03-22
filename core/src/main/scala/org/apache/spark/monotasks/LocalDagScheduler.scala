@@ -23,7 +23,7 @@ import scala.collection.mutable.{HashMap, HashSet}
 import org.apache.spark.{Logging, SparkConf, TaskContextImpl, TaskState}
 import org.apache.spark.TaskState.TaskState
 import org.apache.spark.executor.ExecutorBackend
-import org.apache.spark.monotasks.compute.{ComputeMonotask, ComputeScheduler,
+import org.apache.spark.monotasks.compute.{ComputeMonotask, ComputeScheduler, PrepareMonotask,
   ResultSerializationMonotask}
 import org.apache.spark.monotasks.disk.{DiskMonotask, DiskScheduler}
 import org.apache.spark.monotasks.network.{NetworkMonotask, NetworkScheduler}
@@ -69,6 +69,12 @@ private[spark] class LocalDagScheduler(blockFileManager: BlockFileManager, conf:
   private[monotasks] val runningMonotasks = new HashSet[Long]()
 
   /**
+   * IDs of prepare monotasks that have been submitted to a scheduler to be run. This exists
+   * solely for debugging/testing and is not needed for maintaining correctness.
+   */
+  private[monotasks] val runningPrepareMonotasks = new HashSet[Long]()
+
+  /**
    * IDs for macrotasks that currently are running. Used to determine whether to notify the
    * executor backend that a task has failed (used to avoid duplicate failure messages if multiple
    * monotasks for the macrotask fail).
@@ -110,6 +116,10 @@ private[spark] class LocalDagScheduler(blockFileManager: BlockFileManager, conf:
 
   def getNumRunningComputeMonotasks(): Int = {
     computeScheduler.numRunningTasks.get()
+  }
+
+  def getNumRunningPrepareMonotasks(): Int = {
+    runningPrepareMonotasks.size
   }
 
   /**
@@ -207,27 +217,31 @@ private[spark] class LocalDagScheduler(blockFileManager: BlockFileManager, conf:
   }
 
   private[monotasks] def updateMetricsForStartedMonotask(startedMonotask: Monotask): Unit = {
-    val mapToUpdate = getMapToUpdateNumRunningMonotasks(startedMonotask)
-    val macrotaskId = startedMonotask.context.taskAttemptId
-    val currentlyRunning = mapToUpdate.getOrElse(macrotaskId, 0)
-    mapToUpdate(macrotaskId) = currentlyRunning + 1
-    startedMonotask.setQueueStartTime()
+    if (!startedMonotask.context.taskIsRunningRemotely) {
+      val mapToUpdate = getMapToUpdateNumRunningMonotasks(startedMonotask)
+      val macrotaskId = startedMonotask.context.taskAttemptId
+      val currentlyRunning = mapToUpdate.getOrElse(macrotaskId, 0)
+      mapToUpdate(macrotaskId) = currentlyRunning + 1
+      startedMonotask.setQueueStartTime()
+    }
   }
 
   private[monotasks] def updateMetricsForFinishedMonotask(completedMonotask: Monotask) {
-    val mapToUpdate = getMapToUpdateNumRunningMonotasks(completedMonotask)
-    val macrotaskId = completedMonotask.context.taskAttemptId
-    mapToUpdate.get(macrotaskId) match {
-      case Some(numCurrentlyRunningMonotasks) =>
-        if (numCurrentlyRunningMonotasks == 1) {
-          mapToUpdate.remove(macrotaskId)
-        } else {
-          mapToUpdate(macrotaskId) = numCurrentlyRunningMonotasks - 1
-        }
+    if (!completedMonotask.context.taskIsRunningRemotely) {
+      val mapToUpdate = getMapToUpdateNumRunningMonotasks(completedMonotask)
+      val macrotaskId = completedMonotask.context.taskAttemptId
+      mapToUpdate.get(macrotaskId) match {
+        case Some(numCurrentlyRunningMonotasks) =>
+          if (numCurrentlyRunningMonotasks == 1) {
+            mapToUpdate.remove(macrotaskId)
+          } else {
+            mapToUpdate(macrotaskId) = numCurrentlyRunningMonotasks - 1
+          }
 
-      case None =>
-        logWarning(s"Not updating metrics for macrotask $macrotaskId because no record of it " +
-          "could be found")
+        case None =>
+          logWarning(s"Not updating metrics for macrotask $macrotaskId because no record of it " +
+            "could be found")
+      }
     }
   }
 
@@ -297,6 +311,7 @@ private[spark] class LocalDagScheduler(blockFileManager: BlockFileManager, conf:
       failDependentMonotasks(completedMonotask)
     }
     runningMonotasks.remove(completedMonotask.taskId)
+    runningPrepareMonotasks.remove(completedMonotask.taskId)
   }
 
   /**
@@ -314,6 +329,7 @@ private[spark] class LocalDagScheduler(blockFileManager: BlockFileManager, conf:
     updateMetricsForFinishedMonotask(failedMonotask)
 
     runningMonotasks -= failedMonotask.taskId
+    runningPrepareMonotasks -= failedMonotask.taskId
     failDependentMonotasks(failedMonotask, Some(failedMonotask.taskId))
     val taskAttemptId = failedMonotask.context.taskAttemptId
 
@@ -365,6 +381,9 @@ private[spark] class LocalDagScheduler(blockFileManager: BlockFileManager, conf:
     /* Add the monotask to runningMonotasks before removing it from waitingMonotasks to avoid
      * a race condition in waitUntilAllTasksComplete where both sets are empty. */
     runningMonotasks += monotask.taskId
+    if (monotask.isInstanceOf[PrepareMonotask]) {
+      runningPrepareMonotasks += monotask.taskId
+    }
     waitingMonotasks.remove(monotask)
   }
 

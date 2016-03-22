@@ -50,6 +50,88 @@ class LocalDagSchedulerSuite extends FunSuite with BeforeAndAfterEach with Local
       executorBackend, SparkEnv.get.blockManager.blockFileManager)
   }
 
+  /**
+   * This test ensures that LocalDagScheduler returns the correct number of macrotasks that are
+   * doing computation, network, or disk.  It constructs two macrotasks:
+   *
+   * Macrotask 0 has three monotasks: first a network monotask, then a compute monotask, then a disk
+   * monotask.
+   *
+   * Macrotask 1 has two monotasks: first a disk monotask, and then a compute monotask.
+   *
+   * This test ensures that as those monotasks start and finish, the counts of the number of
+   * macrotasks using each resource are correct.
+   */
+  test("updateMetricsForStartedMonotask and updateMetricsForFinishedMonotask") {
+    // Setup the 3 monotasks for macrotask 0.
+    val macrotask0Context = new TaskContextImpl(0, 0)
+    val macrotask0NetworkMonotask = mock(classOf[NetworkMonotask])
+    when(macrotask0NetworkMonotask.dependencies).thenReturn(HashSet.empty[Monotask])
+    when(macrotask0NetworkMonotask.context).thenReturn(macrotask0Context)
+    val macrotask0ComputeMonotask = mock(classOf[ComputeMonotask])
+    when(macrotask0ComputeMonotask.dependencies).thenReturn(HashSet.empty[Monotask])
+    when(macrotask0ComputeMonotask.context).thenReturn(macrotask0Context)
+    val macrotask0DiskMonotask = mock(classOf[DiskMonotask])
+    when(macrotask0DiskMonotask.dependencies).thenReturn(HashSet.empty[Monotask])
+    when(macrotask0DiskMonotask.context).thenReturn(macrotask0Context)
+
+    // Setup the 2 monotasks for macrotask 1.
+    val macrotask1Context = new TaskContextImpl(1, 0)
+    val macrotask1DiskMonotask = mock(classOf[DiskMonotask])
+    when(macrotask1DiskMonotask.dependencies).thenReturn(HashSet.empty[Monotask])
+    when(macrotask1DiskMonotask.context).thenReturn(macrotask1Context)
+    val macrotask1ComputeMonotask = mock(classOf[ComputeMonotask])
+    when(macrotask1ComputeMonotask.dependencies).thenReturn(HashSet.empty[Monotask])
+    when(macrotask1ComputeMonotask.context).thenReturn(macrotask1Context)
+
+    localDagScheduler.updateMetricsForStartedMonotask(macrotask0NetworkMonotask)
+    assert(localDagScheduler.getNumMacrotasksInCompute() === 0)
+    assert(localDagScheduler.getNumMacrotasksInDisk() === 0)
+    assert(localDagScheduler.getNumMacrotasksInNetwork() === 1)
+
+    localDagScheduler.updateMetricsForStartedMonotask(macrotask1DiskMonotask)
+    assert(localDagScheduler.getNumMacrotasksInCompute() === 0)
+    assert(localDagScheduler.getNumMacrotasksInDisk() === 1)
+    assert(localDagScheduler.getNumMacrotasksInNetwork() === 1)
+
+    localDagScheduler.updateMetricsForFinishedMonotask(macrotask0NetworkMonotask)
+    localDagScheduler.updateMetricsForStartedMonotask(macrotask0ComputeMonotask)
+    assert(localDagScheduler.getNumMacrotasksInCompute() === 1)
+    assert(localDagScheduler.getNumMacrotasksInDisk() === 1)
+    assert(localDagScheduler.getNumMacrotasksInNetwork() === 0)
+
+    localDagScheduler.updateMetricsForFinishedMonotask(macrotask1DiskMonotask)
+    localDagScheduler.updateMetricsForStartedMonotask(macrotask1ComputeMonotask)
+    assert(localDagScheduler.getNumMacrotasksInCompute() === 2)
+    assert(localDagScheduler.getNumMacrotasksInDisk() === 0)
+    assert(localDagScheduler.getNumMacrotasksInNetwork() === 0)
+
+    localDagScheduler.updateMetricsForFinishedMonotask(macrotask0ComputeMonotask)
+    localDagScheduler.updateMetricsForStartedMonotask(macrotask0DiskMonotask)
+    assert(localDagScheduler.getNumMacrotasksInCompute() === 1)
+    assert(localDagScheduler.getNumMacrotasksInDisk() === 1)
+    assert(localDagScheduler.getNumMacrotasksInNetwork() === 0)
+
+    localDagScheduler.updateMetricsForFinishedMonotask(macrotask0DiskMonotask)
+    assert(localDagScheduler.getNumMacrotasksInCompute() === 1)
+    assert(localDagScheduler.getNumMacrotasksInDisk() === 0)
+    assert(localDagScheduler.getNumMacrotasksInNetwork() === 0)
+  }
+
+  test("updateMetricsForStartedMonotask and updateMetricsForFinishedMonotask ignore remote " +
+    "monotasks") {
+    val remoteMacrotaskContext = new TaskContextImpl(0, 0, taskIsRunningRemotely = true)
+    // Setup one monotask for the remote macrotask.
+    val networkMonotask = mock(classOf[NetworkMonotask])
+    when(networkMonotask.dependencies).thenReturn(HashSet.empty[Monotask])
+    when(networkMonotask.context).thenReturn(remoteMacrotaskContext)
+
+    localDagScheduler.updateMetricsForStartedMonotask(networkMonotask)
+    assert(localDagScheduler.getNumMacrotasksInCompute() === 0)
+    assert(localDagScheduler.getNumMacrotasksInDisk() === 0)
+    assert(localDagScheduler.getNumMacrotasksInNetwork() === 0)
+  }
+
   test("submitMonotasks: tasks with no dependencies are run immediately") {
     val noDependencyMonotask = new SimpleMonotask(0)
     localDagScheduler.runEvent(SubmitMonotasks(List(noDependencyMonotask)))
@@ -346,74 +428,6 @@ class LocalDagSchedulerSuite extends FunSuite with BeforeAndAfterEach with Local
 
     // Make sure that A removed B and C from the list of waiting monotasks.
     assertDataStructuresEmpty()
-  }
-
-  /**
-   * This test ensures that LocalDagScheduler returns the correct number of macrotasks that are
-   * doing computation, network, or disk.  It constructs two macrotasks:
-   *
-   * Macrotask 0 has three monotasks: first a network monotask, then a compute monotask, then a disk
-   * monotask.
-   *
-   * Macrotask 1 has two monotasks: first a disk monotask, and then a compute monotask.
-   *
-   * This test ensures that as those monotasks start and finish, the counts of the number of
-   * macrotasks using each resource are correct.
-   */
-  test("updateMetricsForStartedMonotask and updateMetricsForFinishedMonotask") {
-    // Setup the 3 monotasks for macrotask 0.
-    val macrotask0Context = new TaskContextImpl(0, 0)
-    val macrotask0NetworkMonotask = mock(classOf[NetworkMonotask])
-    when(macrotask0NetworkMonotask.dependencies).thenReturn(HashSet.empty[Monotask])
-    when(macrotask0NetworkMonotask.context).thenReturn(macrotask0Context)
-    val macrotask0ComputeMonotask = mock(classOf[ComputeMonotask])
-    when(macrotask0ComputeMonotask.dependencies).thenReturn(HashSet.empty[Monotask])
-    when(macrotask0ComputeMonotask.context).thenReturn(macrotask0Context)
-    val macrotask0DiskMonotask = mock(classOf[DiskMonotask])
-    when(macrotask0DiskMonotask.dependencies).thenReturn(HashSet.empty[Monotask])
-    when(macrotask0DiskMonotask.context).thenReturn(macrotask0Context)
-
-    // Setup the 2 monotasks for macrotask 1.
-    val macrotask1Context = new TaskContextImpl(1, 0)
-    val macrotask1DiskMonotask = mock(classOf[DiskMonotask])
-    when(macrotask1DiskMonotask.dependencies).thenReturn(HashSet.empty[Monotask])
-    when(macrotask1DiskMonotask.context).thenReturn(macrotask1Context)
-    val macrotask1ComputeMonotask = mock(classOf[ComputeMonotask])
-    when(macrotask1ComputeMonotask.dependencies).thenReturn(HashSet.empty[Monotask])
-    when(macrotask1ComputeMonotask.context).thenReturn(macrotask1Context)
-
-    localDagScheduler.updateMetricsForStartedMonotask(macrotask0NetworkMonotask)
-    assert(localDagScheduler.getNumMacrotasksInCompute() === 0)
-    assert(localDagScheduler.getNumMacrotasksInDisk() === 0)
-    assert(localDagScheduler.getNumMacrotasksInNetwork() === 1)
-
-    localDagScheduler.updateMetricsForStartedMonotask(macrotask1DiskMonotask)
-    assert(localDagScheduler.getNumMacrotasksInCompute() === 0)
-    assert(localDagScheduler.getNumMacrotasksInDisk() === 1)
-    assert(localDagScheduler.getNumMacrotasksInNetwork() === 1)
-
-    localDagScheduler.updateMetricsForFinishedMonotask(macrotask0NetworkMonotask)
-    localDagScheduler.updateMetricsForStartedMonotask(macrotask0ComputeMonotask)
-    assert(localDagScheduler.getNumMacrotasksInCompute() === 1)
-    assert(localDagScheduler.getNumMacrotasksInDisk() === 1)
-    assert(localDagScheduler.getNumMacrotasksInNetwork() === 0)
-
-    localDagScheduler.updateMetricsForFinishedMonotask(macrotask1DiskMonotask)
-    localDagScheduler.updateMetricsForStartedMonotask(macrotask1ComputeMonotask)
-    assert(localDagScheduler.getNumMacrotasksInCompute() === 2)
-    assert(localDagScheduler.getNumMacrotasksInDisk() === 0)
-    assert(localDagScheduler.getNumMacrotasksInNetwork() === 0)
-
-    localDagScheduler.updateMetricsForFinishedMonotask(macrotask0ComputeMonotask)
-    localDagScheduler.updateMetricsForStartedMonotask(macrotask0DiskMonotask)
-    assert(localDagScheduler.getNumMacrotasksInCompute() === 1)
-    assert(localDagScheduler.getNumMacrotasksInDisk() === 1)
-    assert(localDagScheduler.getNumMacrotasksInNetwork() === 0)
-
-    localDagScheduler.updateMetricsForFinishedMonotask(macrotask0DiskMonotask)
-    assert(localDagScheduler.getNumMacrotasksInCompute() === 1)
-    assert(localDagScheduler.getNumMacrotasksInDisk() === 0)
-    assert(localDagScheduler.getNumMacrotasksInNetwork() === 0)
   }
 
   test("waitUntilAllTasksComplete returns immediately when no tasks are running or waiting") {
