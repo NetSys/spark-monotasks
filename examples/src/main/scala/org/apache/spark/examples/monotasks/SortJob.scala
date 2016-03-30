@@ -71,6 +71,7 @@ object SortJob extends Logging {
           SequenceFileOutputFormat[LongWritable, LongArrayWritable]](filename)
       }
 
+      val numExecutors = spark.getExecutorStorageStatus.size - 1
       (0 until numShuffles).foreach { i =>
         val unsortedRddDisk = spark.sequenceFile(
           filename, classOf[LongWritable], classOf[LongArrayWritable])
@@ -86,6 +87,12 @@ object SortJob extends Logging {
           .map(pair => (new LongWritable(pair._1), new LongArrayWritable(pair._2)))
         sortedRdd.saveAsNewAPIHadoopFile[SequenceFileOutputFormat[LongWritable, LongArrayWritable]](
           s"${filename}_sorted_$i")
+
+        // Force a garbage collection to happen, in order to try to avoid long garbage
+        // collections in the middle of jobs.
+        spark.parallelize(1 to numExecutors, numExecutors).foreach { i =>
+          System.gc()
+        }
       }
     } finally {
       // Be sure to always stop the SparkContext, even when an exception is thrown; otherwise, the
