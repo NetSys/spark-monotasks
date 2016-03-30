@@ -46,7 +46,7 @@ class DiskCounters(
     try {
       val totalDiskUseFile = Source.fromFile(DiskCounters.DISK_TOTALS_FILENAME)
       totalDiskUseFile.getLines().foreach { line =>
-        if (line.indexOf("loop") == -1) {
+        if (line.indexOf("loop") == -1 && line.indexOf("ram") == -1) {
           val deviceCounters = BlockDeviceCounters(line)
           this.deviceNameToCounters += deviceCounters.deviceName -> deviceCounters
         }
