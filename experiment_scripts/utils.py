@@ -1,10 +1,31 @@
 """
 Utilities to help with running experiments.
+
+The environment variable MONOTASKS_HOME should be set to the directory
+that contains the "spark" directory (with all of the Spark source code),
+the "ephemeral-hdfs" directory, the "spark-ec2" directory, and so on. If this
+variable isn't set, it defaults to "root" (which is correct when running
+using the default ec2 setup).
 """
 
 import os
 import subprocess
 import time
+
+# Returns the given path with the correct base directory at the
+# beginning of it (the MONOTASKS_HOME environment variable, or
+# /root by default, which is correct for EC2).
+def get_full_path(relative_path):
+  if "MONOTASKS_HOME" in os.environ:
+    monotasks_home = os.environ["MONOTASKS_HOME"]
+  else:
+    monotasks_home = "/root"
+  return os.path.join(monotasks_home, relative_path)
+
+# Returns a list of the workers in the cluster.
+def get_workers():
+  workers_filename = get_full_path("spark/conf/slaves")
+  return [slave_line.strip("\n") for slave_line in open(workers_filename).readlines()]
 
 # Copy a file from a given host through scp, throwing an exception if scp fails.
 def scp_from(host, remote_file, local_file, identity_file=None):
@@ -22,8 +43,9 @@ def ssh_call(host, command, identity_file=None):
   subprocess.check_call(build_ssh_command(host, command, identity_file), shell=True)
 
 def build_ssh_command(host, command, identity_file=None):
-  command = "source /root/.bash_profile; %s" % command
-  return "ssh %s -t -o StrictHostKeyChecking=no root@%s '%s'" % \
+  if "ec2" in host:
+    command = "source /root/.bash_profile; %s" % command
+  return "ssh %s -t -o StrictHostKeyChecking=no %s '%s'" % \
     (get_identity_file_argument(identity_file), host, command)
 
 def get_identity_file_argument(identity_file):
@@ -62,7 +84,8 @@ def copy_and_zip_all_logs(stringified_parameters, slaves):
   subprocess.check_call(command, shell=True)
 
   # Copy the configuration into the directory to make it easy to see config later.
-  subprocess.check_call("cp /root/spark/conf/spark-defaults.conf %s/" % log_directory_name,
+  configuration_filename = get_full_path("spark/conf/spark-defaults.conf")
+  subprocess.check_call("cp %s %s/" % (configuration_filename, log_directory_name),
     shell=True)
   print "Finished copying results to %s" % log_directory_name
 
@@ -77,7 +100,7 @@ def copy_and_zip_all_logs(stringified_parameters, slaves):
 
 def check_if_hdfs_file_exists(hdfs_path):
   """ Returns true if the given HDFS path exists, and false otherwise. """
-  command = "/root/ephemeral-hdfs/bin/hdfs dfs -ls %s" % hdfs_path
+  command = "%s dfs -ls %s" % (get_full_path("ephemeral-hdfs/bin/hdfs"), hdfs_path)
   output = subprocess.Popen(command, stderr=subprocess.PIPE, shell=True).communicate()
   index = (output[1].find("No such file"))
   return (index == -1)
@@ -85,11 +108,14 @@ def check_if_hdfs_file_exists(hdfs_path):
 def cleanup_sort_job():
   """ Cleans up after a sort experiment by clearing the buffer cache and deleting sorted data. """
   # Clear the buffer cache, to sidestep issue with machines dying.
-  subprocess.check_call("/root/ephemeral-hdfs/sbin/slaves.sh /root/spark-ec2/clear-cache.sh", shell=True)
+  slaves_filename = get_full_path("ephemeral-hdfs/sbin/slaves.sh")
+  clear_cache_script = get_full_path("spark-ec2/clear-cache.sh")
+  subprocess.check_call("%s %s" % (slaves_filename, clear_cache_script), shell=True)
 
   try:
     # Delete any existing sorted data.
-    subprocess.check_call("/root/ephemeral-hdfs/bin/hadoop dfs -rm -r ./*sorted*", shell=True)
+    hadoop_filename = get_full_path("ephemeral-hdfs/bin/hadoop")
+    subprocess.check_call("%s dfs -rm -r ./*sorted*" % hadoop_filename, shell=True)
   except:
     print "No sorted data found, so didn't delete anything"
 

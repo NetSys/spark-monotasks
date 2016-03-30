@@ -10,7 +10,7 @@ import subprocess
 
 import utils
 
-slaves = [slave_line.strip("\n") for slave_line in open("/root/spark/conf/slaves").readlines()]
+slaves = utils.get_workers()
 print "Running experiment assuming slaves %s" % slaves
 
 num_machines = len(slaves)
@@ -30,12 +30,12 @@ for num_tasks_multiplier in num_tasks_multipliers:
   stringified_parameters = ["%s" % p for p in parameters]
 
   # Clear the buffer cache, to sidestep issue with machines dying because they've run out of memory.
-  subprocess.check_call("/root/ephemeral-hdfs/sbin/slaves.sh /root/spark-ec2/clear-cache.sh",
-    shell=True)
+  subprocess.check_call(utils.get_full_path(
+    "ephemeral-hdfs/sbin/slaves.sh /monotasks/spark-ec2/clear-cache.sh"), shell=True)
 
   # Run the job.
-  command = ("/root/spark/bin/run-example monotasks.MemorySortJob %s" %
-    " ".join(stringified_parameters))
+  memory_sort_job_path = utils.get_full_path("spark/bin/run-example monotasks.MemorySortJob")
+  command = "%s %s" % (memory_sort_job_path, " ".join(stringified_parameters))
   print "Running sort job with command: ", command
   subprocess.check_call(command, shell=True)
 
