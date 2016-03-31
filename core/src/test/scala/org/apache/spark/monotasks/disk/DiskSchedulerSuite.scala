@@ -169,7 +169,9 @@ class DiskSchedulerSuite extends FunSuite with BeforeAndAfter with Timeouts {
     otherMonotasks.foreach(monotask => assert(!idsOfStartedMonotasks.contains(monotask.taskId)))
   }
 
-  test("diskWriteMonotasks are scheduled based on the next available disk") {
+  test("diskWriteMonotasks are scheduled based on the next available disk when load balanced") {
+    conf.set("spark.monotasks.loadBalanceDiskWrites", "true")
+
     initializeDiskScheduler(2)
     val disk0 = diskScheduler.diskIds(0)
     val disk1 = diskScheduler.diskIds(1)
@@ -183,14 +185,36 @@ class DiskSchedulerSuite extends FunSuite with BeforeAndAfter with Timeouts {
     // Then the two short writes should be assigned to disk0, which will become available while
     // the writeMonotask is running.
     val monotasks = Seq(longMonotask, shortMonotask, writeMonotask, shortWrite1, shortWrite2)
-    submitTasksAndWaitForCompletion(monotasks, 1000)
 
+    assert(submitTasksAndWaitForCompletion(monotasks, 1000))
     assert(writeMonotask.diskId.isDefined)
     assert(shortWrite1.diskId.isDefined)
     assert(shortWrite2.diskId.isDefined)
     assert(writeMonotask.diskId.get === disk1)
     assert(shortWrite1.diskId.get === disk0)
-    assert(shortWrite1.diskId.get === disk0)
+    assert(shortWrite2.diskId.get === disk0)
+  }
+
+  test("diskWriteMonotasks are scheduled based on round robin when not load balanced") {
+    conf.set("spark.monotasks.loadBalanceDiskWrites", "false")
+
+    initializeDiskScheduler(2)
+    val disk0 = diskScheduler.diskIds(0)
+    val disk1 = diskScheduler.diskIds(1)
+    val longMonotask = new DummyDiskReadMonotask(taskContext, mock(classOf[BlockId]), disk0, 300)
+    val shortMonotask = new DummyDiskReadMonotask(taskContext, mock(classOf[BlockId]), disk1, 100)
+    val writeMonotask = new DummyDiskWriteMonotask(taskContext, mock(classOf[BlockId]), 400)
+    val shortWrite1 = new DummyDiskWriteMonotask(taskContext, mock(classOf[BlockId]), 50)
+    val shortWrite2 = new DummyDiskWriteMonotask(taskContext, mock(classOf[BlockId]), 50)
+
+    val monotasks = Seq(longMonotask, shortMonotask, writeMonotask, shortWrite1, shortWrite2)
+    assert(submitTasksAndWaitForCompletion(monotasks, 1000))
+    assert(writeMonotask.diskId.isDefined)
+    assert(shortWrite1.diskId.isDefined)
+    assert(shortWrite2.diskId.isDefined)
+    assert(writeMonotask.diskId.get === disk0)
+    assert(shortWrite1.diskId.get === disk1)
+    assert(shortWrite2.diskId.get === disk0)
   }
 
   test("diskAccessors count 0 monotasks in queue after all diskWriteMonotasks have finished") {

@@ -50,6 +50,17 @@ private[spark] class DiskScheduler(
    * access.
    */
   private val hdfsWriteMonotaskQueue = new LinkedBlockingQueue[HdfsWriteMonotask]()
+  /**
+   * An index into diskIds indicating which disk to use for the next write task. This is only used
+   * if loadBalanceDiskWrites is false.
+   */
+  private var nextDisk = 0
+  /**
+   * True if DiskWriteMonotasks should be load balanced across available disks based on the speed
+   * of the disk; otherwise, assigns DiskWriteMonotasks to disks in round-robin order.
+   */
+  private val loadBalanceDiskWrites = conf.getBoolean(
+    "spark.monotasks.loadBalanceDiskWrites", true)
 
   addShutdownHook()
   buildDiskAccessors(conf)
@@ -120,8 +131,16 @@ private[spark] class DiskScheduler(
     // Extract the identifier of the disk on which this task will operate.
     val diskId = task match {
       case write: DiskWriteMonotask =>
-        diskIds.foreach(addToDiskQueue(task, _))
-        return
+        if (loadBalanceDiskWrites) {
+          // Add the monotask to all disk queues; the monotask will be run by whichever disk
+          // is available sooner.
+          diskIds.foreach(addToDiskQueue(task, _))
+          return
+        } else {
+          val id = getNextDiskId()
+          write.diskId = Some(id)
+          id
+        }
 
       case read: DiskReadMonotask =>
         read.diskId
@@ -153,6 +172,16 @@ private[spark] class DiskScheduler(
         s"an invalid diskId: $diskId. Valid diskIds are: ${diskIds.mkString(", ")}")
       monotask.handleException(exception)
     }
+  }
+
+  /**
+   * Returns the diskId of the disk that should be used for the next write operation. Uses a
+   * round-robin disk scheduling strategy.
+   */
+  def getNextDiskId(): String = {
+    val diskId = diskIds(nextDisk)
+    nextDisk = (nextDisk + 1) % diskIds.length
+    diskId
   }
 
   private def addShutdownHook() {
@@ -247,13 +276,12 @@ private[spark] class DiskScheduler(
       try {
         while (!currentThread.isInterrupted()) {
           val diskMonotask = taskQueue.take()
-          val monotaskAssigned = diskMonotask match {
-            case write: DiskWriteMonotask =>
-              write.assignToDisk(diskId)
-            case _ =>
-              true
-            }
-          if (monotaskAssigned) {
+          var monotaskNotYetRun = true
+          if (loadBalanceDiskWrites && diskMonotask.isInstanceOf[DiskWriteMonotask]) {
+            // assignToDisk will return false if the task has already been completed by another disk
+            monotaskNotYetRun = diskMonotask.asInstanceOf[DiskWriteMonotask].assignToDisk(diskId)
+          }
+          if (monotaskNotYetRun) {
             diskMonotask.context.taskMetrics.incDiskWaitNanos(diskMonotask.getQueueTime())
             executeMonotask(diskMonotask)
           }
