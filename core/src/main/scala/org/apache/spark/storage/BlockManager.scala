@@ -1000,7 +1000,7 @@ private[spark] object BlockManager extends Logging {
   private def getMaxOffHeapMemoryBytes(conf: SparkConf): Long = {
     val offHeapMemoryMb = Utils.memoryStringToMb(
       conf.get("spark.storage.offHeapMemory", DEFAULT_MAX_OFF_HEAP_MEMORY))
-    offHeapMemoryMb * 1024 * 1024
+    offHeapMemoryMb.toLong * 1024 * 1024
   }
 
   /**
