@@ -11,7 +11,7 @@ import subprocess
 import utils
 
 slaves = utils.get_workers()
-print "Running experiment assuming slaves %s" % slaves
+print "Running experiment assuming slaves {}".format(slaves)
 
 num_machines = len(slaves)
 values_per_key = 10
@@ -27,7 +27,7 @@ for num_tasks_multiplier in num_tasks_multipliers:
   total_num_items = target_total_data_gb / (4.9 + values_per_key * 1.92) * (64 * 4000000)
   items_per_task =  int(total_num_items / num_tasks)
   parameters = [num_tasks, num_tasks, items_per_task, values_per_key, num_shuffles]
-  stringified_parameters = ["%s" % p for p in parameters]
+  stringified_parameters = ["{}".format(p) for p in parameters]
 
   # Clear the buffer cache, to sidestep issue with machines dying because they've run out of memory.
   subprocess.check_call(utils.get_full_path(
@@ -35,7 +35,8 @@ for num_tasks_multiplier in num_tasks_multipliers:
 
   # Run the job.
   memory_sort_job_path = utils.get_full_path("spark/bin/run-example monotasks.MemorySortJob")
-  command = "%s %s" % (memory_sort_job_path, " ".join(stringified_parameters))
+  command = "{} {}".format(memory_sort_job_path,
+                           " ".join(stringified_parameters))
   print "Running sort job with command: ", command
   subprocess.check_call(command, shell=True)
 

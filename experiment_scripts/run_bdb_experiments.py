@@ -157,12 +157,15 @@ def execute_queries_for_branch(aws_key_id, aws_key, args, branch, is_first_branc
 
   `is_first_branch` should be set to True if this is the first branch to be tested.
   """
-  print_heading("Testing branch \"%s\"" % branch)
-  utils.ssh_call(args.driver_addr, "cd /root/spark/; git checkout %s" % branch, args.identity_file)
+  print_heading("Testing branch \"{}\"".format(branch))
+  utils.ssh_call(args.driver_addr,
+                 "cd /root/spark/; git checkout {}".format(branch),
+                 args.identity_file)
 
   if (args.jar_dir is not None):
     print "Retrieving JAR"
-    copy_command = "cp -v %s/%s/* /root/spark/assembly/target/scala-2.10/ " % (args.jar_dir, branch)
+    copy_command = "cp -v {}/{}/* /root/spark/assembly/target/scala-2.10/ ".format(args.jar_dir,
+                                                                                   branch)
 
     # TODO: This will cause an error if the file specified by jar_filename does not exist. We should
     #       check if the file exists before trying to copy it.
@@ -192,8 +195,8 @@ def execute_query(aws_key_id, aws_key, args, query, branch, do_prepare):
   `do_prepare` should be set to True if the Hive tables for the benchmark data need to be
   regenerated or if the benchmark data needs to be converted to Parquet.
   """
-  print_heading("Executing %s %s of query %s using branch \"%s\"" %
-    (args.num_trials, "trial" if (args.num_trials == 1) else "trials", query, branch))
+  print_heading("Executing {} {} of query {} using branch \"{}\"".format(
+    args.num_trials, "trial" if (args.num_trials == 1) else "trials", query, branch))
 
   # Restart Spark and the Thrift server in order to make sure that we are using the correct version,
   # and to start using new log files.
@@ -205,22 +208,21 @@ def execute_query(aws_key_id, aws_key, args, query, branch, do_prepare):
   if (do_prepare):
     print "Preparing benchmark data"
     prepare_benchmark_script = os.path.join(benchmark_runner_dir, "prepare-benchmark.sh")
-    prepare_benchmark_command = "%s \
+    prepare_benchmark_command = "{} \
       --spark \
-      --aws-key-id=%s \
-      --aws-key=%s \
-      --spark-host=%s \
-      --spark-identity-file=%s \
-      --scale-factor=%s \
-      --file-format=%s \
-      --skip-s3-import" % \
-      (prepare_benchmark_script,
-        aws_key_id,
-        aws_key,
-        args.driver_addr,
-        args.identity_file,
-        args.scale_factor,
-        args.file_format)
+      --aws-key-id={} \
+      --aws-key={} \
+      --spark-host={} \
+      --spark-identity-file={} \
+      --scale-factor={} \
+      --file-format={} \
+      --skip-s3-import".format(prepare_benchmark_script,
+                               aws_key_id,
+                               aws_key,
+                               args.driver_addr,
+                               args.identity_file,
+                               args.scale_factor,
+                               args.file_format)
     if (args.parquet):
       prepare_benchmark_command += " --parquet"
       if (args.skip_parquet_conversion):
@@ -231,15 +233,18 @@ def execute_query(aws_key_id, aws_key, args, query, branch, do_prepare):
 
   print "Executing query"
   run_query_script = os.path.join(benchmark_runner_dir, "run-query.sh")
-  run_query_command = "%s \
+  run_query_command = "{} \
     --spark \
-    --spark-host=%s \
-    --spark-identity-file=%s \
-    --query-num=%s \
-    --num-trials=%s \
+    --spark-host={} \
+    --spark-identity-file={} \
+    --query-num={} \
+    --num-trials={} \
     --spark-no-cache \
-    --clear-buffer-cache " % \
-    (run_query_script, args.driver_addr, args.identity_file, query, args.num_trials)
+    --clear-buffer-cache ".format(run_query_script,
+                                  args.driver_addr,
+                                  args.identity_file,
+                                  query,
+                                  args.num_trials)
   if (args.compress_output):
     run_query_command += " --compress"
   execute_shell_command(run_query_command)
@@ -250,20 +255,24 @@ def execute_query(aws_key_id, aws_key, args, query, branch, do_prepare):
 
   print "Retrieving logs"
   copy_logs_script = os.path.join(args.scripts_dir, "copy_logs.py")
-  output_file_prefix = "%s_%s" % (query, branch)
-  copy_logs_command = "python2 %s \
-    --driver-host=%s \
-    --executor-host=%s \
+  output_file_prefix = "{}_{}".format(query, branch)
+  copy_logs_command = "python2 {} \
+    --driver-host={} \
+    --executor-host={} \
     --username=root \
-    --identity-file=%s \
-    --filename-prefix=%s" % \
-    (copy_logs_script, args.driver_addr, args.executor_addr, args.identity_file, output_file_prefix)
+    --identity-file={} \
+    --filename-prefix={}".format(copy_logs_script,
+                                 args.driver_addr,
+                                 args.executor_addr,
+                                 args.identity_file,
+                                 output_file_prefix)
   execute_shell_command(copy_logs_command)
 
   # Move the logs into a new directory: output_dir/query/branch/
   experiment_output_dir = os.path.join(args.output_dir, query, branch)
-  execute_shell_command("mkdir -pv %s" % experiment_output_dir)
-  execute_shell_command("mv -v %s_* %s/" % (output_file_prefix, experiment_output_dir))
+  execute_shell_command("mkdir -pv {}".format(experiment_output_dir))
+  execute_shell_command("mv -v {}_* {}/".format(output_file_prefix,
+                                                experiment_output_dir))
 
 def get_env_vars(keys):
   """
@@ -273,7 +282,7 @@ def get_env_vars(keys):
   def get_env_var(key):
     value = os.environ.get(key)
     if (value is None):
-      print "Please set the environment variable \"%s\". Exiting..." % key
+      print "Please set the environment variable \"{}\". Exiting...".format(key)
       exit(1)
     return value
 
@@ -309,13 +318,13 @@ def start_thriftserver(driver_addr, identity_file):
 
 def print_heading(heading):
   def print_line(middle):
-    print "#%s#" % middle
+    print "#{}#".format(middle)
 
   bar = ("=" * (len(heading) + 2))
 
   print "\n\n"
   print_line(bar)
-  print_line(" %s " % heading)
+  print_line(" {} ".format(heading))
   print_line(bar)
   print "\n\n"
 
@@ -323,14 +332,14 @@ def print_info(args):
   print_heading("Running Big Data Benchmark experiments")
   print "Queries:"
   for query in args.queries:
-    print "\t%s" % query
+    print "\t{}".format(query)
 
   print "Branches:"
   for branch in args.branches:
-    print "\t%s" % branch
+    print "\t{}".format(branch)
 
-  print "Scale factor: %s" % args.scale_factor
-  print "Number of trials: %s\n\n" % args.num_trials
+  print "Scale factor: {}".format(args.scale_factor)
+  print "Number of trials: {}\n\n".format(args.num_trials)
 
 if __name__ == "__main__":
   main(sys.argv[1:])

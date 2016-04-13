@@ -29,13 +29,14 @@ utils.cleanup_sort_job()
 
 total_num_items = target_total_data_gb / (4.9 + values_per_key * 1.92) * (64 * 4000000)
 items_per_task =  int(total_num_items / num_tasks)
-data_filename = "randomData_%s_%sGB_105target" % (values_per_key, target_total_data_gb)
+data_filename = "randomData_{}_{}GB_105target".format(values_per_key,
+                                                      target_total_data_gb)
 use_existing_data_files = utils.check_if_hdfs_file_exists(data_filename)
 # The cores_per_worker parameter won't be used by the experiment; it's just included here for
 # convenience in how the log files are named.
 parameters = [num_tasks, num_tasks, items_per_task, values_per_key, num_shuffles,
               data_filename, use_existing_data_files, cores_per_worker]
-stringified_parameters = ["%s" % p for p in parameters]
+stringified_parameters = [str(p) for p in parameters]
 command = utils.get_full_path("spark/bin/run-example")
 args = "monotasks.SortJob {}".format(" ".join(stringified_parameters))
 command_with_args = "{} {}".format(command, args)
