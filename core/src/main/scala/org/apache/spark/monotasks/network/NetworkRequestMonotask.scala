@@ -125,6 +125,8 @@ private[spark] class NetworkRequestMonotask(
       BlockId(blockId), buf, StorageLevel.MEMORY_ONLY, tellMaster = false)
     context.taskMetrics.incDiskNanos(diskReadNanos)
     if (outstandingBlockIdToSize.isEmpty) {
+      logInfo(s"Notifying NetworkScheduler of completion of monotask $taskId")
+      networkScheduler.get.handleNetworkRequestSatisfied(this)
       logInfo(s"Notifying LocalDagScheduler of completion of monotask $taskId")
       localDagScheduler.post(TaskSuccess(this))
     }

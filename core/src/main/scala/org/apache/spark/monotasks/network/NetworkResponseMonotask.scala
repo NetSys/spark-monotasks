@@ -37,8 +37,8 @@ import org.apache.spark.storage.BlockId
  * @param context TaskContextImpl for the monotask.
  */
 private[spark] class NetworkResponseMonotask(
-    blockId: BlockId,
-    channel: Channel,
+    val blockId: BlockId,
+    val channel: Channel,
     context: TaskContextImpl)
   extends NetworkMonotask(context) with Logging {
 

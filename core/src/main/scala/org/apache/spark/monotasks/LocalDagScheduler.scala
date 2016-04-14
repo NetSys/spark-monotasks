@@ -56,7 +56,7 @@ private[spark] class LocalDagScheduler(blockFileManager: BlockFileManager, conf:
   private var executorBackend: Option[ExecutorBackend] = None
 
   private val computeScheduler = new ComputeScheduler
-  private val networkScheduler = new NetworkScheduler
+  private val networkScheduler = new NetworkScheduler(conf)
   private val diskScheduler = new DiskScheduler(blockFileManager, conf)
 
   /** Monotasks that are waiting for their dependencies to be satisfied. */
