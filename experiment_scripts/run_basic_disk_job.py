@@ -38,12 +38,12 @@ num_iterations = 10
 num_threads_per_disk_values = [1, 2, 4, 8, 16]
 
 spark_defaults_filepath = utils.get_full_path(relative_path="spark/conf/spark-defaults.conf")
-copy_dir_command = utils.get_full_path(relative_path="spark-ec2/copy-dir")
 stop_all_command = utils.get_full_path(relative_path="spark/sbin/stop-all.sh")
 start_all_command = utils.get_full_path(relative_path="spark/sbin/start-all.sh")
 run_example_command = utils.get_full_path(relative_path="spark/bin/run-example")
 run_on_slaves_command = utils.get_full_path(relative_path="ephemeral-hdfs/sbin/slaves.sh")
 clear_cache_command = utils.get_full_path(relative_path="spark-ec2/clear-cache.sh")
+clear_slave_cache_command = "%s %s" % (run_on_slaves_command, clear_cache_command)
 
 for num_threads_per_disk in num_threads_per_disk_values:
   # Change the number of threads per disk by resetting the Spark config.
@@ -52,12 +52,7 @@ for num_threads_per_disk in num_threads_per_disk_values:
   print "Changing the number of threads per disk using command: %s" % change_num_threads_command
   subprocess.check_call(change_num_threads_command, shell=True)
 
-  copy_config_command = "%s --delete %s" % (copy_dir_command, spark_defaults_filepath)
-  print "Copying the new configuration to the cluster using command: %s" % copy_config_command
-  subprocess.check_call(copy_config_command, shell=True)
-
   # For consistency, clear the buffer cache before each experiment.
-  clear_slave_cache_command = "%s %s" % (run_on_slaves_command, clear_cache_command)
   print "Clearing the OS buffer cache using command: %s" % clear_slave_cache_command
   subprocess.check_call(clear_slave_cache_command, shell=True)
 
