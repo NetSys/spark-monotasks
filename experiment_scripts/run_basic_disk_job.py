@@ -27,7 +27,7 @@ import subprocess
 import utils
 
 workers = utils.get_workers()
-print "Running experiment with %s workers: %s" % (len(workers), workers)
+print "Running experiment with {} workers: {}".format(len(workers), workers)
 
 num_partitions = 128
 items_per_partition = 3000000
@@ -43,17 +43,18 @@ start_all_command = utils.get_full_path(relative_path="spark/sbin/start-all.sh")
 run_example_command = utils.get_full_path(relative_path="spark/bin/run-example")
 run_on_slaves_command = utils.get_full_path(relative_path="ephemeral-hdfs/sbin/slaves.sh")
 clear_cache_command = utils.get_full_path(relative_path="spark-ec2/clear-cache.sh")
-clear_slave_cache_command = "%s %s" % (run_on_slaves_command, clear_cache_command)
+clear_slave_cache_command = "{} {}".format(run_on_slaves_command, clear_cache_command)
 
 for num_threads_per_disk in num_threads_per_disk_values:
   # Change the number of threads per disk by resetting the Spark config.
   change_num_threads_command = ("sed -i \"s/spark\.monotasks\.threadsPerDisk .*/" +
-    "spark.monotasks.threadsPerDisk %s/\" %s" % (num_threads_per_disk, spark_defaults_filepath))
-  print "Changing the number of threads per disk using command: %s" % change_num_threads_command
+    "spark.monotasks.threadsPerDisk {}/\" {}".format(num_threads_per_disk, spark_defaults_filepath))
+  print "Changing the number of threads per disk using command: {}".format(
+    change_num_threads_command)
   subprocess.check_call(change_num_threads_command, shell=True)
 
   # For consistency, clear the buffer cache before each experiment.
-  print "Clearing the OS buffer cache using command: %s" % clear_slave_cache_command
+  print "Clearing the OS buffer cache using command: {}".format(clear_slave_cache_command)
   subprocess.check_call(clear_slave_cache_command, shell=True)
 
   subprocess.check_call(start_all_command, shell=True)
@@ -62,10 +63,10 @@ for num_threads_per_disk in num_threads_per_disk_values:
     items_per_partition,
     longs_per_item,
     num_iterations]
-  stringified_parameters = ["%s" % p for p in parameters]
-  experiment_command = ("%s monotasks.disk.DiskThroughputExperiment %s" %
-    (run_example_command, " ".join(stringified_parameters)))
-  print "Running experiment using command: %s" % experiment_command
+  stringified_parameters = [str(p) for p in parameters]
+  experiment_command = ("{} monotasks.disk.DiskThroughputExperiment {}".format(
+    run_example_command, " ".join(stringified_parameters)))
+  print "Running experiment using command: {}".format(experiment_command)
   subprocess.check_call(experiment_command, shell=True)
 
   # Stop Spark in order to finalize the logs.
