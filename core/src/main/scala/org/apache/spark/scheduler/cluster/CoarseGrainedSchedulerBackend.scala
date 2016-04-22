@@ -91,15 +91,18 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
         if (executorDataMap.contains(executorId)) {
           sender ! RegisterExecutorFailed("Duplicate executor ID: " + executorId)
         } else {
-          logInfo(
-            s"Registered executor: $sender with ID $executorId, $cores cores, and $disks disks")
+          val numThreadsPerDisk = conf.getInt("spark.monotasks.threadsPerDisk", 1)
+          logInfo(s"Registered executor: $sender with ID $executorId, $cores cores, $disks " +
+            s"disks, and $numThreadsPerDisk threads per disk")
           sender ! RegisteredExecutor
 
           addressToExecutorId(sender.path.address) = executorId
           totalCoreCount.addAndGet(cores)
           totalRegisteredExecutors.addAndGet(1)
           val (host, _) = Utils.parseHostPort(hostPort)
-          val data = new ExecutorData(sender, sender.path.address, host, disks, cores, logUrls)
+          val totalDiskConcurrency = disks * numThreadsPerDisk
+          val data = new ExecutorData(
+              sender, sender.path.address, host, totalDiskConcurrency, cores, logUrls)
           // This must be synchronized because variables mutated
           // in this block are read when requesting executors
           CoarseGrainedSchedulerBackend.this.synchronized {
