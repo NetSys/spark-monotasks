@@ -46,6 +46,7 @@ def ssh_call(host, command, identity_file=None):
 def build_ssh_command(host, command, identity_file=None):
   if "ec2" in host:
     command = "source /root/.bash_profile; {}".format(command)
+    host = "root@{}".format(host)
   return "ssh {} -t -o StrictHostKeyChecking=no {} '{}'".format(
     get_identity_file_argument(identity_file), host, command)
 
