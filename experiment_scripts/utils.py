@@ -9,6 +9,7 @@ using the default ec2 setup).
 """
 
 import os
+from os import path
 import subprocess
 import time
 
@@ -53,8 +54,10 @@ def build_ssh_command(host, command, identity_file=None):
 def get_identity_file_argument(identity_file):
   return "" if (identity_file is None) else "-i {}".format(identity_file)
 
-def copy_and_zip_all_logs(stringified_parameters, slaves):
-  """ Packages up all of the logs from running an experiment.
+def copy_all_logs(stringified_parameters, slaves):
+  """
+  Assembles all of the logs from running an experiment into a single directory, and returns the path
+  to that directory.
 
   Args:
     stringified_parameters: A list of strings that were parameters to the experiment. Used
@@ -94,16 +97,27 @@ def copy_and_zip_all_logs(stringified_parameters, slaves):
                                            log_directory_name),
                         shell=True)
   print "Finished copying results to {}".format(log_directory_name)
+  return log_directory_name
+
+def copy_and_zip_all_logs(stringified_parameters, slaves):
+  """ Packages up all of the logs from running an experiment.
+
+  Args:
+    stringified_parameters: A list of strings that were parameters to the experiment. Used
+      in naming the resulting directory.
+    slaves: A list of workers used to run the experiment (the continuous monitor logs will be
+      copied back from all of these machines).
+  """
+  log_subdirectory = copy_all_logs(stringified_parameters, slaves)
+  log_directory = path.dirname(log_subdirectory)
 
   # Tar and zip the file so that it can easily be copied out of the cluster.
-  tar_filename = log_directory_name + ".tar.gz"
+  tar_filename = log_directory + ".tar.gz"
 
   # For some reason, the tar command fails without this.
   subprocess.check_call("touch {}".format(tar_filename), shell=True)
-
-  subprocess.check_call("tar czfv {} --directory=/mnt {}".format(tar_filename,
-                                                                 log_subdirectory_name),
-                        shell=True)
+  subprocess.check_call(
+    "tar czfv {} --directory=/mnt {}".format(tar_filename, log_subdirectory), shell=True)
 
 def check_if_hdfs_file_exists(hdfs_path):
   """ Returns true if the given HDFS path exists, and false otherwise. """
