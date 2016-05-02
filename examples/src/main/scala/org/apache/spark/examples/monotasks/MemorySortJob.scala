@@ -88,6 +88,10 @@ object MemorySortJob {
       itemsPerPartition: Int,
       itemsPerValue: Int): RDD[Product2[Long, Array[Long]]] = {
     spark.parallelize(1 to numMapTasks, numMapTasks).flatMap { i =>
+      // Sleep for one second, which helps the tasks (and the associated RDD blocks) to be more
+      // evenly distributed across machines (without the sleep, the tasks finish very quickly
+      // because they don't do any I/O, so often end up unevenly distributed).
+      Thread.sleep(1000)
       val random = new Random(i)
       Array.fill(itemsPerPartition)((random.nextLong, Array.fill(itemsPerValue)(random.nextLong)))
     }
