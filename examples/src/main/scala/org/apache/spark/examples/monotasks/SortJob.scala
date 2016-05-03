@@ -71,7 +71,6 @@ object SortJob extends Logging {
           SequenceFileOutputFormat[LongWritable, LongArrayWritable]](filename)
       }
 
-      val numExecutors = spark.getExecutorStorageStatus.size - 1
       (0 until numShuffles).foreach { i =>
         val unsortedRddDisk = spark.sequenceFile(
           filename, classOf[LongWritable], classOf[LongArrayWritable])
@@ -90,6 +89,8 @@ object SortJob extends Logging {
 
         // Force a garbage collection to happen, in order to try to avoid long garbage
         // collections in the middle of jobs.
+        val numExecutors = spark.getExecutorStorageStatus.size - 1
+        logInfo(s"Running GC job with $numExecutors tasks")
         spark.parallelize(1 to numExecutors, numExecutors).foreach { i =>
           System.gc()
         }
