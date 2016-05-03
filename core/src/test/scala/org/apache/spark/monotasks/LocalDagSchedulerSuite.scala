@@ -138,7 +138,7 @@ class LocalDagSchedulerSuite extends FunSuite with BeforeAndAfterEach with Local
 
     assert(localDagScheduler.waitingMonotasks.isEmpty)
     assert(1 === localDagScheduler.runningMonotasks.size)
-    assert(localDagScheduler.runningMonotasks.contains(noDependencyMonotask.taskId))
+    assert(localDagScheduler.runningMonotasks.contains(noDependencyMonotask))
   }
 
   test("submitMonotasks: tasks with unsatisfied dependencies are not run immediately") {
@@ -148,7 +148,7 @@ class LocalDagSchedulerSuite extends FunSuite with BeforeAndAfterEach with Local
     localDagScheduler.runEvent(SubmitMonotasks(List(firstMonotask, secondMonotask)))
 
     assert(1 === localDagScheduler.runningMonotasks.size)
-    assert(localDagScheduler.runningMonotasks.contains(firstMonotask.taskId))
+    assert(localDagScheduler.runningMonotasks.contains(firstMonotask))
     assert(1 === localDagScheduler.waitingMonotasks.size)
     assert(localDagScheduler.waitingMonotasks.contains(secondMonotask))
   }
@@ -210,7 +210,7 @@ class LocalDagSchedulerSuite extends FunSuite with BeforeAndAfterEach with Local
     localDagScheduler.runEvent(TaskSuccess(firstMonotask))
 
     assert(1 === localDagScheduler.runningMonotasks.size)
-    assert(localDagScheduler.runningMonotasks.contains(secondMonotask.taskId))
+    assert(localDagScheduler.runningMonotasks.contains(secondMonotask))
     assert(localDagScheduler.waitingMonotasks.isEmpty)
   }
 
@@ -270,9 +270,9 @@ class LocalDagSchedulerSuite extends FunSuite with BeforeAndAfterEach with Local
 
     // At first, tasks A, B, and D should be running.
     assert(3 === localDagScheduler.runningMonotasks.size)
-    assert(localDagScheduler.runningMonotasks.contains(monotaskA.taskId))
-    assert(localDagScheduler.runningMonotasks.contains(monotaskB.taskId))
-    assert(localDagScheduler.runningMonotasks.contains(monotaskD.taskId))
+    assert(localDagScheduler.runningMonotasks.contains(monotaskA))
+    assert(localDagScheduler.runningMonotasks.contains(monotaskB))
+    assert(localDagScheduler.runningMonotasks.contains(monotaskD))
     assert(2 === localDagScheduler.waitingMonotasks.size)
 
     // When D finishes, no new tasks should be run, because E still depends on task C.
@@ -288,7 +288,7 @@ class LocalDagSchedulerSuite extends FunSuite with BeforeAndAfterEach with Local
     // When A finishes, C should be run.
     localDagScheduler.runEvent(TaskSuccess(monotaskA))
     assert(1 === localDagScheduler.runningMonotasks.size)
-    assert(localDagScheduler.runningMonotasks.contains(monotaskC.taskId))
+    assert(localDagScheduler.runningMonotasks.contains(monotaskC))
     assert(1 === localDagScheduler.waitingMonotasks.size)
     assert(localDagScheduler.waitingMonotasks.contains(monotaskE))
 
@@ -296,7 +296,7 @@ class LocalDagSchedulerSuite extends FunSuite with BeforeAndAfterEach with Local
     localDagScheduler.runEvent(TaskSuccess(monotaskC))
     assert(localDagScheduler.waitingMonotasks.isEmpty)
     assert(1 === localDagScheduler.runningMonotasks.size)
-    assert(localDagScheduler.runningMonotasks.contains(monotaskE.taskId))
+    assert(localDagScheduler.runningMonotasks.contains(monotaskE))
 
     // Make a dummy result to pass in as part of the task completion to signal that the macrotask
     // has completed.
@@ -344,7 +344,7 @@ class LocalDagSchedulerSuite extends FunSuite with BeforeAndAfterEach with Local
       s"task attempt $taskAttemptId2")
     assert(Set(secondMonotask) === localDagScheduler.waitingMonotasks, waitingErrorMessage)
 
-    assert(!localDagScheduler.runningMonotasks.contains(monotaskA.taskId),
+    assert(!localDagScheduler.runningMonotasks.contains(monotaskA),
       "The failed monotask should have been removed from the running monotasks")
 
     assert(Set(monotaskB.taskId, firstMonotask.taskId) === localDagScheduler.runningMonotasks,

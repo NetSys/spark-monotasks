@@ -63,10 +63,10 @@ private[spark] class LocalDagScheduler(blockFileManager: BlockFileManager, conf:
   private[monotasks] val waitingMonotasks = new HashSet[Monotask]()
 
   /**
-   * IDs of monotasks that have been submitted to a scheduler to be run. This exists solely for
+   * Monotasks that have been submitted to a scheduler to be run. This exists solely for
    * debugging/testing and is not needed for maintaining correctness.
    */
-  private[monotasks] val runningMonotasks = new HashSet[Long]()
+  private[monotasks] val runningMonotasks = new HashSet[Monotask]()
 
   /**
    * IDs of prepare monotasks that have been submitted to a scheduler to be run. This exists
@@ -310,7 +310,7 @@ private[spark] class LocalDagScheduler(blockFileManager: BlockFileManager, conf:
       // failed.
       failDependentMonotasks(completedMonotask)
     }
-    runningMonotasks.remove(completedMonotask.taskId)
+    runningMonotasks.remove(completedMonotask)
     runningPrepareMonotasks.remove(completedMonotask.taskId)
   }
 
@@ -328,7 +328,7 @@ private[spark] class LocalDagScheduler(blockFileManager: BlockFileManager, conf:
     failedMonotask.cleanup()
     updateMetricsForFinishedMonotask(failedMonotask)
 
-    runningMonotasks -= failedMonotask.taskId
+    runningMonotasks -= failedMonotask
     runningPrepareMonotasks -= failedMonotask.taskId
     failDependentMonotasks(failedMonotask, Some(failedMonotask.taskId))
     val taskAttemptId = failedMonotask.context.taskAttemptId
@@ -380,7 +380,7 @@ private[spark] class LocalDagScheduler(blockFileManager: BlockFileManager, conf:
     }
     /* Add the monotask to runningMonotasks before removing it from waitingMonotasks to avoid
      * a race condition in waitUntilAllTasksComplete where both sets are empty. */
-    runningMonotasks += monotask.taskId
+    runningMonotasks += monotask
     if (monotask.isInstanceOf[PrepareMonotask]) {
       runningPrepareMonotasks += monotask.taskId
     }
@@ -400,6 +400,7 @@ private[spark] class LocalDagScheduler(blockFileManager: BlockFileManager, conf:
     val monotaskId = monotask.taskId
     val macrotaskId = monotask.context.taskAttemptId
 
+    // Add the monotask as a dependency of the macrotask's ResultSerializationMonotask.
     val monotasksFromSameMacrotask = waitingMonotasks.filter(_.context.taskAttemptId == macrotaskId)
     if (monotasksFromSameMacrotask.isEmpty) {
       throw new IllegalArgumentException(s"The macrotask (id: $macrotaskId) to which monotask " +
@@ -414,6 +415,23 @@ private[spark] class LocalDagScheduler(blockFileManager: BlockFileManager, conf:
             s"already completed."))
 
     resultSerializationMonotask.addDependency(monotask)
+
+    // Add the monotask as a dependent of any currently running monotasks for the macrotask.
+    // This is so the monotasks scheduler gets a correct view of the monotask DAG (to infer that
+    // the new monotask depends on existing ones, it needs to be told about this monotask starting
+    // at the same time as it finds out about dependencies finishing).
+    val runningMonotasksForMacrotask =
+      runningMonotasks.filter(_.context.taskAttemptId == macrotaskId)
+    assert(runningMonotasksForMacrotask.size == 1,
+      "Expect only one monotask to be running for a macrotask when addToMacrotask is called. " +
+      "If multiple monotasks are running, we may be unnecessarily adding dependencies to the " +
+      "newly added monotask, which could potentially cause data to be stored for longer than " +
+      "necessary.")
+    runningMonotasksForMacrotask.foreach { runningMonotask =>
+      logInfo(s"Adding monotask $monotask as dependency of $runningMonotask")
+      monotask.addDependency(runningMonotask)
+    }
+
     submitMonotask(monotask)
   }
 
