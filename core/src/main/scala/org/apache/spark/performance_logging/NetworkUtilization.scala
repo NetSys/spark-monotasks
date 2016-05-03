@@ -17,34 +17,24 @@
 package org.apache.spark.performance_logging
 
 class NetworkUtilization(
-    val elapsedMillis: Long,
-    val bytesReceivedPerSecond: Float,
-    val bytesTransmittedPerSecond: Float,
-    val packetsReceivedPerSecond: Float,
-    val packetsTransmittedPerSecond: Float)
+    val startCounters: NetworkCounters,
+    val endCounters: NetworkCounters)
   extends Serializable {
 
-  /**
-   * This constructor is private because it is used only by other constructors, so they can
-   * re-use elapsedMillis for all of the throughput calculations.
-   */
-  private def this(
-      startCounters: NetworkCounters,
-      endCounters: NetworkCounters,
-      elapsedMillis: Long) = {
-    this(
-      elapsedMillis,
-      (endCounters.receivedBytes - startCounters.receivedBytes).toFloat * 1000 / elapsedMillis,
-      ((endCounters.transmittedBytes - startCounters.transmittedBytes).toFloat * 1000 /
-        elapsedMillis),
-      (endCounters.receivedPackets - startCounters.receivedPackets).toFloat * 1000 / elapsedMillis,
-      ((endCounters.transmittedPackets - startCounters.transmittedPackets).toFloat * 1000 /
-        elapsedMillis))
-  }
+  def elapsedMillis: Long = endCounters.timeMillis - startCounters.timeMillis
 
-  def this(startCounters: NetworkCounters, endCounters: NetworkCounters) = {
-    this(startCounters, endCounters, endCounters.timeMillis - startCounters.timeMillis)
-  }
+  def bytesReceivedPerSecond: Double =
+    (endCounters.receivedBytes - startCounters.receivedBytes).toDouble * 1000 / elapsedMillis
+
+  def bytesTransmittedPerSecond: Double =
+    (endCounters.transmittedBytes - startCounters.transmittedBytes).toDouble * 1000 / elapsedMillis
+
+  def packetsReceivedPerSecond: Double =
+    (endCounters.receivedPackets - startCounters.receivedPackets).toDouble * 1000 / elapsedMillis
+
+  def packetsTransmittedPerSecond: Double =
+    (endCounters.transmittedPackets - startCounters.transmittedPackets).toDouble * 1000 /
+      elapsedMillis
 
   def this(startCounters: NetworkCounters) = {
     this(startCounters, new NetworkCounters())

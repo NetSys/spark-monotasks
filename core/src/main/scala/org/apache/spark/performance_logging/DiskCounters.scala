@@ -25,7 +25,7 @@ import org.apache.spark.Logging
 
 /** Stores counters for a particular block device. */
 case class BlockDeviceCounters(val countersLine: String) extends Serializable {
-  val items = countersLine.split(" ").filter(!_.isEmpty())
+  @transient val items = countersLine.split(" ").filter(!_.isEmpty())
   val deviceName = items(DiskCounters.DEVICE_NAME_INDEX)
   val sectorsRead = items(DiskCounters.SECTORS_READ_INDEX).toLong
   val millisReading = items(DiskCounters.MILLIS_READING_INDEX).toLong

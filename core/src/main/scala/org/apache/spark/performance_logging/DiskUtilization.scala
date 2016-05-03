@@ -20,20 +20,21 @@ import scala.collection.mutable.HashMap
 
 /** Utilization of a particular block device. */
 class BlockDeviceUtilization(
-    val diskUtilization: Float,
-    val readThroughput: Float,
-    val writeThroughput: Float)
+    val startCounters: BlockDeviceCounters,
+    val endCounters: BlockDeviceCounters,
+    val elapsedMillis: Long)
   extends Serializable {
 
-  def this(
-      startCounters: BlockDeviceCounters, endCounters: BlockDeviceCounters, elapsedMillis: Long) {
-    this(
-      (endCounters.millisTotal - startCounters.millisTotal).toFloat / elapsedMillis,
-      ((endCounters.sectorsRead - startCounters.sectorsRead).toFloat *
-        DiskUtilization.SECTOR_SIZE_BYTES * 1000 / elapsedMillis),
-      ((endCounters.sectorsWritten - startCounters.sectorsWritten).toFloat *
-        DiskUtilization.SECTOR_SIZE_BYTES * 1000 / elapsedMillis))
-  }
+  def diskUtilization: Double =
+    (endCounters.millisTotal - startCounters.millisTotal).toDouble / elapsedMillis
+
+  def readThroughput: Double =
+    (endCounters.sectorsRead - startCounters.sectorsRead).toDouble *
+      DiskUtilization.SECTOR_SIZE_BYTES * 1000 / elapsedMillis
+
+  def writeThroughput: Double =
+    (endCounters.sectorsWritten - startCounters.sectorsWritten).toDouble *
+      DiskUtilization.SECTOR_SIZE_BYTES * 1000 / elapsedMillis
 }
 
 class DiskUtilization(
