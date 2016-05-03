@@ -39,6 +39,7 @@ import java.util.concurrent.atomic.AtomicLong
 import scala.collection.JavaConversions._
 import scala.collection.mutable.ArrayBuffer
 
+import org.apache.spark.SparkEnv
 import org.apache.spark.annotation.DeveloperApi
 import org.apache.spark.executor.DataReadMethod.DataReadMethod
 import org.apache.spark.performance_logging._
@@ -111,6 +112,26 @@ class TaskMetrics extends Serializable {
   private var _diskWaitNanos: Long = _
   def diskWaitNanos: Long = _diskWaitNanos
   private[spark] def incDiskWaitNanos(value: Long) = _diskWaitNanos += value
+
+  /**
+   * Total time that the network has not been transmitting until the time that this macrotask
+   * started. Set by this macrotask's PrepareMonotask.
+   */
+  private var _startNetworkTransmitTotalIdleMillis: Double = _
+  def startNetworkTransmitTotalIdleMillis: Double = _startNetworkTransmitTotalIdleMillis
+  private[spark] def setStartNetworkTransmitTotalIdleMillis(value: Double) = {
+    _startNetworkTransmitTotalIdleMillis = value
+  }
+
+  /**
+   * Total time that the network has not been transmitting until the time that this macrotask
+   * finished. Set in setMetricsOnTaskCompletion.
+   */
+  private var _endNetworkTransmitTotalIdleMillis: Double = _
+  def endNetworkTransmitTotalIdleMillis: Double = _endNetworkTransmitTotalIdleMillis
+  private[spark] def setEndNetworkTransmitTotalIdleMillis(value: Double) = {
+    _endNetworkTransmitTotalIdleMillis = value
+  }
 
   /**
    * The number of bytes this task transmitted back to the driver as the TaskResult
@@ -238,6 +259,8 @@ class TaskMetrics extends Serializable {
     cpuUtilization = Some(new CpuUtilization(startCpuCounters))
     networkUtilization = Some(new NetworkUtilization(startNetworkCounters))
     diskUtilization = Some(DiskUtilization(startDiskCounters))
+    setEndNetworkTransmitTotalIdleMillis(
+      SparkEnv.get.localDagScheduler.getNetworkTransmitTotalIdleMillis())
   }
 
   /**

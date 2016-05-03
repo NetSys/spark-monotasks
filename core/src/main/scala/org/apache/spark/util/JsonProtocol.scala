@@ -310,6 +310,9 @@ private[spark] object JsonProtocol {
     ("Compute Wait Nanos" -> taskMetrics.computeWaitNanos) ~
     ("Disk Nanos" -> taskMetrics.diskNanos) ~
     ("Disk Wait Nanos" -> taskMetrics.diskWaitNanos) ~
+    ("Start Network Transmit Total Idle Millis" ->
+      taskMetrics.startNetworkTransmitTotalIdleMillis) ~
+    ("End Network Transmit Total Idle Millis" -> taskMetrics.endNetworkTransmitTotalIdleMillis) ~
     ("Result Size" -> taskMetrics.resultSize) ~
     ("JVM GC Time" -> taskMetrics.jvmGCTime) ~
     ("JVM GC Time Total" -> taskMetrics.jvmGCTimeTotal) ~
@@ -758,6 +761,10 @@ private[spark] object JsonProtocol {
     metrics.incDiskNanos(Utils.jsonOption(json \ "Disk Nanos").map(_.extract[Long]).getOrElse(0L))
     metrics.incDiskWaitNanos(
       Utils.jsonOption(json \ "Disk Wait Nanos").map(_.extract[Long]).getOrElse(0L))
+    metrics.setStartNetworkTransmitTotalIdleMillis(
+      (json \ "Start Network Transmit Total Idle Millis").extract[Double])
+    metrics.setEndNetworkTransmitTotalIdleMillis(
+      (json \ "End Network Transmit Total Idle Millis").extract[Double])
     metrics.setResultSize((json \ "Result Size").extract[Long])
     metrics.setJvmGCTime((json \ "JVM GC Time").extract[Long])
     metrics.setJvmGCTimeTotal((json \ "JVM GC Time Total").extract[Long])

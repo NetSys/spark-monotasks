@@ -19,7 +19,7 @@ package org.apache.spark.monotasks.network
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.atomic.AtomicLong
 
-import scala.collection.mutable.HashMap
+import scala.collection.mutable.{HashMap, HashSet}
 
 import org.apache.spark.{Logging, SparkConf, SparkException}
 
@@ -48,6 +48,15 @@ private[spark] class NetworkScheduler(conf: SparkConf) extends Logging {
 
   /** Maximum number of tasks that can concurrently have outstanding network requests. */
   private val maxConcurrentTasks = conf.getInt("spark.monotasks.network.maxConcurrentTasks", 0)
+
+  /** Ids of NetworkResponseMonotasks that are currently transmitting data over the network. */
+  private val runningResponseMonotasks = new HashSet[Long]()
+  /** End time of the last NetworkResponseMonotask to finish. */
+  private var lastTransmitEndNanos = 0L
+  /** The total time during which there were no blocks being sent by the current worker. */
+  private var transmitTotalIdleNanos = 0L
+
+  initializeIdleTimeMeasurement()
 
   // Start a thread responsible for executing the network monotasks in monotaskQueue.
   private val monotaskLaunchThread = new Thread(new Runnable() {
@@ -148,4 +157,55 @@ private[spark] class NetworkScheduler(conf: SparkConf) extends Logging {
   def addOutstandingBytes(bytes: Long) = currentOutstandingBytes.addAndGet(bytes)
 
   def getOutstandingBytes: Long = currentOutstandingBytes.get()
+
+  /**
+   * Called when a NetworkResponseMonotask is about to send its data. Updates internal metadata
+   * related to the total time that this NetworkScheduler has not been transmitting.
+   */
+  def updateIdleTimeOnResponseStart(
+      response: NetworkResponseMonotask,
+      currentTimeNanos: Long = System.nanoTime()): Unit = synchronized {
+    val idleNanos = currentTimeNanos - lastTransmitEndNanos
+    // Only update transmitTotalIdleNanos if idleNanos is positive to avoid a race condition. If
+    // there are other NetworkResponseMonotasks currently running, then we do not need to update the
+    // idle time because one of the other monotasks will have already done so.
+    if ((idleNanos > 0) && (runningResponseMonotasks.size == 0)) {
+      transmitTotalIdleNanos += idleNanos
+    }
+    runningResponseMonotasks += response.taskId
+  }
+
+  /**
+   * Called when a NetworkResponseMonotask has finished sending its data, or failed. Updates
+   * internal metadata related to the total time that the NetworkScheduler has not been
+   * transmitting.
+   */
+  def updateIdleTimeOnResponseEnd(
+      response: NetworkResponseMonotask,
+      currentTimeNanos: Long = System.nanoTime()): Unit = synchronized {
+    if (currentTimeNanos > lastTransmitEndNanos) {
+      lastTransmitEndNanos = currentTimeNanos
+    }
+    runningResponseMonotasks -= response.taskId
+  }
+
+  /**
+   * Configure the time that the transmission idle time measurements should treat as the time that
+   * this NetworkScheduler was created. Must be called before this NetworkScheduler is used.
+   */
+  def initializeIdleTimeMeasurement(startNanos: Long = System.nanoTime()): Unit = synchronized {
+    lastTransmitEndNanos = startNanos
+  }
+
+  def getTransmitTotalIdleMillis(
+      currentTimeNanos: Long = System.nanoTime()): Double = synchronized {
+    // If there are no NetworkResponseMonotasks currently running, then we need to account for the
+    // idle time since the last one finished.
+    val undocumentedIdleNanos = if (runningResponseMonotasks.size == 0) {
+      currentTimeNanos - lastTransmitEndNanos
+    } else {
+      0
+    }
+    (transmitTotalIdleNanos + undocumentedIdleNanos).toDouble / 1000000
+  }
 }

@@ -31,6 +31,9 @@ private[spark] class PrepareMonotask(context: TaskContextImpl, val serializedTas
   extends ComputeMonotask(context) {
 
   override def execute(): Option[ByteBuffer] = {
+    context.taskMetrics.setStartNetworkTransmitTotalIdleMillis(
+      SparkEnv.get.localDagScheduler.getNetworkTransmitTotalIdleMillis())
+
     val (taskFiles, taskJars, taskBytes) = Macrotask.deserializeWithDependencies(serializedTask)
 
     val dependencyManager = SparkEnv.get.dependencyManager

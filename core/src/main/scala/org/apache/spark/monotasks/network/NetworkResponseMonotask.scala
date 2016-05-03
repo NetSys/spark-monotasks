@@ -69,19 +69,23 @@ private[spark] class NetworkResponseMonotask(
     // from in-memory and respond with that.
     failureMessage match {
       case Some(message) =>
-        respond(new BlockFetchFailure(blockId.toString(), message))
+        respond(scheduler, new BlockFetchFailure(blockId.toString(), message))
 
       case None =>
         try {
           val buffer = SparkEnv.get.blockManager.getBlockData(blockId)
-          respond(new BlockFetchSuccess(
-            blockId.toString(),
-            buffer,
-            context.taskMetrics.diskNanos,
-            System.nanoTime() - creationTime))
+          respond(
+            scheduler,
+            new BlockFetchSuccess(
+              blockId.toString(),
+              buffer,
+              context.taskMetrics.diskNanos,
+              System.nanoTime() - creationTime))
         } catch {
           case NonFatal(t) =>
-            respond(new BlockFetchFailure(blockId.toString(), Throwables.getStackTraceAsString(t)))
+            respond(
+              scheduler,
+              new BlockFetchFailure(blockId.toString(), Throwables.getStackTraceAsString(t)))
         }
     }
   }
@@ -90,10 +94,19 @@ private[spark] class NetworkResponseMonotask(
    * Responds to a single message with some Encodable object. If a failure occurs while sending,
    * it will be logged and the channel closed.
    */
-  private def respond(result: Encodable): Unit = {
+  private def respond(scheduler: NetworkScheduler, result: Encodable): Unit = {
+    val isBlockResponse = result.isInstanceOf[BlockFetchSuccess]
+    if (isBlockResponse) {
+      scheduler.updateIdleTimeOnResponseStart(this)
+    }
+
     val remoteAddress = channel.remoteAddress.toString
     channel.writeAndFlush(result).addListener(new ChannelFutureListener {
       def operationComplete(future: ChannelFuture) {
+        if (isBlockResponse) {
+          scheduler.updateIdleTimeOnResponseEnd(NetworkResponseMonotask.this)
+        }
+
         if (future.isSuccess) {
           logInfo(s"Sent result $result to client $remoteAddress")
           // Regardless of whether we responded with BlockFetchSuccess or BlockFetchFailure,

@@ -171,6 +171,10 @@ private[spark] class LocalDagScheduler(
 
   def getOutstandingNetworkBytes(): Long = networkScheduler.getOutstandingBytes
 
+  def getNetworkTransmitTotalIdleMillis(currentTimeNanos: Long = System.nanoTime()): Double = {
+    networkScheduler.getTransmitTotalIdleMillis(currentTimeNanos)
+  }
+
   /**
    * This method processes events submitted to the LocalDagScheduler from external classes. It is
    * not thread safe, and will be called from a single-threaded event loop.
