@@ -46,8 +46,7 @@ import org.json4s.JsonDSL._
 import org.json4s.JsonAST._
 
 import org.apache.spark.executor._
-import org.apache.spark.performance_logging.{BlockDeviceUtilization, CpuCounters, CpuUtilization,
-  DiskUtilization, NetworkUtilization}
+import org.apache.spark.performance_logging._
 import org.apache.spark.scheduler._
 import org.apache.spark.storage._
 import org.apache.spark._
@@ -344,9 +343,21 @@ private[spark] object JsonProtocol {
   }
 
   def blockDeviceUtilizationToJson(blockDeviceUtilization: BlockDeviceUtilization): JValue = {
+    ("Start Counters" -> blockDeviceCountersToJson(blockDeviceUtilization.startCounters)) ~
+    ("End Counters" -> blockDeviceCountersToJson(blockDeviceUtilization.endCounters)) ~
+    // The utilization could be inferred from the start and end counters, but still write it for
+    // backwards compatibility with old parsing scripts.
     ("Disk Utilization" -> blockDeviceUtilization.diskUtilization) ~
     ("Read Throughput" -> blockDeviceUtilization.readThroughput) ~
     ("Write Throughput" -> blockDeviceUtilization.writeThroughput)
+  }
+
+  def blockDeviceCountersToJson(blockDeviceCounters: BlockDeviceCounters): JValue = {
+    ("Sectors Read" -> blockDeviceCounters.sectorsRead) ~
+    ("Millis Reading" -> blockDeviceCounters.millisReading) ~
+    ("Sectors Written" -> blockDeviceCounters.sectorsWritten) ~
+    ("Millis Writing" -> blockDeviceCounters.millisWriting) ~
+    ("Millis Total" -> blockDeviceCounters.millisTotal)
   }
 
   def diskUtilizationToJson(diskUtilization: DiskUtilization): JValue = {
@@ -359,11 +370,21 @@ private[spark] object JsonProtocol {
   }
 
   def networkUtilizationToJson(networkUtilization: NetworkUtilization): JValue = {
+    ("Start Counters" -> networkCountersToJson(networkUtilization.startCounters)) ~
+    ("End Counters" -> networkCountersToJson(networkUtilization.endCounters)) ~
     ("Elapsed Millis" -> networkUtilization.elapsedMillis) ~
     ("Bytes Received Per Second" -> networkUtilization.bytesReceivedPerSecond) ~
     ("Bytes Transmitted Per Second" -> networkUtilization.bytesTransmittedPerSecond) ~
     ("Packets Received Per Second" -> networkUtilization.packetsReceivedPerSecond) ~
     ("Packets Transmitted Per Second" -> networkUtilization.packetsTransmittedPerSecond)
+  }
+
+  def networkCountersToJson(networkCounters: NetworkCounters): JValue = {
+    // Don't log the received and transmitted packets here, since Spark typically sends a large
+    // amount of data such that MTU-sized packets are sent (and the logs are already fairly polluted
+    // with miscellaneous metrics).
+    ("Received Bytes" -> networkCounters.receivedBytes) ~
+    ("Transmitted Bytes" -> networkCounters.transmittedBytes)
   }
 
   def shuffleReadMetricsToJson(shuffleReadMetrics: ShuffleReadMetrics): JValue = {
@@ -817,13 +838,6 @@ private[spark] object JsonProtocol {
     new CpuUtilization(startCounters, endCounters)
   }
 
-  def blockDeviceUtilizationFromJson(json: JValue): BlockDeviceUtilization = {
-    new BlockDeviceUtilization(
-      (json \ "Disk Utilization").extract[Float],
-      (json \ "Read Throughput").extract[Float],
-      (json \ "Write Throughput").extract[Float])
-  }
-
   def diskUtilizationFromJson(json: JValue): DiskUtilization = {
     // TODO: This does not currently decode the block device utilization, which should be done
     //       using blockDeviceUtilizationFromJson! Decoding the mapping of names to utilizations is
@@ -835,12 +849,12 @@ private[spark] object JsonProtocol {
   }
 
   def networkUtilizationFromJson(json: JValue): NetworkUtilization = {
+    // TODO: This does not currently decode the network utilization correctly, because
+    //       NetworkCounters doesn't have an appropriate constructor.
+    //       https://github.com/NetSys/spark-monotasks/issues/33
     new NetworkUtilization(
-      (json \ "Elapsed Millis").extract[Long],
-      (json \ "Bytes Received Per Second").extract[Float],
-      (json \ "Bytes Transmitted Per Second").extract[Float],
-      (json \ "Packets Received Per Second").extract[Float],
-      (json \ "Packets Transmitted Per Second").extract[Float])
+      new NetworkCounters(),
+      new NetworkCounters())
   }
 
   def taskEndReasonFromJson(json: JValue): TaskEndReason = {
