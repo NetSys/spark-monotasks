@@ -127,6 +127,14 @@ class TaskMetrics extends Serializable {
   def jvmGCTime = _jvmGCTime
   private[spark] def setJvmGCTime(value: Long) = _jvmGCTime = value
 
+  /**
+   * Total time the JVM had spent in garbage collection at the time when this task finished. Useful
+   * for determining the total amount of GC that occured on a machine while a job was running.
+   */
+  private var _jvmGCTimeTotal: Long = _
+  def jvmGCTimeTotal = _jvmGCTime
+  private[spark] def setJvmGCTimeTotal(value: Long) = _jvmGCTimeTotal = value
+
   @transient private val startingGCMillis = Utils.totalGarbageCollectionMillis
 
   /**
@@ -225,7 +233,8 @@ class TaskMetrics extends Serializable {
   /** Should be called when a macrotask completes to set metrics about the task's runtime. */
   def setMetricsOnTaskCompletion() {
     setExecutorRunTime(System.currentTimeMillis() - startingTime)
-    setJvmGCTime(Utils.totalGarbageCollectionMillis - startingGCMillis)
+    setJvmGCTimeTotal(Utils.totalGarbageCollectionMillis)
+    setJvmGCTime(_jvmGCTimeTotal - startingGCMillis)
     cpuUtilization = Some(new CpuUtilization(startCpuCounters))
     networkUtilization = Some(new NetworkUtilization(startNetworkCounters))
     diskUtilization = Some(DiskUtilization(startDiskCounters))

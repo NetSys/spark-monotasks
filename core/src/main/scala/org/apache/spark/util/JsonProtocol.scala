@@ -312,6 +312,7 @@ private[spark] object JsonProtocol {
     ("Disk Wait Nanos" -> taskMetrics.diskWaitNanos) ~
     ("Result Size" -> taskMetrics.resultSize) ~
     ("JVM GC Time" -> taskMetrics.jvmGCTime) ~
+    ("JVM GC Time Total" -> taskMetrics.jvmGCTimeTotal) ~
     ("Result Serialization Time" -> taskMetrics.resultSerializationTime) ~
     ("Memory Bytes Spilled" -> taskMetrics.memoryBytesSpilled) ~
     ("Disk Bytes Spilled" -> taskMetrics.diskBytesSpilled) ~
@@ -759,6 +760,7 @@ private[spark] object JsonProtocol {
       Utils.jsonOption(json \ "Disk Wait Nanos").map(_.extract[Long]).getOrElse(0L))
     metrics.setResultSize((json \ "Result Size").extract[Long])
     metrics.setJvmGCTime((json \ "JVM GC Time").extract[Long])
+    metrics.setJvmGCTimeTotal((json \ "JVM GC Time Total").extract[Long])
     metrics.setResultSerializationTime((json \ "Result Serialization Time").extract[Long])
     metrics.incMemoryBytesSpilled((json \ "Memory Bytes Spilled").extract[Long])
     metrics.incDiskBytesSpilled((json \ "Disk Bytes Spilled").extract[Long])
