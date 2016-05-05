@@ -16,6 +16,8 @@
 
 package org.apache.spark.examples.monotasks
 
+import scala.language.postfixOps
+import scala.sys.process._
 import scala.util.Random
 
 import org.apache.hadoop.io.LongWritable
@@ -72,6 +74,10 @@ object SortJob extends Logging {
       }
 
       (0 until numShuffles).foreach { i =>
+        // Remove the sorted data, so that the disk doesn't fill up, and just in case there's
+        // lingering sorted data from an earlier experiment.
+        "/root/ephemeral-hdfs/bin/hdfs dfs -rm -r ./*sorted*" !
+
         val unsortedRddDisk = spark.sequenceFile(
           filename, classOf[LongWritable], classOf[LongArrayWritable])
         // Convert the RDD back to Longs, because LongWritables aren't serializable, so Spark
