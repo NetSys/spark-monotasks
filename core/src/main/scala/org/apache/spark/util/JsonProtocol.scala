@@ -308,6 +308,7 @@ private[spark] object JsonProtocol {
     ("Executor Run Time" -> taskMetrics.executorRunTime) ~
     ("Result Size" -> taskMetrics.resultSize) ~
     ("JVM GC Time" -> taskMetrics.jvmGCTime) ~
+    ("JVM GC Time Total" -> taskMetrics.jvmGCTimeTotal) ~
     ("Result Serialization Time" -> taskMetrics.resultSerializationTime) ~
     ("Memory Bytes Spilled" -> taskMetrics.memoryBytesSpilled) ~
     ("Disk Bytes Spilled" -> taskMetrics.diskBytesSpilled) ~
@@ -748,6 +749,7 @@ private[spark] object JsonProtocol {
     metrics.setExecutorRunTime((json \ "Executor Run Time").extract[Long])
     metrics.setResultSize((json \ "Result Size").extract[Long])
     metrics.setJvmGCTime((json \ "JVM GC Time").extract[Long])
+    metrics.setJvmGCTimeTotal((json \ "JVM GC Time Total").extract[Long])
     metrics.setResultSerializationTime((json \ "Result Serialization Time").extract[Long])
     metrics.incMemoryBytesSpilled((json \ "Memory Bytes Spilled").extract[Long])
     metrics.incDiskBytesSpilled((json \ "Disk Bytes Spilled").extract[Long])
