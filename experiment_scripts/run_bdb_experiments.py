@@ -306,12 +306,8 @@ def stop_thriftserver(driver_addr, identity_file):
 
 def start_thriftserver(driver_addr, identity_file):
   print "Starting the Thrift server"
-  # The value for "--executor-memory" is taken from the default value for the "--executor-memory"
-  # parameter in the benchmark/runner/prepare_benchmark.py script.
   utils.ssh_call(
-    driver_addr,
-    "/root/spark/sbin/start-thriftserver.sh --executor-memory 24G",
-    identity_file=identity_file)
+    driver_addr, "/root/spark/sbin/start-thriftserver.sh", identity_file=identity_file)
   # TODO: We should keep checking to see if the JDBC server has started yet.
   print "Sleeping for 30 seconds so the JDBC server can start"
   time.sleep(30)
