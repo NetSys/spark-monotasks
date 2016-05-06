@@ -41,14 +41,14 @@ class ComputeSchedulerSuite extends FunSuite {
     computeScheduler.initialize(memoryStore)
 
     // Because there is no free memory, submitted monotasks shouldn't be run immediately.
-    val mockComputeMonotask = mock(classOf[ComputeMonotask])
-    when(mockComputeMonotask.context).thenReturn(new TaskContextImpl(0, 0))
-    computeScheduler.submitTask(mockComputeMonotask)
-    verify(mockComputeMonotask, never()).executeAndHandleExceptions()
+    val mockShuffleMapMonotask = mock(classOf[ShuffleMapMonotask[Any]])
+    when(mockShuffleMapMonotask.context).thenReturn(new TaskContextImpl(0, 0))
+    computeScheduler.submitTask(mockShuffleMapMonotask)
+    verify(mockShuffleMapMonotask, never()).executeAndHandleExceptions()
 
     // Once memory becomes available in the memory store, the task should be run.
     memoryStore.remove(blockId)
-    verify(mockComputeMonotask, timeout(1000)).executeAndHandleExceptions()
+    verify(mockShuffleMapMonotask, timeout(1000)).executeAndHandleExceptions()
   }
 
   /**
