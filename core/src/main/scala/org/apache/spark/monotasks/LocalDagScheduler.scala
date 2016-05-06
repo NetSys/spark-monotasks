@@ -276,7 +276,7 @@ private[spark] class LocalDagScheduler(
       completedMonotask: Monotask,
       serializedTaskResult: Option[ByteBuffer] = None): Unit = {
     val taskAttemptId = completedMonotask.context.taskAttemptId
-    logInfo(s"Monotask $completedMonotask (id: ${completedMonotask.taskId}) for " +
+    logDebug(s"Monotask $completedMonotask (id: ${completedMonotask.taskId}) for " +
       s"macrotask $taskAttemptId has completed.")
     completedMonotask.cleanup()
     updateMetricsForFinishedMonotask(completedMonotask)
@@ -325,7 +325,7 @@ private[spark] class LocalDagScheduler(
       logDebug(s"$monotask is a dependent of completed monotask $completedMonotask")
       if (monotask.dependenciesSatisfied()) {
         if (waitingMonotasks.contains(monotask)) {
-          logInfo(s"Scheduling $monotask now that $completedMonotask has finished")
+          logDebug(s"Scheduling $monotask now that $completedMonotask has finished")
           scheduleMonotask(monotask)
           Some(monotask)
         } else {
@@ -350,7 +350,7 @@ private[spark] class LocalDagScheduler(
    */
   private def handleTaskFailure(
       failedMonotask: Monotask, serializedFailureReason: Option[ByteBuffer]): Unit = {
-    logInfo(s"Monotask ${failedMonotask.taskId} (for macrotask " +
+    logError(s"Monotask ${failedMonotask.taskId} (for macrotask " +
       s"${failedMonotask.context.taskAttemptId}) failed")
     failedMonotask.cleanup()
     updateMetricsForFinishedMonotask(failedMonotask)
@@ -455,7 +455,7 @@ private[spark] class LocalDagScheduler(
       "newly added monotask, which could potentially cause data to be stored for longer than " +
       "necessary.")
     runningMonotasksForMacrotask.foreach { runningMonotask =>
-      logInfo(s"Adding monotask $monotask as dependency of $runningMonotask")
+      logDebug(s"Adding monotask $monotask as dependency of $runningMonotask")
       monotask.addDependency(runningMonotask)
     }
 

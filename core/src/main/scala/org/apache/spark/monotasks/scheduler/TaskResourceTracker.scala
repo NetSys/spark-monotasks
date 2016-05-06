@@ -70,7 +70,7 @@ private[spark] class TaskResourceTracker extends Logging {
       stageId: Int,
       completedMonotask: Monotask,
       startedMonotasks: HashSet[Monotask]): Unit = {
-    logInfo(s"UpdateQueueTracking called for $completedMonotask ${startedMonotasks.mkString(",")}")
+    logDebug(s"UpdateQueueTracking called for $completedMonotask ${startedMonotasks.mkString(",")}")
     val completedMonotaskType = MonotaskType.getType(completedMonotask)
 
     // Try to coalesce monotasks into a single phase if they ran back to back and used the same
@@ -80,7 +80,7 @@ private[spark] class TaskResourceTracker extends Logging {
         !completedMonotask.isInstanceOf[PrepareMonotask] &&
         startedMonotaskTypes.size == 1 &&
         startedMonotaskTypes.contains(completedMonotaskType)) {
-      logInfo(s"Skipping update about finished monotask $completedMonotask, because it uses the " +
+      logDebug(s"Skipping update about finished monotask $completedMonotask, because it uses the " +
         "same resource as the previous phase, so can be coalesced to avoid unnecessary " +
         "notifications to MonotasksScheduler")
       return
@@ -116,7 +116,7 @@ private[spark] class TaskResourceTracker extends Logging {
             "running resources.")
         var phaseInfo = resourceToInfo(completedMonotaskType)
         phaseInfo.numRunningMonotasks -= 1
-        logInfo(s"TaskContextImpl: just finished $completedMonotask; count is " +
+        logDebug(s"TaskContextImpl: just finished $completedMonotask; count is " +
           s"${phaseInfo.numRunningMonotasks}")
         assert(phaseInfo.numRunningMonotasks >= 0)
         if (phaseInfo.numRunningMonotasks > 0) {
@@ -158,7 +158,7 @@ private[spark] class TaskResourceTracker extends Logging {
       } else {
         val phaseId = nextPhaseId
         nextPhaseId += 1
-        logInfo(s"TaskContextImpl: just started $startedMonotaskType with phase id $phaseId")
+        logDebug(s"TaskContextImpl: just started $startedMonotaskType with phase id $phaseId")
         resourceToInfo.put(startedMonotaskType, new PhaseInfo(phaseId, 1))
         Some((startedMonotaskType, phaseId))
       }
