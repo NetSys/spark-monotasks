@@ -17,7 +17,8 @@
 package org.apache.spark.monotasks.disk
 
 import java.nio.channels.ClosedByInterruptException
-import java.util.concurrent.LinkedBlockingQueue
+import java.util.Comparator
+import java.util.concurrent.{LinkedBlockingQueue, PriorityBlockingQueue}
 import java.util.concurrent.atomic.AtomicInteger
 
 import scala.collection.mutable.HashMap
@@ -232,6 +233,14 @@ private[spark] class DiskScheduler(
     }
   }
 
+  /** Orders disk monotasks based on the macrotask's ID. */
+  private class MonotaskComparator extends Comparator[DiskMonotask] {
+    @Override def compare(monotask1: DiskMonotask, monotask2: DiskMonotask): Int = {
+      // Monotasks with smaller macrotask IDs should be prioritized first.
+      return (monotask1.context.taskAttemptId - monotask2.context.taskAttemptId).toInt
+    }
+  }
+
   /**
    * Stores and services the DiskMonotask queue for the specified disk.
    *
@@ -240,16 +249,22 @@ private[spark] class DiskScheduler(
    */
   private class DiskAccessor(diskId: String, concurrency: Int) extends Runnable {
 
-    // The name of the physical disk on which this DiskAccessor will operate.
+    /** The name of the physical disk on which this DiskAccessor will operate. */
     val diskName = BlockFileManager.getDiskNameFromPath(diskId)
 
-    // A queue of DiskMonotasks that are waiting to be executed.
-    private val taskQueue = new LinkedBlockingQueue[DiskMonotask]()
+    /**
+     * A queue of DiskMonotasks that are waiting to be executed, ordered by the task ID (these
+     * are ordered by task ID so that requests from one machine can't accumulate and temporarily
+     * starve requests from other machines).
+     */
+    private val taskQueue = new PriorityBlockingQueue[DiskMonotask](11, new MonotaskComparator)
 
     private val numRunningAndQueuedDiskMonotasks = new AtomicInteger(0)
 
-    // An array of threads that are concurrently executing DiskMonotasks from this DiskAccessor's
-    // task queue.
+    /**
+     * An array of threads that are concurrently executing DiskMonotasks from this DiskAccessor's
+     * task queue.
+     */
     private val diskAccessorThreads = (1 to concurrency).map { threadIndex =>
       val diskAccessorThread = new Thread(this)
       diskAccessorThread.setDaemon(true)
