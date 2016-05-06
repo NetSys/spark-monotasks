@@ -15,19 +15,28 @@
  */
 package org.apache.spark.monotasks.scheduler
 
-import scala.collection.mutable.{HashSet, Set}
+import scala.collection.mutable.Set
 
+import org.apache.spark.SparkConf
 import org.apache.spark.monotasks.MonotaskType
 import org.apache.spark.scheduler.{TaskSet, WorkerOffer}
 import org.apache.spark.Logging
 
 /** A MonotasksScheduler that assigns a fixed number of monotasks to each worker machine. */
-private[spark] class SlotScheduler extends MonotasksScheduler with Logging {
+private[spark] class SlotScheduler(conf: SparkConf) extends MonotasksScheduler with Logging {
+  /**
+   * Number of tasks that may be running concurrently on the network on an executor.
+   *
+   * Always at least 1, because when this is configured to 0, it means there's no limit on
+   * the number of tasks that can be using the network concurrently.
+   */
+  private val concurrentNetworkTasks = Math.max(
+    1, conf.getInt("spark.monotasks.network.maxConcurrentTasks", 0))
 
   /** Called on the driver to determine how many tasks to launch initially. */
   def getInitialOffers(
       originalWorkerOffers: Seq[WorkerOffer], taskSet: TaskSet): Seq[WorkerOffer] = {
-    val networkSlotsToAdd = if (taskSet.usesNetwork) 1 else 0
+    val networkSlotsToAdd = if (taskSet.usesNetwork) concurrentNetworkTasks else 0
     originalWorkerOffers.map {  originalOffer =>
       val diskSlotsToAdd = if (taskSet.usesDisk) originalOffer.totalDisks else 0
       val newSlots = originalOffer.freeSlots + networkSlotsToAdd + diskSlotsToAdd

@@ -75,7 +75,7 @@ private[spark] object MonotasksScheduler extends Logging {
 
       case _ =>
         // By default, use the slot-based scheduler.
-        new SlotScheduler
+        new SlotScheduler(conf)
     }
   }
 }
