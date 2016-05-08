@@ -7,7 +7,7 @@ import subprocess
 
 import utils
 
-target_total_data_gb = 200
+target_total_data_gb = 600
 # HDFS blocks are actually 128MB; round down here so that none of the output monotasks
 # end up writing data to two different blocks, which we don't handle correctly.
 hdfs_blocks_per_gb = 1024 / 105
@@ -16,27 +16,13 @@ slaves = [slave_line.strip("\n") for slave_line in open("/root/spark/conf/slaves
 print "Running experiment assuming slaves {}".format(slaves)
 
 num_machines = len(slaves)
-values_per_key_values = [10, 25, 100, 1]
+values_per_key_values = [10]
 num_tasks = target_total_data_gb * hdfs_blocks_per_gb
 # Just do one trial for now! When experiment is properly configured, do many trials.
 num_shuffles = 3
-cores_per_worker_values = [8, 4]
+cores_per_worker_values = [8]
 
 for cores_per_worker in cores_per_worker_values:
-  # Change the number of concurrent tasks by re-setting the Spark config.
-  change_cores_command = ("sed -i s/SPARK_WORKER_CORES=.*/SPARK_WORKER_CORES=" +
-    "{}/ /root/spark/conf/spark-env.sh".format(cores_per_worker))
-  print "Changing the number of Spark cores using command ", change_cores_command
-  subprocess.check_call(change_cores_command, shell=True)
-
-  copy_config_command = "/root/spark-ec2/copy-dir --delete /root/spark/conf/"
-  print "Copying the new configuration to the cluster with command ", copy_config_command
-  subprocess.check_call(copy_config_command, shell=True)
-
-  # Need to stop and re-start Spark, so that the new number of cores per worker takes effect.
-  subprocess.check_call("/root/spark/sbin/stop-all.sh")
-  subprocess.check_call("/root/spark/sbin/start-all.sh")
-
   for values_per_key in values_per_key_values:
     total_num_items = target_total_data_gb / (4.9 + values_per_key * 1.92) * (64 * 4000000)
     items_per_task =  int(total_num_items / num_tasks)
