@@ -178,7 +178,7 @@ class NewHadoopRDD[K, V](
 
   override def compute(
       sparkPartition: Partition,
-      sparkTaskContext: TaskContext): Iterator[(K, V)] = {
+      sparkTaskContext: TaskContext): InterruptibleIterator[(K, V)] = {
     val localHadoopConf = confBroadcast.value.value
     val inputFormat = inputFormatClass.newInstance
     inputFormat match {
@@ -243,10 +243,12 @@ class NewHadoopRDD[K, V](
     if (separateHdfsSerialization) {
       // Decompress and deserialize the HDFS data separately, so that the time can be measured.
       val deserializationDecompressionStartMillis = System.currentTimeMillis()
-      val deserializedDecompressedArray = deserializedDecompressedIterator.toArray
+      val alreadyDeserDecompIterator = makeMaterializedWritableIterator(
+        sparkTaskContext, deserializedDecompressedIterator)
       sparkTaskContext.taskMetrics.setHdfsDeserializationDecompressionMillis(
         System.currentTimeMillis() - deserializationDecompressionStartMillis)
-      deserializedDecompressedArray.iterator
+
+      alreadyDeserDecompIterator
     } else {
       deserializedDecompressedIterator
     }
