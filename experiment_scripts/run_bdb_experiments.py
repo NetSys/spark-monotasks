@@ -86,6 +86,12 @@ def parse_args():
     default=False,
     help="Whether to compress output tables.")
   parser.add_argument(
+    "--memory",
+    action="store_true",
+    default=False,
+    help=("If specified, then the input and output tables will be stored in memory. This " +
+      "automatically caches the input tables in memory before running a query."))
+  parser.add_argument(
     "-n",
     "--num-trials",
     help="The number of times to execute each query.",
@@ -196,6 +202,9 @@ def execute_query(aws_key_id, aws_key, args, query, branch, do_prepare):
   else:
     start_thriftserver()
 
+  if args.memory:
+    cache_table_for_query(query)
+
   print "Executing query"
   run_query_script = path.join(benchmark_runner_dir, "run-query.sh")
   run_query_command = "{} \
@@ -204,7 +213,6 @@ def execute_query(aws_key_id, aws_key, args, query, branch, do_prepare):
     --spark-identity-file={} \
     --query-num={} \
     --num-trials={} \
-    --spark-no-cache \
     --clear-buffer-cache".format(
       run_query_script,
       driver_addr,
@@ -213,6 +221,8 @@ def execute_query(aws_key_id, aws_key, args, query, branch, do_prepare):
       args.num_trials)
   if args.compress_output:
     run_query_command += " --compress"
+  if args.memory:
+    run_query_command += " --spark-cache-output-tables"
   execute_shell_command(run_query_command)
 
   # Stop the Thrift server and Spark in order to stop using the Spark log files.
@@ -267,6 +277,30 @@ def start_thriftserver():
   # TODO: We should keep checking to see if the JDBC server has started yet.
   print "Sleeping for 30 seconds so that the JDBC server can start"
   time.sleep(30)
+
+
+def cache_table_for_query(query):
+  """
+  Caches the tables required by the specified query in memory. Spark and the Thrift server must be
+  running before calling this function.
+  """
+  if "4" in query:
+    cache_table(query, table="documents")
+  else:
+    if "1" not in query:
+      cache_table(query, table="uservisits")
+    if "2" not in query:
+      cache_table(query, table="rankings")
+
+
+def cache_table(query, table):
+  """
+  Caches the specified table in memory. Spark and the Thrift server must be running before calling
+  this function.
+  """
+  print "Caching table '{}' for query {}...".format(table, query)
+  execute_shell_command("/root/spark/bin/beeline -u jdbc:hive2://localhost:10000 -n root " +
+    "-e 'CACHE TABLE {}'".format(table))
 
 
 def print_heading(heading):
