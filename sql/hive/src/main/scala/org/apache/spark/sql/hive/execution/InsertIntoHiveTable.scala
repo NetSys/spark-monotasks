@@ -22,6 +22,7 @@ import java.util
 import java.util.Date
 
 import scala.collection.JavaConversions._
+import scala.collection.mutable.ArrayBuffer
 
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.hive.conf.HiveConf
@@ -35,7 +36,8 @@ import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspectorUtils.Object
 import org.apache.hadoop.hive.serde2.objectinspector._
 import org.apache.hadoop.mapred.{FileOutputFormat, JobConf}
 
-import org.apache.spark.{SerializableWritable, SparkException, TaskContext}
+import org.apache.spark.{InterruptibleIterator, SerializableWritable, SparkEnv, SparkException,
+  TaskContext}
 import org.apache.spark.mapreduce.SparkHadoopMapReduceUtil
 import org.apache.spark.monotasks.disk.{MemoryStoreFileSystem, MemoryStorePath}
 import org.apache.spark.rdd.RDD
@@ -106,8 +108,23 @@ case class InsertIntoHiveTable(
 
       writerContainer.executorSideSetup(context.stageId, context.partitionId, context.attemptNumber)
 
+      val separateHdfsSerialization = SparkEnv.get.conf.getBoolean(
+        "spark.monotasks.separateHdfsSerialization", false)
+      val iteratorToSerialize = if (separateHdfsSerialization) {
+        // Evaluate the iterator, without serializing or compressing the records. Serialization and
+        // compression will happen separately so that their runtime can be measured.
+        val buffer = new ArrayBuffer[Row]()
+        while (iterator.hasNext) {
+          buffer += iterator.next().copy()
+        }
+        new InterruptibleIterator[Row](context, buffer.iterator)
+      } else {
+        iterator
+      }
+
       var numRecords = 0L
-      iterator.foreach { row =>
+      val serializationCompressionStartMillis = System.currentTimeMillis()
+      iteratorToSerialize.foreach { row =>
         numRecords += 1
 
         var i = 0
@@ -122,6 +139,10 @@ case class InsertIntoHiveTable(
       }
 
       writerContainer.close()
+      if (separateHdfsSerialization) {
+        val serMillis = System.currentTimeMillis() - serializationCompressionStartMillis
+        context.taskMetrics.setHdfsSerializationCompressionMillis(serMillis)
+      }
       submitHdfsWriteMonotask(
         conf.value, writerContainer.getMemoryStorePath(), rdd.id, context, numRecords)
     }

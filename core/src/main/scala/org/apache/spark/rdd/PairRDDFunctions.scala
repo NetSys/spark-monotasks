@@ -1005,7 +1005,7 @@ class PairRDDFunctions[K, V](self: RDD[(K, V)])
       val iteratorToSerialize = if (separateHdfsSerialization) {
         // Evaluate the iterator, without serializing or compressing the records. Serialization and
         // compression will happen separately so that their runtime can be measured.
-        iterator.toArray.iterator
+        makeMaterializedWritableIterator(context, iterator)
       } else {
         iterator
       }
@@ -1019,22 +1019,21 @@ class PairRDDFunctions[K, V](self: RDD[(K, V)])
         codec)
 
       var numRecords = 0
+      val serializationCompressionStartMillis = System.currentTimeMillis()
       try {
-        val serializationCompressionStartMillis = System.currentTimeMillis()
         // Serialize the RDD partition and store its bytes in byteStream.
-        iteratorToSerialize.foreach {
-          case (key: Any, value: Any) =>
-            recordWriter.write(key, value)
-            numRecords += 1
-        }
-
-        if (separateHdfsSerialization) {
-          context.taskMetrics.setHdfsSerializationCompressionMillis(
-            System.currentTimeMillis() - serializationCompressionStartMillis)
+        while (iteratorToSerialize.hasNext()) {
+          val keyValuePair = iteratorToSerialize.next()
+          recordWriter.write(keyValuePair._1, keyValuePair._2)
+          numRecords += 1
         }
       } finally {
         // This also closes byteStream.
         recordWriter.close(executorHadoopTaskContext)
+      }
+      if (separateHdfsSerialization) {
+        context.taskMetrics.setHdfsSerializationCompressionMillis(
+          System.currentTimeMillis() - serializationCompressionStartMillis)
       }
 
       submitHdfsWriteMonotask(

@@ -38,9 +38,12 @@ import java.lang.{Boolean => JBoolean, Integer => JInteger}
 import java.nio.ByteBuffer
 import java.util.UUID
 
+import scala.collection.mutable.ArrayBuffer
+
 import org.apache.hadoop.conf.{Configurable, Configuration}
 import org.apache.hadoop.fs.{FSDataOutputStream, FileSystem}
 import org.apache.hadoop.fs.FileSystem.Statistics
+import org.apache.hadoop.io.{BytesWritable, LongWritable, NullWritable, Text, Writable}
 import org.apache.hadoop.io.compress.{CompressionCodec, GzipCodec}
 import org.apache.hadoop.io.SequenceFile
 import org.apache.hadoop.io.SequenceFile.{CompressionType, Writer}
@@ -50,11 +53,11 @@ import org.apache.hadoop.mapreduce.lib.output.{FileOutputCommitter, FileOutputFo
   SequenceFileOutputFormat, TextOutputFormat}
 import org.apache.hadoop.util.ReflectionUtils
 
-import org.apache.spark.{SparkEnv, TaskContext, TaskContextImpl}
+import org.apache.spark.{InterruptibleIterator, SparkEnv, TaskContext, TaskContextImpl}
 import org.apache.spark.monotasks.AddToMacrotask
 import org.apache.spark.monotasks.disk.HdfsWriteMonotask
 import org.apache.spark.storage.{BlockId, StorageLevel, TempLocalBlockId}
-import org.apache.spark.util.ByteArrayOutputStreamWithZeroCopyByteBuffer
+import org.apache.spark.util.{ByteArrayOutputStreamWithZeroCopyByteBuffer, LongArrayWritable}
 
 private[spark]
 trait SparkHadoopMapReduceUtil {
@@ -296,6 +299,38 @@ trait SparkHadoopMapReduceUtil {
       codec,
       numRecords)
     SparkEnv.get.localDagScheduler.post(AddToMacrotask(hdfsWriteMonotask))
+  }
+
+  /** Unrolls the provided iterator, then returns a new iterator over the values. */
+  def makeMaterializedWritableIterator[K, V](
+      sparkTaskContext: TaskContext,
+      it: Iterator[(K, V)]): InterruptibleIterator[(K, V)] = {
+    val buffer = new ArrayBuffer[(K, V)]()
+    while (it.hasNext) {
+      val nextPair = it.next()
+      buffer += ((
+        copyWritable(nextPair._1.asInstanceOf[Writable]).asInstanceOf[K],
+        copyWritable(nextPair._2.asInstanceOf[Writable]).asInstanceOf[V]))
+    }
+    new InterruptibleIterator[(K, V)](sparkTaskContext, buffer.iterator)
+  }
+
+  /** Returns a copy of the provided writable. */
+  private def copyWritable(original: Writable): Writable = {
+    original match {
+      case longArrayWritable: LongArrayWritable =>
+        new LongArrayWritable(longArrayWritable.get())
+      case longWritable: LongWritable =>
+        new LongWritable(longWritable.get())
+      case nullWritable: NullWritable =>
+        NullWritable.get()
+      case text: Text =>
+        new Text(text.copyBytes())
+      case bytesWritable: BytesWritable =>
+        new BytesWritable(bytesWritable.copyBytes())
+      case other =>
+        throw new Exception(s"Unknown Writable: $other (${other.getClass})")
+    }
   }
 }
 
