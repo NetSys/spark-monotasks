@@ -310,6 +310,9 @@ private[spark] object JsonProtocol {
     ("Compute Wait Nanos" -> taskMetrics.computeWaitNanos) ~
     ("Disk Nanos" -> taskMetrics.diskNanos) ~
     ("Disk Wait Nanos" -> taskMetrics.diskWaitNanos) ~
+    ("HDFS Deserialization/Decompression Millis" ->
+      taskMetrics.hdfsDeserializationDecompressionMillis) ~
+    ("HDFS Serialization/Compression Millis" -> taskMetrics.hdfsSerializationCompressionMillis) ~
     ("Start Network Transmit Total Idle Millis" ->
       taskMetrics.startNetworkTransmitTotalIdleMillis) ~
     ("End Network Transmit Total Idle Millis" -> taskMetrics.endNetworkTransmitTotalIdleMillis) ~
@@ -761,6 +764,10 @@ private[spark] object JsonProtocol {
     metrics.incDiskNanos(Utils.jsonOption(json \ "Disk Nanos").map(_.extract[Long]).getOrElse(0L))
     metrics.incDiskWaitNanos(
       Utils.jsonOption(json \ "Disk Wait Nanos").map(_.extract[Long]).getOrElse(0L))
+    metrics.setHdfsDeserializationDecompressionMillis(
+      (json \ "HDFS Deserialization/Decompression Millis").extract[Long])
+    metrics.setHdfsSerializationCompressionMillis(
+      (json \ "HDFS Serialization/Compression Millis").extract[Long])
     metrics.setStartNetworkTransmitTotalIdleMillis(
       (json \ "Start Network Transmit Total Idle Millis").extract[Double])
     metrics.setEndNetworkTransmitTotalIdleMillis(

@@ -178,7 +178,7 @@ class NewHadoopRDD[K, V](
 
   override def compute(
       sparkPartition: Partition,
-      sparkTaskContext: TaskContext): InterruptibleIterator[(K, V)] = {
+      sparkTaskContext: TaskContext): Iterator[(K, V)] = {
     val localHadoopConf = confBroadcast.value.value
     val inputFormat = inputFormatClass.newInstance
     inputFormat match {
@@ -202,40 +202,54 @@ class NewHadoopRDD[K, V](
     val inputMetrics =
       sparkTaskContext.taskMetrics.getInputMetricsForReadMethod(DataReadMethod.Hadoop)
 
-    new InterruptibleIterator[(K, V)](sparkTaskContext, new NextIterator[(K, V)] {
-      // Register an on-task-completion callback to close the RecordReader.
-      sparkTaskContext.addTaskCompletionListener(_ => closeIfNeeded())
+    val deserializedDecompressedIterator =
+      new InterruptibleIterator[(K, V)](sparkTaskContext, new NextIterator[(K, V)] {
+        // Register an on-task-completion callback to close the RecordReader.
+        sparkTaskContext.addTaskCompletionListener(_ => closeIfNeeded())
 
-      override def getNext(): (K, V)  = {
-        try {
-          finished = !recordReader.nextKeyValue()
-        } catch  {
-          case _: EOFException => finished = true
-        }
-        if (finished) {
-          // Close and release the reader here; close() will also be called when the macrotask
-          // completes, but it helps to close and release the reference to the reader early to
-          // release buffers that are stored by the RecordReader.
-          close()
-          (null.asInstanceOf[K], null.asInstanceOf[V])
-        } else {
-          inputMetrics.incRecordsRead(1)
-          (recordReader.getCurrentKey(), recordReader.getCurrentValue())
-        }
-      }
-
-      override def close(): Unit = {
-        try {
-          if (recordReader != null) {
-            // Close reader and release it
-            recordReader.close()
-            recordReader = null
+        override def getNext(): (K, V)  = {
+          try {
+            finished = !recordReader.nextKeyValue()
+          } catch  {
+            case _: EOFException => finished = true
           }
-        } catch {
-          case NonFatal(e) => logWarning("Exception in RecordReader.close()", e)
+          if (finished) {
+            // Close and release the reader here; close() will also be called when the macrotask
+            // completes, but it helps to close and release the reference to the reader early to
+            // release buffers that are stored by the RecordReader.
+            close()
+            (null.asInstanceOf[K], null.asInstanceOf[V])
+          } else {
+            inputMetrics.incRecordsRead(1)
+            (recordReader.getCurrentKey(), recordReader.getCurrentValue())
+          }
         }
-      }
-    })
+
+        override def close(): Unit = {
+          try {
+            if (recordReader != null) {
+              // Close reader and release it
+              recordReader.close()
+              recordReader = null
+            }
+          } catch {
+            case NonFatal(e) => logWarning("Exception in RecordReader.close()", e)
+          }
+        }
+      })
+
+    val separateHdfsSerialization = SparkEnv.get.conf.getBoolean(
+      "spark.monotasks.separateHdfsSerialization", false)
+    if (separateHdfsSerialization) {
+      // Decompress and deserialize the HDFS data separately, so that the time can be measured.
+      val deserializationDecompressionStartMillis = System.currentTimeMillis()
+      val deserializedDecompressedArray = deserializedDecompressedIterator.toArray
+      sparkTaskContext.taskMetrics.setHdfsDeserializationDecompressionMillis(
+        System.currentTimeMillis() - deserializationDecompressionStartMillis)
+      deserializedDecompressedArray.iterator
+    } else {
+      deserializedDecompressedIterator
+    }
   }
 
   /**

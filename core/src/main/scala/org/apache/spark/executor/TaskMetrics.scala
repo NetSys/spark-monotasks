@@ -113,6 +113,20 @@ class TaskMetrics extends Serializable {
   def diskWaitNanos: Long = _diskWaitNanos
   private[spark] def incDiskWaitNanos(value: Long) = _diskWaitNanos += value
 
+  /** Total time spent deserializing and decompressing data that was read from HDFS. */
+  private var _hdfsDeserializationDecompressionMillis: Long = _
+  def hdfsDeserializationDecompressionMillis: Long = _hdfsDeserializationDecompressionMillis
+  private[spark] def setHdfsDeserializationDecompressionMillis(value: Long) = {
+     _hdfsDeserializationDecompressionMillis += value
+  }
+
+  /** Total time spent serializing and compressing data that was written to HDFS. */
+  private var _hdfsSerializationCompressionMillis: Long = _
+  def hdfsSerializationCompressionMillis: Long = _hdfsSerializationCompressionMillis
+  private[spark] def setHdfsSerializationCompressionMillis(value: Long) = {
+     _hdfsSerializationCompressionMillis += value
+  }
+
   /**
    * Total time that the network has not been transmitting until the time that this macrotask
    * started. Set by this macrotask's PrepareMonotask.

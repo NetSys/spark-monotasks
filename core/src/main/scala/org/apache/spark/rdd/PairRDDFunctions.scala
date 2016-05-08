@@ -1000,6 +1000,16 @@ class PairRDDFunctions[K, V](self: RDD[(K, V)])
       val executorHadoopTaskContext = executorHadoopTaskObjects.taskContext
       val codec = executorHadoopTaskObjects.codec
 
+      val separateHdfsSerialization = SparkEnv.get.conf.getBoolean(
+        "spark.monotasks.separateHdfsSerialization", false)
+      val iteratorToSerialize = if (separateHdfsSerialization) {
+        // Evaluate the iterator, without serializing or compressing the records. Serialization and
+        // compression will happen separately so that their runtime can be measured.
+        iterator.toArray.iterator
+      } else {
+        iterator
+      }
+
       val byteStream = new ByteArrayOutputStreamWithZeroCopyByteBuffer()
       val recordWriter = getRecordWriter(
         byteStream,
@@ -1008,13 +1018,19 @@ class PairRDDFunctions[K, V](self: RDD[(K, V)])
         executorHadoopTaskObjects.fileOutputFormat,
         codec)
 
-      // Serialize the RDD partition and store its bytes in byteStream.
-      var numRecords = 0L
+      var numRecords = 0
       try {
-        while (iterator.hasNext()) {
-          val keyValuePair = iterator.next()
-          recordWriter.write(keyValuePair._1, keyValuePair._2)
-          numRecords += 1
+        val serializationCompressionStartMillis = System.currentTimeMillis()
+        // Serialize the RDD partition and store its bytes in byteStream.
+        iteratorToSerialize.foreach {
+          case (key: Any, value: Any) =>
+            recordWriter.write(key, value)
+            numRecords += 1
+        }
+
+        if (separateHdfsSerialization) {
+          context.taskMetrics.setHdfsSerializationCompressionMillis(
+            System.currentTimeMillis() - serializationCompressionStartMillis)
         }
       } finally {
         // This also closes byteStream.
