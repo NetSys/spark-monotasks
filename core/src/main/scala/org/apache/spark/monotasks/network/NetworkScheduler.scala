@@ -47,7 +47,7 @@ private[spark] class NetworkScheduler(conf: SparkConf) extends Logging {
   private val taskIdToNumOutstandingRequests = new HashMap[Long, Int]()
 
   /** Maximum number of tasks that can concurrently have outstanding network requests. */
-  private val maxConcurrentTasks = conf.getInt("spark.monotasks.network.maxConcurrentTasks", 0)
+  private val maxConcurrentTasks = conf.getInt("spark.monotasks.network.maxConcurrentTasks", 4)
 
   /** Ids of NetworkResponseMonotasks that are currently transmitting data over the network. */
   private val runningResponseMonotasks = new HashSet[Long]()
