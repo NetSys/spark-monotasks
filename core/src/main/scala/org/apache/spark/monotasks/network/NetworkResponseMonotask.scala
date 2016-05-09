@@ -108,7 +108,7 @@ private[spark] class NetworkResponseMonotask(
         }
 
         if (future.isSuccess) {
-          logDebug(s"Sent result $result to client $remoteAddress")
+          logInfo(s"Sent result $result to client $remoteAddress")
           // Regardless of whether we responded with BlockFetchSuccess or BlockFetchFailure,
           // from the perspective of the LocalDagScheduler, this monotask has succeeded at its
           // job of responding to the remote executor.
