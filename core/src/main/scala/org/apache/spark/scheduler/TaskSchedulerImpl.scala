@@ -22,7 +22,6 @@ import java.util.{TimerTask, Timer}
 import java.util.concurrent.atomic.AtomicLong
 
 import scala.concurrent.duration._
-import scala.collection.JavaConverters._
 import scala.collection.mutable.ArrayBuffer
 import scala.collection.mutable.HashMap
 import scala.collection.mutable.HashSet
@@ -231,7 +230,18 @@ private[spark] class TaskSchedulerImpl(
       val execId = shuffledOffers(i).executorId
       val host = shuffledOffers(i).host
 
-      if (availableSlots(i) >= CPUS_PER_TASK) {
+      // Compute how many of the available slots can be used. This code assumes only a single task
+      // set is scheduled at a time.  The idea here is that the number of available slots assumes
+      // that a macrotask is going to use all resources on the machine; if the macrotasks for the
+      // job don't use some resources, then the machine should be assigned fewer tasks (because it
+      // can run fewer monotasks concrrently).
+      val usableSlots = {
+        val unusableDiskSlots = if (taskSet.taskSet.usesDisk) 0 else shuffledOffers(i).totalDisks
+        val unusableNetworkSlots = if (taskSet.taskSet.usesNetwork) 0 else 1
+        availableSlots(i) - unusableDiskSlots - unusableNetworkSlots
+      }
+
+      if (usableSlots >= CPUS_PER_TASK) {
         try {
           for (task <- taskSet.resourceOffer(execId, host, maxLocality)) {
             tasks(i) += task
@@ -263,7 +273,6 @@ private[spark] class TaskSchedulerImpl(
   def resourceOffers(offers: Seq[WorkerOffer]): Seq[Seq[TaskDescription]] = synchronized {
     // Mark each slave as alive and remember its hostname
     // Also track if new executor is added
-    logInfo(s"Worker offers with cores: ${offers.map(_.freeSlots).mkString(",")}")
     var newExecAvail = false
     for (o <- offers) {
       executorIdToHost(o.executorId) = o.host
@@ -282,43 +291,25 @@ private[spark] class TaskSchedulerImpl(
     val shuffledOffers = Random.shuffle(offers)
     // Build a list of tasks to assign to each worker.
     val tasks = shuffledOffers.map(o => new ArrayBuffer[TaskDescription](o.freeSlots))
+    val availableSlots = shuffledOffers.map(o => o.freeSlots).toArray
     val sortedTaskSets = rootPool.getSortedTaskSetQueue
-
-    if (sortedTaskSets.size == 1) {
-      // For the current experiments, expect to always have only one task set!
-      val taskSet = sortedTaskSets(0)
-
+    for (taskSet <- sortedTaskSets) {
       logDebug("parentName: %s, name: %s, runningTasks: %s".format(
         taskSet.parent.name, taskSet.name, taskSet.runningTasks))
       if (newExecAvail) {
         taskSet.executorAdded()
       }
+    }
 
-      // If this is the first set of offers for the task set, determine the original allocation of
-      // tasks to workers.  Otherwise, use the number of free slots passed by the scheduler, which
-      // will be the number of tasks that was requested by the worker.
-      // TODO: When we handle multiple jobs, will need to handle the case where running tasks is
-      //       empty but some tasks have finished (in which case whether the set of running tasks
-      //       is empty is not a good signal of whether the task set has started yet).
-      val offersForTaskSet = if (taskSet.runningTasksSet.isEmpty) {
-        logInfo(s"Task set $taskSet has no running tasks, so changing offers!")
-        SparkEnv.get.monotasksScheduler.getInitialOffers(shuffledOffers, taskSet.taskSet)
-      } else {
-        shuffledOffers
-      }
-      val availableSlots = offersForTaskSet.map(o => o.freeSlots).toArray
-      logInfo(s"Available slots: ${availableSlots.mkString(",")}")
-
-      var launchedTask = false
-      for (maxLocality <- taskSet.myLocalityLevels) {
-        do {
-          launchedTask = resourceOfferSingleTaskSet(
-            taskSet, maxLocality, offersForTaskSet, availableSlots, tasks)
-        } while (launchedTask)
-      }
-    } else if (sortedTaskSets.length > 1) {
-      throw new IllegalStateException(
-        "Monotasks does not currently support running multiple jobs simultaneously")
+    // Take each TaskSet in our scheduling order, and then offer it each node in increasing order
+    // of locality levels so that it gets a chance to launch local tasks on all of them.
+    // NOTE: the preferredLocality order: PROCESS_LOCAL, NODE_LOCAL, NO_PREF, RACK_LOCAL, ANY
+    var launchedTask = false
+    for (taskSet <- sortedTaskSets; maxLocality <- taskSet.myLocalityLevels) {
+      do {
+        launchedTask = resourceOfferSingleTaskSet(
+          taskSet, maxLocality, shuffledOffers, availableSlots, tasks)
+      } while (launchedTask)
     }
 
     if (tasks.size > 0) {

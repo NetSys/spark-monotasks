@@ -33,11 +33,9 @@
 
 package org.apache.spark
 
-import scala.collection.mutable.{ArrayBuffer, HashSet, Map}
+import scala.collection.mutable.{ArrayBuffer, Map}
 
 import org.apache.spark.executor.TaskMetrics
-import org.apache.spark.monotasks.Monotask
-import org.apache.spark.monotasks.scheduler.TaskResourceTracker
 import org.apache.spark.util.{TaskCompletionListener, TaskCompletionListenerException}
 
 /**
@@ -77,10 +75,6 @@ private[spark] class TaskContextImpl(
   // Whether the task has completed.
   @volatile private var completed: Boolean = false
 
-  // Handles tracking information about which resources the macrotask is currently using and updates
-  // the MonotasksScheduler when resource usage changes.
-  @transient private val resourceTracker: TaskResourceTracker = new TaskResourceTracker
-
   def initialize(stageId: Int, partitionId: Int) {
     this.stageId = stageId
     this.partitionId = partitionId
@@ -102,23 +96,6 @@ private[spark] class TaskContextImpl(
   override def addOnCompleteCallback(f: () => Unit) {
     onCompleteCallbacks += new TaskCompletionListener {
       override def onTaskCompletion(context: TaskContext): Unit = f()
-    }
-  }
-
-  /**
-   * Updates the tracking about the queues for each type of resource (which determines when the
-   * Executor tells the Driver to assign it more tasks).
-   */
-  def updateQueueTracking(
-      completedMonotask: Monotask,
-      startedMonotasks: HashSet[Monotask]): Unit = {
-    logInfo(s"UpdateQueueTracking called for $completedMonotask ${startedMonotasks.mkString(",")}")
-
-    if (taskIsRunningRemotely) {
-      logInfo(
-        s"Completed monotask $completedMonotask not running locally, so no need to update tracking")
-    } else {
-      resourceTracker.updateQueueTracking(stageId, completedMonotask, startedMonotasks)
     }
   }
 

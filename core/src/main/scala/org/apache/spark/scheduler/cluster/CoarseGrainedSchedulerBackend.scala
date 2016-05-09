@@ -27,8 +27,7 @@ import akka.actor._
 import akka.pattern.ask
 import akka.remote.{DisassociatedEvent, RemotingLifecycleEvent}
 
-import org.apache.spark.{ExecutorAllocationClient, Logging, SparkEnv, SparkException}
-import org.apache.spark.monotasks.scheduler.MonotasksScheduler
+import org.apache.spark.{ExecutorAllocationClient, Logging, SparkEnv, SparkException, TaskState}
 import org.apache.spark.scheduler._
 import org.apache.spark.scheduler.cluster.CoarseGrainedClusterMessages._
 import org.apache.spark.util.{ActorLogReceive, SerializableBuffer, AkkaUtils, Utils}
@@ -72,15 +71,6 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
   // Executors we have requested the cluster manager to kill that have not died yet
   private val executorsPendingToRemove = new HashSet[String]
 
-  /**
-   * The epoch is used to ignore some RequestTasks messages from executors. Consider a case where
-   * stage 2 has finished and stage 3 has started.  If an executor sent a RequestTasks message
-   * when stage 2 was running, but the scheduler receives that message after stage 2 has completed
-   * and stage 3 has begun, the message should be ignored (otherwise, too many tasks get assigned
-   * to the worker).
-   */
-  private var epoch = 0
-
   class DriverActor(sparkProperties: Seq[(String, String)]) extends Actor with ActorLogReceive {
     override protected def log = CoarseGrainedSchedulerBackend.this.log
     private val addressToExecutorId = new HashMap[Address, String]
@@ -88,6 +78,11 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
     override def preStart() {
       // Listen for remote client disconnection events, since they don't go through Akka's watch()
       context.system.eventStream.subscribe(self, classOf[RemotingLifecycleEvent])
+
+      // Periodically revive offers to allow delay scheduling to work
+      val reviveInterval = conf.getLong("spark.scheduler.revive.interval", 1000)
+      import context.dispatcher
+      context.system.scheduler.schedule(0.millis, reviveInterval.millis, self, ReviveOffers)
     }
 
     def receiveWithLogging = {
@@ -124,24 +119,15 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
 
       case StatusUpdate(executorId, taskId, state, data) =>
         scheduler.statusUpdate(taskId, state, data.value)
-
-      case RequestTasks(executorEpoch, executorId, numTasks) =>
-        if (executorEpoch != epoch) {
-          logInfo(s"Ignoring update from executor $executorId with epoch of $executorEpoch. " +
-            s"The RequestTasks message had epoch $executorEpoch, but the current epoch is $epoch.")
-        } else {
+        if (TaskState.isFinished(state)) {
           executorDataMap.get(executorId) match {
             case Some(executorInfo) =>
-              logInfo(s"Executor $executorId requested $numTasks in epoch $executorEpoch")
-              launchTasks(scheduler.resourceOffers(
-                Seq(new WorkerOffer(
-                  executorId,
-                  executorInfo.executorHost,
-                  numTasks * scheduler.CPUS_PER_TASK,
-                  executorInfo.totalDisks))))
+              executorInfo.freeSlots += scheduler.CPUS_PER_TASK
+              makeOffers(executorId)
             case None =>
               // Ignoring the update since we don't know about the executor.
-              logWarning(s"Ignored request for tasks from executor with ID $executorId")
+              logWarning(s"Ignored task status update ($taskId state $state) " +
+                "from unknown executor $sender with ID $executorId")
           }
         }
 
@@ -182,16 +168,24 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
 
     // Make fake resource offers on all executors
     def makeOffers() {
-      // Increase the epoch, because this function should only be called when a new stage begins.
-      epoch = epoch + 1
-      logInfo(s"Making offers!")
       launchTasks(scheduler.resourceOffers(executorDataMap.map { case (id, executorData) =>
         new WorkerOffer(
           id,
           executorData.executorHost,
-          executorData.totalCores,
+          executorData.freeSlots,
           executorData.totalDisks)
       }.toSeq))
+    }
+
+    // Make fake resource offers on just one executor
+    def makeOffers(executorId: String) {
+      val executorData = executorDataMap(executorId)
+      launchTasks(scheduler.resourceOffers(
+        Seq(new WorkerOffer(
+          executorId,
+          executorData.executorHost,
+          executorData.freeSlots,
+          executorData.totalDisks))))
     }
 
     // Launch tasks returned by a set of resource offers
@@ -216,7 +210,8 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
         }
         else {
           val executorData = executorDataMap(task.executorId)
-          executorData.executorActor ! LaunchTask(epoch, new SerializableBuffer(serializedTask))
+          executorData.freeSlots -= scheduler.CPUS_PER_TASK
+          executorData.executorActor ! LaunchTask(new SerializableBuffer(serializedTask))
         }
       }
     }

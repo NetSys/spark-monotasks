@@ -47,8 +47,6 @@ import org.apache.spark.util.ActorLogReceive
 
 private case class ReviveOffers()
 
-private case class RequestTasks(numTasks: Int)
-
 private case class StatusUpdate(taskId: Long, state: TaskState, serializedData: ByteBuffer)
 
 private case class KillTask(taskId: Long, interruptThread: Boolean)
@@ -82,10 +80,10 @@ private[spark] class LocalActor(
 
     case StatusUpdate(taskId, state, serializedData) =>
       scheduler.statusUpdate(taskId, state, serializedData)
-
-    case RequestTasks(numTasks) =>
-      freeCores += numTasks
-      reviveOffers()
+      if (TaskState.isFinished(state)) {
+        freeCores += scheduler.CPUS_PER_TASK
+        reviveOffers()
+      }
 
     case KillTask(taskId, interruptThread) =>
       executor.killTask(taskId, interruptThread)
@@ -95,9 +93,12 @@ private[spark] class LocalActor(
   }
 
   def reviveOffers() {
+    // Set the free slots to freeCores + 1 to leave room for one network monotask. Local tasks
+    // won't ever use the network, and this is just a hack to counterract the fact that
+    // TaskSchedulerImpl will only assign (freeSlots - 1) tasks when tasks don't use the network.
     // TODO: Update this code to correctly set the number of disks.
     val offers = Seq(
-      new WorkerOffer(localExecutorId, localExecutorHostname, freeCores, totalDisks = 0))
+      new WorkerOffer(localExecutorId, localExecutorHostname, freeCores + 1, totalDisks = 0))
     val tasks = scheduler.resourceOffers(offers).flatten
     for (task <- tasks) {
       freeCores -= scheduler.CPUS_PER_TASK
@@ -145,10 +146,6 @@ private[spark] class LocalBackend(scheduler: TaskSchedulerImpl, val totalCores: 
 
   override def statusUpdate(taskId: Long, state: TaskState, serializedData: ByteBuffer) {
     localActor ! StatusUpdate(taskId, state, serializedData)
-  }
-
-  override def requestTasks(numTasks: Int) {
-    localActor ! RequestTasks(numTasks)
   }
 
   override def applicationId(): String = appId

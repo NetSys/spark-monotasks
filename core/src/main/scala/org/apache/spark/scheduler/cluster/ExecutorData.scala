@@ -44,11 +44,15 @@ import akka.actor.{Address, ActorRef}
  * @param totalDisks The total number of disks available to the executor
  * @param totalCores The total number of cores available to the executor
  */
-private[spark] class ExecutorData(
+private[cluster] class ExecutorData(
    val executorActor: ActorRef,
    val executorAddress: Address,
    override val executorHost: String,
    val totalDisks: Int,
    override val totalCores: Int,
    override val logUrlMap: Map[String, String]
-) extends ExecutorInfo(executorHost, totalCores, logUrlMap)
+) extends ExecutorInfo(executorHost, totalCores, logUrlMap) {
+  // Each executor can run at most (# cores) + (# disks) + (# network slots = 1) monotasks
+  // concurrently, so cap the number of concurrent macrotasks per executor at this value.
+  var freeSlots = totalCores + totalDisks + 1
+}

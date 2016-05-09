@@ -35,8 +35,6 @@ package org.apache.spark.scheduler
 
 /**
  * Represents free resources available on an executor.
- *
- * TODO: Remove totalDisks, which is no longer used.
  */
 private[spark]
 case class WorkerOffer(executorId: String, host: String, freeSlots: Int, totalDisks: Int)
