@@ -237,7 +237,9 @@ private[spark] class TaskSchedulerImpl(
       // can run fewer monotasks concrrently).
       val usableSlots = {
         val unusableDiskSlots = if (taskSet.taskSet.usesDisk) 0 else shuffledOffers(i).totalDisks
-        val unusableNetworkSlots = if (taskSet.taskSet.usesNetwork) 0 else 1
+        val maxConcurrentNetworkTasks =
+          SparkEnv.get.conf.getInt("spark.monotasks.network.maxConcurrentTasks", 4)
+        val unusableNetworkSlots = if (taskSet.taskSet.usesNetwork) 0 else maxConcurrentNetworkTasks
         availableSlots(i) - unusableDiskSlots - unusableNetworkSlots
       }
 

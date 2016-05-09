@@ -35,6 +35,8 @@ package org.apache.spark.scheduler.cluster
 
 import akka.actor.{Address, ActorRef}
 
+import org.apache.spark.SparkEnv
+
 /**
  * Grouping of data for an executor used by CoarseGrainedSchedulerBackend.
  *
@@ -54,5 +56,6 @@ private[cluster] class ExecutorData(
 ) extends ExecutorInfo(executorHost, totalCores, logUrlMap) {
   // Each executor can run at most (# cores) + (# disks) + (# network slots = 1) monotasks
   // concurrently, so cap the number of concurrent macrotasks per executor at this value.
-  var freeSlots = totalCores + totalDisks + 1
+  var freeSlots = totalCores + totalDisks +
+    SparkEnv.get.conf.getInt("spark.monotasks.network.maxConcurrentTasks", 4)
 }
