@@ -290,6 +290,7 @@ def is_active(instance):
 # For easy maintainability, please keep this manually-inputted dictionary sorted by key.
 def get_spark_ami(opts):
     instance_types = {
+        "d2.4xlarge":  "hvm",
         "c1.medium":   "pvm",
         "c1.xlarge":   "pvm",
         "c3.2xlarge":  "pvm",
