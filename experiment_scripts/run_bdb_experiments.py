@@ -9,7 +9,6 @@ import argparse
 import os
 from os import path
 import subprocess
-import time
 
 import utils
 
@@ -149,19 +148,15 @@ def execute_queries_for_branch(aws_key_id, aws_key, args, branch, is_first_branc
   copy_dir_filepath = utils.get_full_path(path.join("spark-ec2", "copy-dir"))
   execute_shell_command("{} --delete {}".format(copy_dir_filepath, SPARK_DIR))
 
-  do_prepare = is_first_branch
   for query in args.queries:
-    execute_query(aws_key_id, aws_key, args, query, branch, do_prepare)
-    # Only do the prepare step if this is the first query of the first branch.
-    do_prepare = False
+    execute_query(aws_key_id, aws_key, args, query, branch, is_first_branch)
 
-def execute_query(aws_key_id, aws_key, args, query, branch, do_prepare):
+def execute_query(aws_key_id, aws_key, args, query, branch, is_first_branch):
   """
   Executes the specified query using the branch that is currently checked out (whose name is
   `branch`). Copies the event log and continuous monitors file to  `args.output_dir`.
 
-  `do_prepare` should be set to True if the Hive tables for the benchmark data need to be
-  regenerated or if the benchmark data needs to be converted to Parquet.
+  `is_first_branch` should be set to True if this is the first branch to be tested.
   """
   print_heading("Executing {} {} of query {} using branch '{}'".format(
     args.num_trials, "trial" if (args.num_trials == 1) else "trials", query, branch))
@@ -175,32 +170,31 @@ def execute_query(aws_key_id, aws_key, args, query, branch, do_prepare):
   benchmark_runner_dir = path.join(args.benchmark_dir, "runner")
   driver_addr = subprocess.check_output(
     "curl -s http://169.254.169.254/latest/meta-data/public-hostname", shell=True)
-  if do_prepare:
-    print "Preparing benchmark data"
-    prepare_benchmark_script = path.join(benchmark_runner_dir, "prepare-benchmark.sh")
-    prepare_benchmark_command = "{} \
-      --spark \
-      --aws-key-id={} \
-      --aws-key={} \
-      --spark-host={} \
-      --spark-identity-file={} \
-      --scale-factor={} \
-      --file-format={} \
-      --skip-s3-import".format(
-        prepare_benchmark_script,
-        aws_key_id,
-        aws_key,
-        driver_addr,
-        args.identity_file,
-        args.scale_factor,
-        args.file_format)
-    if args.parquet:
-      prepare_benchmark_command += " --parquet"
-      if args.skip_parquet_conversion:
-        prepare_benchmark_command += " --skip-parquet-conversion"
-    execute_shell_command(prepare_benchmark_command)
-  else:
-    start_thriftserver()
+
+  print "Creating benchmark tables and starting the Thrift server"
+  prepare_benchmark_script = path.join(benchmark_runner_dir, "prepare-benchmark.sh")
+  prepare_benchmark_command = "{} \
+    --spark \
+    --aws-key-id={} \
+    --aws-key={} \
+    --spark-host={} \
+    --spark-identity-file={} \
+    --scale-factor={} \
+    --file-format={} \
+    --skip-s3-import".format(
+      prepare_benchmark_script,
+      aws_key_id,
+      aws_key,
+      driver_addr,
+      args.identity_file,
+      args.scale_factor,
+      args.file_format)
+
+  if args.parquet:
+    prepare_benchmark_command += " --parquet"
+    if not is_first_branch or args.skip_parquet_conversion:
+      prepare_benchmark_command += " --skip-parquet-conversion"
+  execute_shell_command(prepare_benchmark_command)
 
   if args.memory:
     cache_table_for_query(query)
@@ -269,14 +263,6 @@ def stop_spark():
 def stop_thriftserver():
   print "Stopping the Thrift server"
   execute_shell_command(path.join(SPARK_SBIN_DIR, "stop-thriftserver.sh"))
-
-
-def start_thriftserver():
-  print "Starting the Thrift server"
-  execute_shell_command(path.join(SPARK_SBIN_DIR, "start-thriftserver.sh"))
-  # TODO: We should keep checking to see if the JDBC server has started yet.
-  print "Sleeping for 30 seconds so that the JDBC server can start"
-  time.sleep(30)
 
 
 def cache_table_for_query(query):
