@@ -931,9 +931,10 @@ private[spark] class BlockManager(
     }
   }
 
-  /** Returns a Boolean indicating if the specified block is stored by any BlockManager. */
-  def isStored(blockId: BlockId): Boolean =
-    blockInfo.contains(blockId) || master.getLocations(blockId).nonEmpty
+  /** Returns a Boolean indicating if the specified block is stored by the local BlockManager. */
+  def isStoredLocally(blockId: BlockId): Boolean = blockInfo.contains(blockId)
+
+  def getAllStorageLocations(blockId: BlockId): Seq[BlockManagerId] = master.getLocations(blockId)
 
   /**
    * Returns a Monotask that will load the specified block into the MemoryStore. Returns None if the

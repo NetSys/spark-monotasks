@@ -988,14 +988,14 @@ class RDDSuite extends FunSuite with BeforeAndAfter with SharedSparkContext {
   /** The RDD is already in memory, so no additional monotasks are required. */
   test("buildDag: RDD is cached in memory") {
     initializeBuildDagTestObjects()
-    when(blockManager.isStored(blockId)).thenReturn(true)
+    when(blockManager.isStoredLocally(blockId)).thenReturn(true)
     when(blockManager.getBlockLoadMonotask(meq(blockId), any())).thenReturn(None)
 
     val monotasks = rdd3.buildDag(
       partition, dependencyIdToPartitions, taskContext, nextMonotask, blockManager)
     assert(monotasks.isEmpty)
     assert(nextMonotask.dependencies.isEmpty)
-    verify(blockManager).isStored(blockId)
+    verify(blockManager).isStoredLocally(blockId)
     verify(blockManager).getBlockLoadMonotask(meq(blockId), any())
   }
 
@@ -1006,7 +1006,7 @@ class RDDSuite extends FunSuite with BeforeAndAfter with SharedSparkContext {
    */
   test("buildDag: RDD is cached on disk") {
     initializeBuildDagTestObjects()
-    when(blockManager.isStored(blockId)).thenReturn(true)
+    when(blockManager.isStoredLocally(blockId)).thenReturn(true)
     val diskReadMonotask = new DiskReadMonotask(taskContext, blockId, "diskId")
     when(blockManager.getBlockLoadMonotask(meq(blockId), any())).thenReturn(Some(diskReadMonotask))
 
@@ -1016,7 +1016,7 @@ class RDDSuite extends FunSuite with BeforeAndAfter with SharedSparkContext {
     assert(monotasks.head === diskReadMonotask)
     assert(nextMonotask.dependencies.size === 1)
     assert(nextMonotask.dependencies.head === diskReadMonotask)
-    verify(blockManager).isStored(blockId)
+    verify(blockManager).isStoredLocally(blockId)
     verify(blockManager).getBlockLoadMonotask(meq(blockId), any())
   }
 
@@ -1025,14 +1025,14 @@ class RDDSuite extends FunSuite with BeforeAndAfter with SharedSparkContext {
    */
   test("buildDag: RDD is not cached but should be cached in memory") {
     initializeBuildDagTestObjects()
-    when(blockManager.isStored(blockId)).thenReturn(false)
+    when(blockManager.isStoredLocally(blockId)).thenReturn(false)
     rdd3.persist(StorageLevel.MEMORY_ONLY)
 
     val monotasks = rdd3.buildDag(
       partition, dependencyIdToPartitions, taskContext, nextMonotask, blockManager)
     assert(monotasks.isEmpty)
     assert(nextMonotask.dependencies.size === 0)
-    verify(blockManager).isStored(blockId)
+    verify(blockManager).isStoredLocally(blockId)
     verify(blockManager, never()).getBlockLoadMonotask(meq(blockId), any())
   }
 
@@ -1041,14 +1041,14 @@ class RDDSuite extends FunSuite with BeforeAndAfter with SharedSparkContext {
    */
   test("buildDag: RDD is not cached but should be cached in tachyon") {
     initializeBuildDagTestObjects()
-    when(blockManager.isStored(blockId)).thenReturn(false)
+    when(blockManager.isStoredLocally(blockId)).thenReturn(false)
     rdd3.persist(StorageLevel.OFF_HEAP)
 
     val monotasks = rdd3.buildDag(
       partition, dependencyIdToPartitions, taskContext, nextMonotask, blockManager)
     assert(monotasks.isEmpty)
     assert(nextMonotask.dependencies.size === 0)
-    verify(blockManager).isStored(blockId)
+    verify(blockManager).isStoredLocally(blockId)
     verify(blockManager, never()).getBlockLoadMonotask(meq(blockId), any())
   }
 
@@ -1070,14 +1070,14 @@ class RDDSuite extends FunSuite with BeforeAndAfter with SharedSparkContext {
    */
   test("buildDag: RDD is not cached but it should be cached on disk") {
     initializeBuildDagTestObjects()
-    when(blockManager.isStored(blockId)).thenReturn(false)
+    when(blockManager.isStoredLocally(blockId)).thenReturn(false)
     rdd3.persist(StorageLevel.DISK_ONLY)
 
     val monotasks = rdd3.buildDag(
       partition, dependencyIdToPartitions, taskContext, nextMonotask, blockManager)
     assert(monotasks.size === 3)
     assert(nextMonotask.dependencies.size === 1)
-    verify(blockManager).isStored(blockId)
+    verify(blockManager).isStoredLocally(blockId)
     verify(blockManager, never()).getBlockLoadMonotask(meq(blockId), any())
 
     // Verify that the RddComputeMonotask is properly formed.
@@ -1123,14 +1123,14 @@ class RDDSuite extends FunSuite with BeforeAndAfter with SharedSparkContext {
   /** The RDD will be computed by nextMonotask. No additional monotasks are needed. */
   test("buildDag: RDD is not cached and should not be cached") {
     initializeBuildDagTestObjects()
-    when(blockManager.isStored(blockId)).thenReturn(false)
+    when(blockManager.isStoredLocally(blockId)).thenReturn(false)
 
     val monotasks = rdd3.buildDag(
       partition, dependencyIdToPartitions, taskContext, nextMonotask, blockManager)
 
     assert(monotasks.size === 0)
     assert(nextMonotask.dependencies.size === 0)
-    verify(blockManager).isStored(blockId)
+    verify(blockManager).isStoredLocally(blockId)
     verify(blockManager, never()).getBlockLoadMonotask(meq(blockId), any())
   }
 
@@ -1157,7 +1157,7 @@ class RDDSuite extends FunSuite with BeforeAndAfter with SharedSparkContext {
 
     assert(monotasks.size === 6)
     assert(nextMonotask.dependencies.size === 1)
-    verify(blockManager).isStored(blockId)
+    verify(blockManager).isStoredLocally(blockId)
     verify(blockManager, never()).getBlockLoadMonotask(meq(blockId), any())
 
     val nextMonotaskDependency = findMonotask(nextMonotask.dependencies.head.taskId, monotasks)

@@ -407,7 +407,8 @@ abstract class RDD[T: ClassTag](
       nextMonotask: Monotask,
       blockManager: BlockManager = SparkEnv.get.blockManager): Seq[Monotask] = {
     val blockId = new RDDBlockId(this.id, partition.index)
-    if (blockManager.isStored(blockId)) {
+    val storageLocations = blockManager.getAllStorageLocations(blockId)
+    if (blockManager.isStoredLocally(blockId)) {
       // This RDD is stored locally and needs to be loaded into the MemoryStore. Note that it is
       // possible that the RDD is already cached in the MemoryStore, in which case no new Monotasks
       // will be created.
@@ -419,6 +420,19 @@ abstract class RDD[T: ClassTag](
         nextMonotask.addDependency(monotask)
         monotask
       }.toSeq
+    } else if (storageLocations.nonEmpty) {
+      // If the block is only stored remotely, throw an error. Otherwise, monotasks will silently
+      // re-compute the block, which can lead to out-of-memory issues where blocks are stored on
+      // multiple machines (and re-computing the block also means that Monotasks behaves differently
+      // than Spark).
+      // TODO: Remove this once monotasks support reading remote data.
+      val remoteStr = blockManager.getAllStorageLocations(blockId).map(
+        b => s"${b.executorId} (${b.host})").mkString(", ")
+      val message = s"Block $blockId (read by partition ${partition.index} for task " +
+        s"${context.taskAttemptId}) is stored remotely on $remoteStr. Exiting to avoid " +
+        "re-computing the block."
+      logError(message)
+      throw new SparkException(message)
     } else if (storageLevel.useDisk) {
       // This RDD needs to be computed and then cached on disk. Computing the RDD loads it into the
       // MemoryStore.
