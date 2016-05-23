@@ -952,37 +952,43 @@ class DAGScheduler(
    *         network.
    */
   private def getResourceNeeds(stage: Stage): (Boolean, Boolean) = {
-    val rdd = stage.rdd
-
     // If the input RDD is marked to be stored on disk, it will either be read from disk (if it's
     // already stored there) or written to disk (if it hasn't been stored there yet); in either
     // case, the macrotasks for the job will include disk monotasks.
-    val rddOnDisk = rdd.getStorageLevel.useDisk
-    val hasHadoopInput = rdd.isInstanceOf[HadoopRDD[_, _]] || rdd.isInstanceOf[NewHadoopRDD[_, _]]
-    val hasHadoopOutput = rdd.getWillBeSavedToHdfs
-    val hasDiskShuffleWrite = stage.isShuffleMap && writeShuffleDataToDisk
-    var hasShuffleRead = rddHasShuffleDependencies(rdd)
-    val usesDisk = (rddOnDisk || hasHadoopInput || hasHadoopOutput || hasDiskShuffleWrite ||
-      (hasShuffleRead && writeShuffleDataToDisk))
-    logDebug(s"Stage $stage to compute RDD $rdd has resource needs to use disk: $usesDisk and " +
-      s"network: $hasShuffleRead")
-    (usesDisk, hasShuffleRead)
-  }
+    var rddOnDisk = false
 
-  /** Walks the RDD's dependency tree to determine whether the RDD has any shuffle dependencies. */
-  private def rddHasShuffleDependencies(rdd: RDD[_]): Boolean = {
+    var hasHadoopInput = false
+    var hasHadoopOutput = false
+    var hasShuffleRead = false
+
+    // Walk the RDD's dependency tree to determine the resource needs of tasks in the stage.
     val waitingForVisit = new Stack[RDD[_]]
-    waitingForVisit.push(rdd)
-    while (!waitingForVisit.isEmpty) {
+    waitingForVisit.push(stage.rdd)
+    while(!waitingForVisit.isEmpty) {
       val currentRdd = waitingForVisit.pop()
+
+      // Update tasks' resource needs based on currentRdd.
+      hasHadoopInput = hasHadoopInput || (currentRdd.isInstanceOf[HadoopRDD[_, _]] ||
+        currentRdd.isInstanceOf[NewHadoopRDD[_, _]])
+      hasHadoopOutput = hasHadoopOutput || currentRdd.getWillBeSavedToHdfs
+      rddOnDisk = rddOnDisk || currentRdd.getStorageLevel.useDisk
+
+      // Traverse all of the RDD's dependencies.
       currentRdd.dependencies.foreach {
-        case _: ShuffleDependency[_, _, _] =>
-          return true
+        case shuffleDependency: ShuffleDependency[_, _, _] =>
+          hasShuffleRead = true
+
         case dep: Dependency[_] =>
           waitingForVisit.push(dep.rdd)
       }
     }
-    false
+
+    val hasDiskShuffleWrite = stage.isShuffleMap && writeShuffleDataToDisk
+    val usesDisk = (rddOnDisk || hasHadoopInput || hasHadoopOutput || hasDiskShuffleWrite ||
+      (hasShuffleRead && writeShuffleDataToDisk))
+    logDebug(s"Stage $stage to compute RDD ${stage.rdd} has resource needs to use disk: " +
+      s"$usesDisk and network: $hasShuffleRead")
+    (usesDisk, hasShuffleRead)
   }
 
 
