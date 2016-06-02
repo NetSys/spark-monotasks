@@ -117,6 +117,18 @@ public class BlockFetchIntegrationSuite {
           }
         }
       }
+
+      @Override
+      public void signalBlocksAvailable(
+          String[] blockIds,
+          int[] blockSizes,
+          long taskAttemptId,
+          int attemptNumber,
+          String executorId,
+          String host,
+          int blockManagerPort) {
+          // Do nothing.
+      }
     };
 
     TransportContext context = new TransportContext(conf, blockFetcher);
@@ -166,6 +178,11 @@ public class BlockFetchIntegrationSuite {
       public void onFailure(String blockId, Throwable e) {
         res.failedBlocks.add(blockId);
         sem.release();
+      }
+
+      @Override
+      public boolean isLowPriority() {
+        return false;
       }
     };
 

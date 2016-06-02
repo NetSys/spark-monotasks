@@ -20,7 +20,7 @@ import scala.collection.mutable.HashMap
 import scala.util.control.NonFatal
 
 import org.apache.spark.{FetchFailed, Logging, SparkEnv, SparkException, TaskContextImpl}
-import org.apache.spark.monotasks.TaskSuccess
+import org.apache.spark.monotasks.{LocalDagSchedulerEvent, TaskSuccess}
 import org.apache.spark.network.buffer.ManagedBuffer
 import org.apache.spark.network.client.BlockReceivedCallback
 import org.apache.spark.storage.{BlockId, BlockManagerId, ShuffleBlockId, StorageLevel}
@@ -34,11 +34,14 @@ import org.apache.spark.util.Utils
  * @param shuffleBlockIdsAndSizes sequence of two-item tuples describing the shuffle blocks, where
  *                                the first item is a BlockId and the second item is the block's
  *                                approximate size.
+ * @param lowPriority True if the Monotask should only be run opportunistically, when other
+ *                    monotasks aren't running.
  */
 private[spark] class NetworkRequestMonotask(
     context: TaskContextImpl,
     private val remoteAddress: BlockManagerId,
-    private val shuffleBlockIdsAndSizes: Seq[(ShuffleBlockId, Long)])
+    private val shuffleBlockIdsAndSizes: Seq[(ShuffleBlockId, Long)],
+    lowPriority: Boolean = false)
   extends NetworkMonotask(context) with Logging with BlockReceivedCallback {
 
   /** Scheduler to notify about bytes received over the network. Set by execute(). */
@@ -48,41 +51,64 @@ private[spark] class NetworkRequestMonotask(
   private var requestIssueTimeNanos = 0L
 
   val outstandingBlockIdToSize = new HashMap[BlockId, Long]
-  shuffleBlockIdsAndSizes.foreach {
-    case (shuffleBlockId, size) =>
-      outstandingBlockIdToSize.put(shuffleBlockId, size)
-  }
+
+  override def isLowPriority(): Boolean = lowPriority
 
   override def execute(scheduler: NetworkScheduler): Unit = {
-    val blockIds = shuffleBlockIdsAndSizes.map(_._1)
-    val blockIdsAsString = blockIds.mkString(", ")
-    val totalSize = shuffleBlockIdsAndSizes.map(_._2).sum
-    logInfo(s"Monotask $taskId: sending request for blocks $blockIdsAsString (total size " +
-      s"(${Utils.bytesToString(totalSize)}}) to $remoteAddress")
-    networkScheduler = Some(scheduler)
-    scheduler.addOutstandingBytes(totalSize)
-    requestIssueTimeNanos = System.nanoTime()
+    // Filter out blocks that are already available locally. This is necessary because when
+    // ShuffleHelper creates the NetworkRequestMonotasks to fetch shuffle data, it only looks at the
+    // MapStatuses sent by the map tasks, and doesn't check to see if any shuffle blocks have
+    // already been opportunistically fetched.
+    val filteredShuffleBlockIdsAndSizes = shuffleBlockIdsAndSizes.filter { blockIdAndSize =>
+      !SparkEnv.get.blockManager.memoryStore.contains(blockIdAndSize._1)
+    }
+    if (filteredShuffleBlockIdsAndSizes.isEmpty) {
+      // Mark the monotask as finished.
+      logInfo(s"Notifying LocalDagScheduler of completion of monotask $taskId before it fetched " +
+        s"any data, because all of its data is already present locally")
+      localDagScheduler.post(TaskSuccess(this))
 
-    try {
-      SparkEnv.get.blockTransferService.fetchBlocks(
-        remoteAddress.host,
-        remoteAddress.port,
-        blockIds.map(_.toString).toArray,
-        context.taskAttemptId,
-        context.attemptNumber,
-        this)
-    } catch {
-      case NonFatal(t) => {
-        logError(s"Failed to initiate fetchBlock for shuffle blocks $blockIdsAsString", t)
-        // Use the first shuffle block as the failure reason (only one fetch failure will be
-        // reported back to the master anyway).
-        val failureReason = FetchFailed(
-          remoteAddress,
-          blockIds(0).shuffleId,
-          blockIds(0).mapId,
-          context.partitionId,
-          Utils.exceptionString(t))
-        handleException(failureReason)
+      // Also tell the network scheduler that this task has finished, so it knows it can launch
+      // more.
+      scheduler.handleNetworkRequestSatisfied(this)
+    } else {
+      // Populate outstandingBlockIdToSize based on which blocks need to be fetched.
+      filteredShuffleBlockIdsAndSizes.foreach {
+        case (shuffleBlockId, size) =>
+          outstandingBlockIdToSize.put(shuffleBlockId, size)
+      }
+      // Issue requests to fetch all of the data.
+      val blockIds = filteredShuffleBlockIdsAndSizes.map(_._1)
+      val blockIdsAsString = blockIds.mkString(", ")
+      val totalSize = filteredShuffleBlockIdsAndSizes.map(_._2).sum
+      logInfo(s"Monotask $taskId: sending request for blocks $blockIdsAsString (total size " +
+        s"(${Utils.bytesToString(totalSize)}}) to $remoteAddress")
+      networkScheduler = Some(scheduler)
+      scheduler.addOutstandingBytes(totalSize)
+      requestIssueTimeNanos = System.nanoTime()
+
+      try {
+        SparkEnv.get.blockTransferService.fetchBlocks(
+          remoteAddress.host,
+          remoteAddress.port,
+          blockIds.map(_.toString).toArray,
+          context.taskAttemptId,
+          context.attemptNumber,
+          this)
+      } catch {
+        case NonFatal(t) => {
+          logError(s"Failed to initiate fetchBlock for shuffle blocks $blockIdsAsString", t)
+          networkScheduler.get.handleNetworkRequestSatisfied(this)
+          // Use the first shuffle block as the failure reason (only one fetch failure will be
+          // reported back to the master anyway).
+          val failureReason = FetchFailed(
+            remoteAddress,
+            blockIds(0).shuffleId,
+            blockIds(0).mapId,
+            context.partitionId,
+            Utils.exceptionString(t))
+          handleException(failureReason)
+        }
       }
     }
   }
@@ -124,16 +150,28 @@ private[spark] class NetworkRequestMonotask(
     SparkEnv.get.blockManager.cacheSingle(
       BlockId(blockId), buf, StorageLevel.MEMORY_ONLY, tellMaster = false)
     context.taskMetrics.incDiskNanos(diskReadNanos)
+
     if (outstandingBlockIdToSize.isEmpty) {
       logInfo(s"Notifying NetworkScheduler of completion of monotask $taskId")
       networkScheduler.get.handleNetworkRequestSatisfied(this)
       logInfo(s"Notifying LocalDagScheduler of completion of monotask $taskId")
       localDagScheduler.post(TaskSuccess(this))
+    } else {
+      logDebug(s"On success, monotask $this: blocks still outstanding: " +
+        s"${outstandingBlockIdToSize.mkString(", ")}")
     }
   }
 
   override def onFailure(failedBlockId: String, e: Throwable): Unit = {
     removeOutstandingBlock(failedBlockId, "onFailure")
+
+    if (outstandingBlockIdToSize.isEmpty) {
+      logInfo(s"Notifying NetworkScheduler of completion of monotask $taskId (after failure)")
+      networkScheduler.get.handleNetworkRequestSatisfied(this)
+    } else {
+      logInfo(s"On failure, monotask $this: blocks still outstanding: " +
+        s"${outstandingBlockIdToSize.mkString(", ")}")
+    }
 
     logError(s"Failed to get block(s) from ${remoteAddress.host}:${remoteAddress.port}", e)
     BlockId(failedBlockId) match {

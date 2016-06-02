@@ -100,7 +100,7 @@ private[spark] class MemoryShuffleWriter[K, V](
    * Stops writing shuffle data by storing the shuffle data in the block manager (if the shuffle
    * was successful) and updating the bytes written in the task's ShuffleWriteMetrics.
    */
-  override def stop(success: Boolean): Option[MapStatus] = {
+  override def stop(success: Boolean): Array[Int] = {
     val byteBuffers = shuffleData.map(_.closeAndGetBytes())
     val sizes = byteBuffers.map(_.limit)
     val totalDataSize = sizes.sum
@@ -113,9 +113,9 @@ private[spark] class MemoryShuffleWriter[K, V](
         cacheIndividualBlocks(byteBuffers)
       }
       shuffleBlockManager.addShuffleOutput(dep.shuffleId, mapId, numBuckets)
-      Some(MapStatus(SparkEnv.get.blockManager.blockManagerId, sizes.map(_.toLong)))
+      sizes
     } else {
-      None
+      Array.empty[Int]
     }
   }
 

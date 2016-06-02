@@ -35,6 +35,7 @@ package org.apache.spark.network.client;
 
 import java.io.Closeable;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.concurrent.TimeUnit;
 
@@ -47,6 +48,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.spark.network.protocol.BlockFetchRequest;
+import org.apache.spark.network.protocol.BlocksAvailable;
 import org.apache.spark.network.util.NettyUtils;
 
 /**
@@ -78,6 +80,22 @@ public class TransportClient implements Closeable {
   }
 
   /**
+   * Signals to the remote side that blocks are available on this machine to fetch.
+   */
+  public void signalBlocksAvailable(
+      String[] blockIds,
+      int[] blockSizes,
+      long taskAttemptId,
+      int attemptNumber,
+      String executorId,
+      String host,
+      int port) {
+    BlocksAvailable message = new BlocksAvailable(
+      blockIds, blockSizes, taskAttemptId, attemptNumber, executorId, host, port);
+    channel.writeAndFlush(message);
+  }
+
+  /**
    * Requests blocks from the remote side.
    *
    * Multiple fetchBlocks requests may be outstanding simultaneously. If the blocks reside in-memory
@@ -85,22 +103,31 @@ public class TransportClient implements Closeable {
    * (assuming that only one client is used); otherwise, requests may be re-ordered if some requests
    * need to be read from a disk with a longer queue.
    *
-   * @param blockIds Identifiers of the blocks that should be fetched.
+   * @param rawBlockIds Identifiers of the blocks that should be fetched.
    * @param callback Callback invoked upon successful receipt of each block, or upon any failure.
    */
   public void fetchBlocks(
-      final String[] blockIds,
+      final String[] rawBlockIds,
       Long taskAttemptId,
       int attemptNumber,
       final BlockReceivedCallback callback) {
+    ArrayList<String> blockIdsToFetch = new ArrayList<String>();
+    for (String blockId : rawBlockIds) {
+      // If addFetchRequest returns false, it means there was already an outstanding request for
+      // that block, so don't add it to the blocks we're requesting.
+      if (handler.addFetchRequest(blockId, callback)) {
+        blockIdsToFetch.add(blockId);
+      }
+    }
+    final String[] blockIds = new String[blockIdsToFetch.size()];
+    for (int i = 0; i < blockIds.length; i++) {
+        blockIds[i] = blockIdsToFetch.get(i);
+    }
+
     final String serverAddr = NettyUtils.getRemoteAddress(channel);
     final String blockIdsAsStrings = Arrays.toString(blockIds);
     final long startTime = System.currentTimeMillis();
     logger.debug("Sending request for blocks {} to {}", blockIdsAsStrings, serverAddr);
-
-    for (String blockId : blockIds) {
-      handler.addFetchRequest(blockId, callback);
-    }
 
     BlockFetchRequest request = new BlockFetchRequest(blockIds, taskAttemptId, attemptNumber);
     channel.writeAndFlush(request).addListener(

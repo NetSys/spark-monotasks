@@ -66,8 +66,29 @@ public class TransportResponseHandler extends MessageHandler<ResponseMessage> {
     this.outstandingFetches = new ConcurrentHashMap<String, BlockReceivedCallback>();
   }
 
-  public void addFetchRequest(String blockId, BlockReceivedCallback callback) {
+  /**
+   * Attempts to add an outstanding fetch request.  If another request is already outstanding for
+   * the given block, returns false and keeps the callback corresponding to the higher priority
+   * request (this assumes that at most one high priority request will be outstanding concurrently).
+   * Otherwise, returns true.
+   */
+  public synchronized boolean addFetchRequest(String blockId, BlockReceivedCallback callback) {
+    if (outstandingFetches.containsKey(blockId)) {
+      BlockReceivedCallback existingCallback = outstandingFetches.get(blockId);
+      if (existingCallback.isLowPriority()) {
+        // Replace the existing callback with the new one, and fail the existing callback.
+        existingCallback.onFailure(blockId, new BlockFetchFailureException(
+            "Low-priority request to fetch " + blockId + " failed so high priority can take over"));
+      } else {
+        // The new request is low-priority, so shouldn't be executed. Fail the new one.
+        callback.onFailure(blockId, new BlockFetchFailureException(
+            "Low-priority request to fetch " + blockId +
+            "failed because high priority one already running"));
+        return false;
+      }
+    }
     outstandingFetches.put(blockId, callback);
+    return true;
   }
 
   public void removeFetchRequest(String blockId) {
@@ -108,7 +129,7 @@ public class TransportResponseHandler extends MessageHandler<ResponseMessage> {
   }
 
   @Override
-  public void handle(ResponseMessage message) {
+  public synchronized void handle(ResponseMessage message) {
     String remoteAddress = NettyUtils.getRemoteAddress(channel);
     if (message instanceof BlockFetchSuccess) {
       BlockFetchSuccess resp = (BlockFetchSuccess) message;

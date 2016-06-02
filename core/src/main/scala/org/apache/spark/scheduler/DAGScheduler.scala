@@ -871,12 +871,28 @@ class DAGScheduler(
     }
 
     val tasks: Seq[Macrotask[_]] = if (stage.isShuffleMap) {
+      // Determine a possible mapping of machines to reduce tasks.
+      val shuffleDependency = stage.shuffleDep.getOrElse {
+        throw new SparkException("Shuffle map stage has no shuffle dependency")
+      }
+      val executorIdToReduceIds =
+        shuffleDependency.assignReduceTasksToExecutors(blockManagerMaster)
+      val executorIdToReduceIdsStr = executorIdToReduceIds.map(
+        pair => s"${pair._1}: ${pair._2.mkString(",")}").mkString("; ")
+      logInfo(s"For shuffle dep $shuffleDependency, ossible assignment of reduce tasks to " +
+        s"executors: $executorIdToReduceIdsStr")
       partitionsToCompute.map { id =>
         val locs = getPreferredLocs(stage.rdd, id)
         val part = stage.rdd.partitions(id)
         val dependencyIdToPartitions = Dependency.getDependencyIdToPartitions(stage.rdd, part.index)
         new ShuffleMapMacrotask(
-          stage.id, taskBinary, part, dependencyIdToPartitions, locs, writeShuffleDataToDisk)
+          stage.id,
+          taskBinary,
+          part,
+          dependencyIdToPartitions,
+          executorIdToReduceIds,
+          locs,
+          writeShuffleDataToDisk)
       }
     } else {
       val job = stage.resultOfJob.get
@@ -1428,17 +1444,25 @@ class DAGScheduler(
     if (!rddPrefs.isEmpty) {
       return rddPrefs.map(TaskLocation(_))
     }
-    // If the RDD has narrow dependencies, pick the first partition of the first narrow dep
-    // that has any placement preferences. Ideally we would choose based on transfer sizes,
-    // but this will do for now.
+
     rdd.dependencies.foreach {
       case n: NarrowDependency[_] =>
+        // If the RDD has narrow dependencies, pick the first partition of the first narrow dep
+        // that has any placement preferences. Ideally we would choose based on transfer sizes,
+        // but this will do for now.
         for (inPart <- n.getParents(partition)) {
           val locs = getPreferredLocsInternal(n.rdd, inPart, visited)
           if (locs != Nil) {
             return locs
           }
         }
+
+      case s: ShuffleDependency[_, _, _] =>
+        // If the RDD has a shuffle dependency, use the locations that were pre-determined when the
+        // map stage was launched.
+        val blockManagerId = s.reduceLocations(partition)
+        return Seq(TaskLocation(blockManagerId.host, blockManagerId.executorId))
+
       case _ =>
     }
     Nil

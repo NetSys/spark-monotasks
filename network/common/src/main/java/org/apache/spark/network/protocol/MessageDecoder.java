@@ -70,6 +70,9 @@ public final class MessageDecoder extends MessageToMessageDecoder<ByteBuf> {
       case BlockFetchFailure:
         return BlockFetchFailure.decode(in);
 
+      case BlocksAvailable:
+        return BlocksAvailable.decode(in);
+
       default:
         throw new IllegalArgumentException("Unexpected message type: " + msgType);
     }

@@ -33,7 +33,14 @@ private[spark] class NetworkScheduler(conf: SparkConf) extends Logging {
    * in the main scheduler thread (network monotasks are asynchronous, but launching a large
    * number of them can still take a non-negligible amount of time in aggregate).
    */
-  private val monotaskQueue = new LinkedBlockingQueue[NetworkMonotask]()
+  private val readyMonotaskQueue = new LinkedBlockingQueue[NetworkMonotask]()
+
+  /**
+   * Queue of low priority monotasks that should only be executed when the network scheduler has
+   * no other work to do.
+   */
+  private val lowPriorityNetworkRequestMonotaskQueue =
+    new LinkedBlockingQueue[NetworkRequestMonotask]()
 
   /**
    * Queue of NetworkRequestMonotasks that can't be sent until a task finishes. This is guaranteed
@@ -41,7 +48,7 @@ private[spark] class NetworkScheduler(conf: SparkConf) extends Logging {
    * with all monotasks for a given task, so they'll all be submitted to the per-resource
    * schedulers in order, and no others will get inserted in between).
    */
-  private val networkRequestMonotaskQueue = new LinkedBlockingQueue[NetworkRequestMonotask]();
+  private val networkRequestMonotaskQueue = new LinkedBlockingQueue[NetworkRequestMonotask]()
 
   /** For each task with running network requests, the number of outstanding requests. */
   private val taskIdToNumOutstandingRequests = new HashMap[Long, Int]()
@@ -62,7 +69,7 @@ private[spark] class NetworkScheduler(conf: SparkConf) extends Logging {
   private val monotaskLaunchThread = new Thread(new Runnable() {
     override def run(): Unit = {
       while (true) {
-        monotaskQueue.take().execute(NetworkScheduler.this)
+        readyMonotaskQueue.take().execute(NetworkScheduler.this)
       }
     }
   })
@@ -77,12 +84,12 @@ private[spark] class NetworkScheduler(conf: SparkConf) extends Logging {
         // in the executor logs and generate corresponding graphs about network performance.
         logInfo(s"KNET Monotask ${monotask.taskId} block ${networkResponseMonotask.blockId} to " +
           s"${networkResponseMonotask.channel.remoteAddress()} READY ${System.currentTimeMillis}")
-        monotaskQueue.put(monotask)
+        readyMonotaskQueue.put(monotask)
 
       case networkRequestMonotask: NetworkRequestMonotask =>
         if (maxConcurrentTasks <= 0) {
           logInfo(s"Max concurrent tasks is $maxConcurrentTasks, so launching monotask immediately")
-          monotaskQueue.put(monotask)
+          readyMonotaskQueue.put(monotask)
         } else {
           val taskId = networkRequestMonotask.context.taskAttemptId
           taskIdToNumOutstandingRequests.synchronized {
@@ -91,14 +98,20 @@ private[spark] class NetworkScheduler(conf: SparkConf) extends Logging {
               logInfo(s"Max concurrent tasks $maxConcurrentTasks; launching " +
                 s"NetworkRequestMonotask for $taskId")
               // Start the monotask and update the counts.
-              monotaskQueue.put(monotask)
+              readyMonotaskQueue.put(monotask)
               taskIdToNumOutstandingRequests.put(
                 taskId,
                 taskIdToNumOutstandingRequests.getOrElse(taskId, 0) + 1)
             } else {
               logInfo(s"$maxConcurrentTasks tasks are already running, so " +
-                s"queueing $networkRequestMonotask for macrotask $taskId")
-              networkRequestMonotaskQueue.put(networkRequestMonotask)
+                s"queueing $networkRequestMonotask (" +
+                s"${if (networkRequestMonotask.isLowPriority()) "low" else "high"} priority) for " +
+                s"macrotask $taskId")
+              if (networkRequestMonotask.isLowPriority()) {
+                lowPriorityNetworkRequestMonotaskQueue.put(networkRequestMonotask)
+              } else {
+                networkRequestMonotaskQueue.put(networkRequestMonotask)
+              }
             }
           }
         }
@@ -129,21 +142,38 @@ private[spark] class NetworkScheduler(conf: SparkConf) extends Logging {
         // Remove the macrotask from the outstanding requests and possibly start a new macrotask's
         // network requests.
         taskIdToNumOutstandingRequests.remove(taskId)
-        // Thread safety isn't an issue here, because access is synchronized on
-        // taskIdToNumOutstandingRequests.
-        if (networkRequestMonotaskQueue.size() > 0) {
-          val firstTaskId = networkRequestMonotaskQueue.peek().context.taskAttemptId
+        if (networkRequestMonotaskQueue.size() + lowPriorityNetworkRequestMonotaskQueue.size() >
+            0) {
           var tasksStarted = 0
-          while (networkRequestMonotaskQueue.size() > 0 &&
-              networkRequestMonotaskQueue.peek().context.taskAttemptId == firstTaskId) {
-            val networkMonotask = networkRequestMonotaskQueue.remove()
-            // TODO: unify networkRequestMonotaskQueue with monotaskQueue. If this method
+          // Try to launch all of the network monotasks for a particular macrotask.
+          // TODO: For the low-priority ones, all of a macrotask's monotasks will be fetching data
+          //       from the same machine. This may cause network hotspots, in which case we should
+          //       organize these differently.
+          //       One better strategy would be to have one queue per remote execute, and do
+          //       round-robin on the executors up to some maximum amount of outstanding data.
+          val monotaskQueue = if (networkRequestMonotaskQueue.size() > 0) {
+            logInfo(s"Attempting to launch high priority network monotask")
+            networkRequestMonotaskQueue
+          } else {
+            logInfo(s"Attempting to launch low priority network monotask")
+            lowPriorityNetworkRequestMonotaskQueue
+          }
+
+          // Thread safety isn't an issue here, because access is synchronized on
+          // taskIdToNumOutstandingRequests.
+          val firstTaskId = monotaskQueue.peek().context.taskAttemptId
+
+          while (monotaskQueue.size() > 0 &&
+              monotaskQueue.peek().context.taskAttemptId == firstTaskId) {
+            val networkMonotask = monotaskQueue.remove()
+            // TODO: unify networkRequestMonotaskQueue with readyMonotaskQueue. If this method
             //       handles updating taskIdToNumOutstanding, the thread that launches monotasks
             //       can read them directly from networkRequestMonotaskQueue.
             logInfo(s"Launching network monotask $networkMonotask for task $firstTaskId")
-            monotaskQueue.put(networkMonotask)
+            readyMonotaskQueue.put(networkMonotask)
             tasksStarted += 1
           }
+          logInfo(s"Starting $tasksStarted monotasks")
           taskIdToNumOutstandingRequests.put(firstTaskId, tasksStarted)
         }
       }

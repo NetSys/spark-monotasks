@@ -19,7 +19,7 @@ package org.apache.spark.monotasks.compute
 import org.apache.spark.{Partition, ShuffleDependency, SparkEnv, TaskContextImpl}
 import org.apache.spark.rdd.RDD
 import org.apache.spark.scheduler.MapStatus
-import org.apache.spark.storage.MultipleShuffleBlocksId
+import org.apache.spark.storage.{BlockManagerId, MultipleShuffleBlocksId, ShuffleBlockId}
 
 /**
  * Divides the elements of an RDD into multiple buckets (based on a partitioner specified in the
@@ -34,6 +34,7 @@ private[spark] class ShuffleMapMonotask[T](
     rdd: RDD[T],
     private val partition: Partition,
     private val dependency: ShuffleDependency[Any, Any, _],
+    private val executorIdToReduceIds: Seq[(BlockManagerId, Seq[Int])],
     private val outputSingleBlock: Boolean)
   extends ExecutionMonotask[T, MapStatus](context, rdd, partition) {
 
@@ -55,7 +56,13 @@ private[spark] class ShuffleMapMonotask[T](
       // https://github.com/NetSys/spark-monotasks/blob/spark_with_logging/
       //     core/src/main/scala/org/apache/spark/util/collection/ExternalSorter.scala#L375
       shuffleWriter.write(castedIterator.map(product2 => (product2._1, product2._2)))
-      shuffleWriter.stop(success = true).get
+      val blockSizes = shuffleWriter.stop(success = true)
+
+      if (SparkEnv.get.conf.getBoolean("spark.monotasks.earlyShuffle", false)) {
+        notifyReduceTasksOfMapOutput(blockSizes)
+      }
+
+      MapStatus(SparkEnv.get.blockManager.blockManagerId, blockSizes.map(_.toLong))
     } catch {
       case e: Exception =>
         try {
@@ -67,6 +74,45 @@ private[spark] class ShuffleMapMonotask[T](
         throw e
     }
     mapStatus
+  }
+
+  /**
+   * Tells the remote machines where reduce tasks are expected to run that the shuffle data is ready
+   * to be fetched.
+   *
+   * TODO: For on-disk data, should decide here whether the data will actually be fetched (since if
+   *       it will be fetched, it shouldn't be written to disk).
+   */
+  private def notifyReduceTasksOfMapOutput(blockSizes: Array[Int]): Unit = {
+    val shuffleId = dependency.shuffleHandle.shuffleId
+    val blockManagerId = SparkEnv.get.blockManager.blockManagerId
+    executorIdToReduceIds.foreach {
+      case (remoteBlockManagerId, reduceIds) =>
+        if (remoteBlockManagerId != blockManagerId) {
+          val reduceIdsWithNonZeroData = reduceIds.filter(blockSizes(_) > 0)
+          if (reduceIdsWithNonZeroData.nonEmpty) {
+            val shuffleBlockIds = reduceIdsWithNonZeroData.map(
+              ShuffleBlockId(shuffleId, partition.index, _).toString)
+            val shuffleBlockSizes = reduceIdsWithNonZeroData.map(blockSizes(_))
+            // Don't bother scheduling a network monotask for this, since it's just a small RPC.
+            logInfo(s"Signalling to $remoteBlockManagerId that shuffle blocks " +
+              s"${shuffleBlockIds.mkString(",")} are available")
+            SparkEnv.get.blockTransferService.signalBlocksAvailable(
+              remoteBlockManagerId.host,
+              remoteBlockManagerId.port,
+              shuffleBlockIds.toArray,
+              shuffleBlockSizes.toArray,
+              context.taskAttemptId,
+              context.attemptNumber,
+              blockManagerId.executorId,
+              blockManagerId.host,
+              blockManagerId.port)
+          } else {
+            logDebug(s"Not notifying $remoteBlockManagerId about shuffle data because all " +
+              "blocks have zero size")
+          }
+        }
+    }
   }
 
   /**

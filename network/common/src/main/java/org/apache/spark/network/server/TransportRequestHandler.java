@@ -40,6 +40,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.spark.network.protocol.BlockFetchRequest;
+import org.apache.spark.network.protocol.BlocksAvailable;
 import org.apache.spark.network.protocol.RequestMessage;
 import org.apache.spark.network.util.NettyUtils;
 
@@ -79,6 +80,8 @@ public class TransportRequestHandler extends MessageHandler<RequestMessage> {
   public void handle(RequestMessage request) {
     if (request instanceof BlockFetchRequest) {
       processFetchRequest((BlockFetchRequest) request);
+    } else if (request instanceof BlocksAvailable) {
+      processBlocksAvailable((BlocksAvailable) request);
     } else {
       throw new IllegalArgumentException("Unknown request type: " + request);
     }
@@ -90,5 +93,16 @@ public class TransportRequestHandler extends MessageHandler<RequestMessage> {
     logger.info("Received req from {} to fetch blocks {}", client, Arrays.toString(req.blockIds));
 
     blockFetcher.getBlockData(req.blockIds, channel, req.taskAttemptId, req.attemptNumber);
+  }
+
+  private void processBlocksAvailable(final BlocksAvailable blocksAvailable) {
+    blockFetcher.signalBlocksAvailable(
+        blocksAvailable.blockIds,
+        blocksAvailable.blockSizes,
+        blocksAvailable.taskAttemptId,
+        blocksAvailable.attemptNumber,
+        blocksAvailable.executorId,
+        blocksAvailable.host,
+        blocksAvailable.blockManagerPort);
   }
 }

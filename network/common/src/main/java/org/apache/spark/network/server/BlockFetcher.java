@@ -22,9 +22,20 @@ import io.netty.channel.Channel;
  * Interface for asynchronously getting data identified by a set of block identifiers. The requested
  * data (or an error, if applicable) is sent back on the given channel.
  *
+ * This interface is also used to signal that a set of blocks are available on a remote machine.
+ *
  * Used by TransportRequestHandler to service requests from remote hosts for particular blocks.
  */
 public abstract class BlockFetcher {
   public abstract void getBlockData(
     String[] blockIds, Channel channel, long taskAttemptId, int attemptNumber);
+
+  public abstract void signalBlocksAvailable(
+    String[] blockIds,
+    int[] blockSizes,
+    long taskAttemptId,
+    int attemptNumber,
+    String executorId,
+    String host,
+    int blockManagerPort);
 }

@@ -51,7 +51,7 @@ import org.apache.spark.executor._
 import org.apache.spark.io.CompressionCodec
 import org.apache.spark.monotasks.{LocalDagScheduler, Monotask, SubmitMonotask, SubmitMonotasks}
 import org.apache.spark.monotasks.disk.{DiskReadMonotask, DiskRemoveMonotask}
-import org.apache.spark.monotasks.network.NetworkResponseMonotask
+import org.apache.spark.monotasks.network.{NetworkRequestMonotask, NetworkResponseMonotask}
 import org.apache.spark.network._
 import org.apache.spark.network.buffer.{ManagedBuffer, NioManagedBuffer}
 import org.apache.spark.network.server.BlockFetcher
@@ -248,6 +248,36 @@ private[spark] class BlockManager(
     if (task != null) {
       Await.ready(task, Duration.Inf)
     }
+  }
+
+  override def signalBlocksAvailable(
+      blockIds: Array[String],
+      blockSizes: Array[Int],
+      taskAttemptId: Long,
+      attemptNumber: Int,
+      executor: String,
+      host: String,
+      port: Int): Unit = {
+    // Create a network request monotask to fetch the newly available blocks, and submit it to
+    // the LocalDagScheduler.  The new monotask has low-priority, so it's only executed if the
+    // scheduler doesn't have any other work.
+    val taskContext =
+      new TaskContextImpl(taskAttemptId, attemptNumber, taskIsRunningRemotely = true)
+    val remoteBlockManagerId = BlockManagerId(executor, host, port)
+    logInfo(s"Received notification that blocks ${blockIds.mkString(",")} are available on " +
+      s"executor $remoteBlockManagerId; initiating network monotask to fetch them.")
+    val blockIdsAndSizes = blockIds.map { blockIdStr =>
+      BlockId(blockIdStr) match {
+        case shuffleBlockId: ShuffleBlockId =>
+          shuffleBlockId
+        case _ =>
+          throw new SparkException(
+            s"Newly available block $blockIdStr is expected to be a shuffle block")
+      }
+    }.zip(blockSizes.map(_.toLong))
+    val networkRequestMonotask = new NetworkRequestMonotask(
+      taskContext, remoteBlockManagerId, blockIdsAndSizes, lowPriority = true)
+    localDagScheduler.post(SubmitMonotask(networkRequestMonotask))
   }
 
   override def getBlockData(

@@ -35,7 +35,7 @@ private[spark] abstract class Monotask(val context: TaskContextImpl) extends Log
   val taskId = Monotask.newId()
 
   /** Whether this monotask has finished executing. */
-  private var isFinished = false
+  var isFinished = false
 
   /**
    * The BlockId with which this monotask stored temporary data in the BlockManager for use by its

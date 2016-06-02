@@ -59,6 +59,26 @@ class NettyBlockTransferService(conf: SparkConf, securityManager: SecurityManage
     logInfo("Server created on " + server.getPort)
   }
 
+  def signalBlocksAvailable(
+      remoteHost: String,
+      remotePort: Int,
+      blockIds: Array[String],
+      blockSizes: Array[Int],
+      taskAttemptId: Long,
+      attemptNumber: Int,
+      localExecutorId: String,
+      localHost: String,
+      localBlockManagerPort: Int) {
+    val client = clientFactory.createClient(remoteHost, remotePort)
+    client.signalBlocksAvailable(
+      blockIds,
+      blockSizes,
+      taskAttemptId,
+      attemptNumber,
+      localExecutorId,
+      localHost,
+      localBlockManagerPort);
+  }
   override def fetchBlocks(
       host: String,
       port: Int,

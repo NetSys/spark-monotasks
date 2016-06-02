@@ -42,7 +42,7 @@ public interface Message extends Encodable {
 
   /** Preceding every serialized Message is its type, which allows us to deserialize it. */
   public static enum Type implements Encodable {
-    BlockFetchRequest(0), BlockFetchSuccess(1), BlockFetchFailure(2);
+    BlockFetchRequest(0), BlockFetchSuccess(1), BlockFetchFailure(2), BlocksAvailable(3);
 
     private final byte id;
 
@@ -63,6 +63,7 @@ public interface Message extends Encodable {
         case 0: return BlockFetchRequest;
         case 1: return BlockFetchSuccess;
         case 2: return BlockFetchFailure;
+        case 3: return BlocksAvailable;
         default: throw new IllegalArgumentException("Unknown message type: " + id);
       }
     }

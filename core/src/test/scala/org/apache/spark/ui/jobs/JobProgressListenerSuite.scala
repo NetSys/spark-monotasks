@@ -183,7 +183,7 @@ class JobProgressListenerSuite extends FunSuite with LocalSparkContext with Matc
     var taskInfo = new TaskInfo(1234L, 0, 1, 0L, "exe-1", "host1", TaskLocality.NODE_LOCAL, false)
     taskInfo.finishTime = 1
     var task = new ShuffleMapMacrotask(
-      0, null, new Partition { override def index = 0 }, null, null, true)
+      0, null, new Partition { override def index = 0 }, null, null, null, true)
     val taskType = Utils.getFormattedClassName(task)
     listener.onTaskEnd(
       SparkListenerTaskEnd(task.stageId, 0, taskType, Success, taskInfo, taskMetrics))
@@ -195,7 +195,7 @@ class JobProgressListenerSuite extends FunSuite with LocalSparkContext with Matc
       new TaskInfo(1234L, 0, 1, 1000L, "exe-unknown", "host1", TaskLocality.NODE_LOCAL, true)
     taskInfo.finishTime = 1
     task = new ShuffleMapMacrotask(
-      0, null, new Partition { override def index = 0 }, null, null, true)
+      0, null, new Partition { override def index = 0 }, null, null, null, true)
     listener.onTaskEnd(
       SparkListenerTaskEnd(task.stageId, 0, taskType, Success, taskInfo, taskMetrics))
     assert(listener.stageIdToData.size === 1)
@@ -204,7 +204,7 @@ class JobProgressListenerSuite extends FunSuite with LocalSparkContext with Matc
     taskInfo = new TaskInfo(1235L, 0, 1, 0L, "exe-1", "host1", TaskLocality.NODE_LOCAL, false)
     taskInfo.finishTime = 1
     task = new ShuffleMapMacrotask(
-      0, null, new Partition { override def index = 0 }, null, null, true)
+      0, null, new Partition { override def index = 0 }, null, null, null, true)
     listener.onTaskEnd(
       SparkListenerTaskEnd(task.stageId, 0, taskType, Success, taskInfo, taskMetrics))
     assert(listener.stageIdToData.getOrElse((0, 0), fail())
@@ -214,7 +214,7 @@ class JobProgressListenerSuite extends FunSuite with LocalSparkContext with Matc
     taskInfo = new TaskInfo(1236L, 0, 2, 0L, "exe-2", "host1", TaskLocality.NODE_LOCAL, false)
     taskInfo.finishTime = 1
     task = new ShuffleMapMacrotask(
-      0, null, new Partition { override def index = 0 }, null, null, true)
+      0, null, new Partition { override def index = 0 }, null, null, null, true)
     listener.onTaskEnd(
       SparkListenerTaskEnd(task.stageId, 0, taskType, Success, taskInfo, taskMetrics))
     assert(listener.stageIdToData.getOrElse((0, 0), fail())
@@ -228,7 +228,7 @@ class JobProgressListenerSuite extends FunSuite with LocalSparkContext with Matc
     val taskInfo = new TaskInfo(1234L, 0, 3, 0L, "exe-1", "host1", TaskLocality.NODE_LOCAL, false)
     taskInfo.finishTime = 1
     val task = new ShuffleMapMacrotask(
-      0, null, new Partition { override def index = 0 }, null, null, true)
+      0, null, new Partition { override def index = 0 }, null, null, null, true)
     val taskType = Utils.getFormattedClassName(task)
 
     // Go through all the failure cases to make sure we are counting them as failures.
@@ -261,7 +261,7 @@ class JobProgressListenerSuite extends FunSuite with LocalSparkContext with Matc
     val listener = new JobProgressListener(conf)
 
     val task = new ShuffleMapMacrotask(
-      0, null, new Partition { override def index = 0 }, null, null, true)
+      0, null, new Partition { override def index = 0 }, null, null, null, true)
     val taskType = Utils.getFormattedClassName(task)
     val execId = "exe-1"
 

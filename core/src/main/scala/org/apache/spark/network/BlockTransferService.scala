@@ -69,6 +69,21 @@ abstract class BlockTransferService extends Closeable with Logging {
   def hostName: String
 
   /**
+   * Signals to the remote side that blocks are available on this machine to fetch. Available only
+   * after [[init]] is invoked.
+   */
+  def signalBlocksAvailable(
+      remoteHost: String,
+      remotePort: Int,
+      blockIds: Array[String],
+      blockSizes: Array[Int],
+      taskAttemptId: Long,
+      attemptNumber: Int,
+      localExecutorId: String,
+      localHost: String,
+      localBlockManagerPort: Int);
+
+  /**
    * Fetches blocks from a remote node asynchronously, available only after [[init]] is invoked.
    */
   def fetchBlocks(
@@ -106,6 +121,7 @@ abstract class BlockTransferService extends Closeable with Logging {
           ret.flip()
           result.success(new NioManagedBuffer(ret))
         }
+        override def isLowPriority(): Boolean = false
       })
 
     Await.result(result.future, Duration.Inf)

@@ -16,10 +16,13 @@
 
 package org.apache.spark.monotasks.network
 
+import scala.concurrent.duration._
+
 import org.mockito.Matchers.any
-import org.mockito.Mockito.{mock, when}
+import org.mockito.Mockito.{mock, never, verify, when}
 
 import org.scalatest.{BeforeAndAfterEach, FunSuite}
+import org.scalatest.concurrent.Eventually._
 
 import org.apache.spark.{SparkConf, SparkEnv, TaskContextImpl}
 import org.apache.spark.executor.TaskMetrics
@@ -39,7 +42,12 @@ class NetworkSchedulerSuite extends FunSuite with BeforeAndAfterEach {
     // TaskMetrics requires access to the LocalDagScheduler via SparkEnv.
     val sparkEnv = mock(classOf[SparkEnv])
     localDagScheduler = mock(classOf[LocalDagScheduler])
-    networkScheduler = new NetworkScheduler(new SparkConf(false))
+
+    // Set the max concurrent tasks to 1, which simplifies testing of handling of task queues.
+    val sparkConf = new SparkConf(false)
+    sparkConf.set("spark.monotasks.network.maxConcurrentTasks", "1")
+
+    networkScheduler = new NetworkScheduler(sparkConf)
     networkScheduler.initializeIdleTimeMeasurement(startNanos=0L)
     when(sparkEnv.localDagScheduler).thenReturn(localDagScheduler)
     SparkEnv.set(sparkEnv)
@@ -129,5 +137,58 @@ class NetworkSchedulerSuite extends FunSuite with BeforeAndAfterEach {
     // The NetworkScheduler is idle here for elapsedNanos.
     currentNanos += elapsedNanos
     updateAndVerifyMetricsOnResponseEnd(response, 2 * elapsedMillis)
+  }
+
+  private def getMockNetworkRequestMonotask(
+      lowPriority: Boolean, taskId: Int): NetworkRequestMonotask = {
+    val monotask = mock(classOf[NetworkRequestMonotask])
+    when(monotask.isLowPriority()).thenReturn(lowPriority)
+    val taskContext = new TaskContextImpl(taskId, 0)
+    when(monotask.context).thenReturn(taskContext)
+    monotask
+  }
+
+  test("high priority monotasks run before low priority ones") {
+    val lowPriorityMonotask1 = getMockNetworkRequestMonotask(true, 0)
+    val lowPriorityMonotask2 = getMockNetworkRequestMonotask(true, 1)
+    val lowPriorityMonotask3 = getMockNetworkRequestMonotask(true, 2)
+    val highPriorityMonotask1 = getMockNetworkRequestMonotask(false, 3)
+
+    // Submit all of the low priority monotasks to the scheduler. Only the first one should be
+    // launched.
+    networkScheduler.submitTask(lowPriorityMonotask1)
+    networkScheduler.submitTask(lowPriorityMonotask2)
+    networkScheduler.submitTask(lowPriorityMonotask3)
+
+    eventually(timeout(3 seconds), interval(10 milliseconds)) {
+      verify(lowPriorityMonotask1).execute(networkScheduler)
+    }
+
+    verify(lowPriorityMonotask2, never()).execute(any())
+    verify(lowPriorityMonotask3, never()).execute(any())
+
+    // Submit the high priority monotask. Nothing should happen yet, since there's currently a
+    // monotask running.
+    networkScheduler.submitTask(highPriorityMonotask1)
+
+    verify(highPriorityMonotask1, never()).execute(any())
+
+    // Finish the low priority monotask. This should cause the high priority monotask (and none of
+    // the other monotasks) to be launched.
+    networkScheduler.handleNetworkRequestSatisfied(lowPriorityMonotask1)
+
+    eventually(timeout(3 seconds), interval(10 milliseconds)) {
+      verify(highPriorityMonotask1).execute(networkScheduler)
+    }
+
+    verify(lowPriorityMonotask2, never()).execute(any())
+    verify(lowPriorityMonotask3, never()).execute(any())
+
+    // When the high priority monotask finishes, the next low priority monotask should be launched.
+    networkScheduler.handleNetworkRequestSatisfied(highPriorityMonotask1)
+    eventually(timeout(3 seconds), interval(10 milliseconds)) {
+      verify(lowPriorityMonotask2).execute(networkScheduler)
+    }
+    verify(lowPriorityMonotask3, never()).execute(any())
   }
 }

@@ -34,7 +34,7 @@ object MemorySortJob {
     // Sleep for a few seconds to give all of the executors a chance to register. Without this
     // sleep, the first stage can get scheduled before all of the executors have registered,
     // leading to load imbalance.
-    Thread.sleep(5000)
+    Thread.sleep(10000)
 
     val numMapTasks = if (args.length > 0) args(0).toInt else 16
     val numReduceTasks = if (args.length > 1) args(1).toInt else 128

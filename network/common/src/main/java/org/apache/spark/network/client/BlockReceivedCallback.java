@@ -48,4 +48,12 @@ public interface BlockReceivedCallback {
 
   /** Called upon failure to fetch a particular block. */
   void onFailure(String blockId, Throwable e);
+
+  /**
+   * Whether this callback should be prioritized below others.  This is used in cases where the
+   * same block is requested multiple times, in which case the low priority callback will be
+   * failed, and only the high priority one will succeed (it's assumed that if the same block
+   * is requested concurrently, at most one of the concurrent requests will be high priority).
+   */
+  boolean isLowPriority();
 }

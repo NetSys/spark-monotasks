@@ -27,18 +27,23 @@ import org.apache.spark.monotasks.Monotask
 import org.apache.spark.monotasks.compute.ShuffleMapMonotask
 import org.apache.spark.monotasks.disk.DiskWriteMonotask
 import org.apache.spark.rdd.RDD
-import org.apache.spark.storage.MultipleShuffleBlocksId
+import org.apache.spark.storage.{BlockManagerId, MultipleShuffleBlocksId}
 
 /**
  * Describes a group of monotasks that will divide the elements of an RDD into multiple buckets
  * (based on a partitioner specified in the ShuffleDependency). The shuffle data is stored to disk
  * if writeShuffleDataToDisk is set to true, and it is stored in memory otherwise.
+ *
+ * TODO: Make executorIdToReduceIds a broadcast variable, or make it part of the shuffle dependency
+ *       so that it's included in the task binary (which gets broadcasted), since it can be shared
+ *       by all of the executors on a particular machine.
  */
 private[spark] class ShuffleMapMacrotask(
     stageId: Int,
     taskBinary: Broadcast[Array[Byte]],
     partition: Partition,
     dependencyIdToPartitions: HashMap[Long, HashSet[Partition]],
+    private val executorIdToReduceIds: Seq[(BlockManagerId, Seq[Int])],
     @transient private var locs: Seq[TaskLocation],
     private val writeShuffleDataToDisk: Boolean)
   extends Macrotask[MapStatus](stageId, partition, dependencyIdToPartitions) {
@@ -58,7 +63,7 @@ private[spark] class ShuffleMapMacrotask(
       ByteBuffer.wrap(taskBinary.value), SparkEnv.get.dependencyManager.replClassLoader)
 
     val shuffleMapMonotask = new ShuffleMapMonotask(
-      context, rdd, partition, dep, writeShuffleDataToDisk)
+      context, rdd, partition, dep, executorIdToReduceIds, writeShuffleDataToDisk)
 
     val maybeDiskWriteMonotask = if (writeShuffleDataToDisk) {
       // Create one disk write monotask that will write all of the shuffle blocks.

@@ -42,6 +42,7 @@ import org.apache.spark.monotasks.Monotask
 import org.apache.spark.rdd.RDD
 import org.apache.spark.serializer.Serializer
 import org.apache.spark.shuffle.{ShuffleHandle, ShuffleHelper}
+import org.apache.spark.storage.{BlockManagerId, BlockManagerMaster}
 
 /**
  * :: DeveloperApi ::
@@ -138,6 +139,8 @@ class ShuffleDependency[K, V, C](
 
   _rdd.sparkContext.cleaner.foreach(_.registerShuffleForCleanup(this))
 
+  var reduceLocations = new Array[BlockManagerId](partitioner.numPartitions)
+
   /** Helps with reading the shuffle data associated with this dependency. Set by getMonotasks(). */
   var shuffleHelper: Option[ShuffleHelper[K, V, C]] = None
 
@@ -152,6 +155,33 @@ class ShuffleDependency[K, V, C](
     val monotasks = shuffleHelper.get.getReadMonotasks()
     monotasks.foreach(nextMonotask.addDependency(_))
     monotasks
+  }
+
+  /**
+   * Generates, saves, and returns a possible assignment of reduce tasks to machines.
+   *
+   * This is used to send possible reduce task locations to map tasks, so that they can
+   * opportunistically start sending shuffle data early if the network is idle.
+   */
+  def assignReduceTasksToExecutors(
+      blockManagerMaster: BlockManagerMaster): Seq[(BlockManagerId, Seq[Int])] = {
+    val numReduceTasks = partitioner.numPartitions
+    val possibleReduceTaskLocations =
+      blockManagerMaster.getPeers(SparkEnv.get.blockManager.blockManagerId)
+    val executorIdToReduceTaskIds = possibleReduceTaskLocations.zipWithIndex.map {
+      case (id, index) =>
+        val locations = index until numReduceTasks by possibleReduceTaskLocations.size
+        (id, locations)
+    }
+
+    // Set reduceLocations so that it can be used later by the DAGScheduler.
+    executorIdToReduceTaskIds.foreach {
+      case (blockManagerId, reduceTaskIds) =>
+        reduceTaskIds.foreach { reduceTaskId =>
+          reduceLocations(reduceTaskId) = blockManagerId
+        }
+    }
+    executorIdToReduceTaskIds
   }
 }
 
