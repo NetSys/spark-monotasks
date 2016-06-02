@@ -21,6 +21,7 @@ num_tasks = target_total_data_gb * hdfs_blocks_per_gb
 # Just do one trial for now! When experiment is properly configured, do many trials.
 num_shuffles = 3
 cores_per_worker_values = [8]
+cache_input_output_data = "false"
 
 for cores_per_worker in cores_per_worker_values:
   for values_per_key in values_per_key_values:
@@ -31,7 +32,7 @@ for cores_per_worker in cores_per_worker_values:
     # The cores_per_worker parameter won't be used by the experiment; it's just included here for
     # convenience in how the log files are named.
     parameters = [num_tasks, num_tasks, items_per_task, values_per_key, num_shuffles,
-      data_filename, use_existing_data_files, cores_per_worker]
+      data_filename, use_existing_data_files, cache_input_output_data, cores_per_worker]
     stringified_parameters = ["{}".format(p) for p in parameters]
     command = ("/root/spark/bin/run-example monotasks.SortJob " +
                " ".join(stringified_parameters))

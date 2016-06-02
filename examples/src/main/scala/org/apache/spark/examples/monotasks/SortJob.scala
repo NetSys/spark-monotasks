@@ -43,6 +43,9 @@ object SortJob extends Logging {
     val numShuffles = if (args.length > 4) args(4).toInt else 10
     val maybeInputFilename = if (args.length > 5) Some(args(5)) else None
     val readExistingData = if (args.length > 6) args(6).toBoolean else false
+    // Caching the HDFS input data and the resulting sorted RDD allows us to easily compare runtimes
+    // for cached and uncached data using exactly the same input data.
+    val cacheInputOutputData = if (args.length > 7) args(7).toBoolean else false
 
     // Sleep for a few seconds to give all of the executors a chance to register. Without this
     // sleep, the first stage can get scheduled before all of the executors have registered,
@@ -73,16 +76,22 @@ object SortJob extends Logging {
           SequenceFileOutputFormat[LongWritable, LongArrayWritable]](filename)
       }
 
+      val unsortedRdd = spark.sequenceFile(
+        filename, classOf[LongWritable], classOf[LongArrayWritable])
+      if (cacheInputOutputData) {
+        // Cache the input data in memory before running any shuffles.
+        unsortedRdd.cache()
+        unsortedRdd.count()
+      }
+
       (0 until numShuffles).foreach { i =>
         // Remove the sorted data, so that the disk doesn't fill up, and just in case there's
         // lingering sorted data from an earlier experiment.
         "/root/ephemeral-hdfs/bin/hdfs dfs -rm -r ./*sorted*" !
 
-        val unsortedRddDisk = spark.sequenceFile(
-          filename, classOf[LongWritable], classOf[LongArrayWritable])
         // Convert the RDD back to Longs, because LongWritables aren't serializable, so Spark
         // can't serialize them for the shuffle.
-        val unsortedRddLongs = unsortedRddDisk.map { pair =>
+        val unsortedRddLongs = unsortedRdd.map { pair =>
           (pair._1.get(), pair._2.get())
         }
         val partitioner = new LongPartitioner(numReduceTasks)
@@ -90,8 +99,18 @@ object SortJob extends Logging {
           unsortedRddLongs, partitioner)
           .setKeyOrdering(Ordering[Long])
           .map(pair => (new LongWritable(pair._1), new LongArrayWritable(pair._2)))
-        sortedRdd.saveAsNewAPIHadoopFile[SequenceFileOutputFormat[LongWritable, LongArrayWritable]](
-          s"${filename}_sorted_$i")
+
+        if (cacheInputOutputData) {
+          // Cache the sorted RDD in memory. This data is then removed so that we do not fill up the
+          // cluster's memory when running multiple shuffles.
+          sortedRdd.cache()
+          sortedRdd.count()
+          sortedRdd.unpersist(blocking=true)
+        } else {
+          sortedRdd
+            .saveAsNewAPIHadoopFile[SequenceFileOutputFormat[LongWritable, LongArrayWritable]](
+              s"${filename}_sorted_$i")
+        }
 
         // Force a garbage collection to happen, in order to try to avoid long garbage
         // collections in the middle of jobs.
