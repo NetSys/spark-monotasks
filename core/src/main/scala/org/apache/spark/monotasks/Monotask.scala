@@ -69,6 +69,10 @@ private[spark] abstract class Monotask(val context: TaskContextImpl) extends Log
   /** Returns the elapsed time since the monotask began queuing. */
   def getQueueTime(): Long = System.nanoTime - queueStartTimeNanos
 
+  override def toString(): String = {
+    s"Monotask ${this.taskId} (${super.toString()} for macrotask ${context.taskAttemptId})"
+  }
+
   /**
    * Registers a monotask that must complete before this monotask can be run (by updating state
    * in both this monotask and in the passed dependency).
