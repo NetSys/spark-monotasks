@@ -227,12 +227,12 @@ class LocalDagSchedulerSuite extends FunSuite with BeforeAndAfterEach with Local
     secondMonotask.addDependency(firstMonotask)
     localDagScheduler.runEvent(SubmitMonotasks(List(firstMonotask, secondMonotask)))
 
-    assert(localDagScheduler.runningMacrotaskAttemptIds.contains(taskAttemptId),
+    assert(localDagScheduler.localMacrotaskAttemptIds.contains(taskAttemptId),
       (s"Task attempt id $taskAttemptId should have been added to the set of running ids when " +
         "the task was submitted"))
 
     localDagScheduler.runEvent(TaskSuccess(firstMonotask))
-    assert(localDagScheduler.runningMacrotaskAttemptIds.contains(taskAttemptId),
+    assert(localDagScheduler.localMacrotaskAttemptIds.contains(taskAttemptId),
       (s"Task attempt id $taskAttemptId should still be in the set of running ids because no " +
         "task result was submitted, implying more monotasks for the macrotask are still running"))
 
@@ -240,7 +240,7 @@ class LocalDagSchedulerSuite extends FunSuite with BeforeAndAfterEach with Local
     localDagScheduler.runEvent(TaskSuccess(secondMonotask, Some(result)))
     assert(secondMonotask.context.isCompleted)
     verify(executorBackend).statusUpdate(meq(taskAttemptId), meq(TaskState.FINISHED), meq(result))
-    assert(localDagScheduler.runningMacrotaskAttemptIds.isEmpty,
+    assert(localDagScheduler.localMacrotaskAttemptIds.isEmpty,
       s"Task attempt id $taskAttemptId should have been removed from running ids")
   }
 
@@ -421,7 +421,7 @@ class LocalDagSchedulerSuite extends FunSuite with BeforeAndAfterEach with Local
     // Verify that D removed E from the list of waiting monotask and removed the macrotask from
     // macrotaskRemainingMonotasks.
     assert(!localDagScheduler.waitingMonotasks.contains(monotaskE))
-    assert(!localDagScheduler.runningMacrotaskAttemptIds.contains(taskAttemptId))
+    assert(!localDagScheduler.localMacrotaskAttemptIds.contains(taskAttemptId))
 
     // Suppose that A completed normally, uneffected by D's failure.
     localDagScheduler.runEvent(TaskSuccess(monotaskA))
@@ -461,6 +461,6 @@ class LocalDagSchedulerSuite extends FunSuite with BeforeAndAfterEach with Local
   private def assertDataStructuresEmpty() = {
     assert(localDagScheduler.waitingMonotasks.isEmpty)
     assert(localDagScheduler.runningMonotasks.isEmpty)
-    assert(localDagScheduler.runningMacrotaskAttemptIds.isEmpty)
+    assert(localDagScheduler.localMacrotaskAttemptIds.isEmpty)
   }
 }
