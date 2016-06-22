@@ -324,8 +324,9 @@ private[spark] class LocalDagScheduler(
    */
   private def scheduleReadyMonotasks(completedMonotask: Monotask): HashSet[Monotask] = {
     completedMonotask.dependents.flatMap { monotask =>
-      logDebug(s"$monotask is a dependent of completed monotask $completedMonotask")
       if (monotask.dependenciesSatisfied()) {
+        logDebug(s"Dependent $monotask of monotask $completedMonotask now has all " +
+          "dependencies satisfied, so can be launched")
         if (waitingMonotasks.contains(monotask)) {
           logDebug(s"Scheduling $monotask now that $completedMonotask has finished")
           scheduleMonotask(monotask)
@@ -337,7 +338,9 @@ private[spark] class LocalDagScheduler(
           None
         }
       } else {
-        logDebug(s"Dependent $monotask doesn't have all dependencies satisfied")
+        logDebug(s"Dependent $monotask of monotask $completedMonotask doesn't have all " +
+          s"dependencies satisfied (unsatisfied dependencies: " +
+          s"${monotask.dependencies.filter(!_.isFinished).mkString(",")})")
         None
       }
     }
