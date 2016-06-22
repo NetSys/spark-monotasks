@@ -31,7 +31,7 @@ private[spark] class SlotScheduler(conf: SparkConf) extends MonotasksScheduler w
    * the number of tasks that can be using the network concurrently.
    */
   private val concurrentNetworkTasks = Math.max(
-    1, conf.getInt("spark.monotasks.network.maxConcurrentTasks", 0))
+    1, conf.getInt("spark.monotasks.network.maxConcurrentTasks", 4))
 
   /** Called on the driver to determine how many tasks to launch initially. */
   def getInitialOffers(
