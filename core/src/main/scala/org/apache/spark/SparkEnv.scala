@@ -331,7 +331,7 @@ object SparkEnv extends Logging {
     val blockFileManager = new BlockFileManager(conf)
 
     // NB: localDagScheduler is not valid until initialize() is called later.
-    val localDagScheduler = new LocalDagScheduler(blockFileManager, conf)
+    val localDagScheduler = new LocalDagScheduler(blockFileManager, conf, numUsableCores)
 
     // This code assumes that the number of disks and cores on the master is the same as it will
     // be on all of the workers.
