@@ -106,6 +106,7 @@ private[spark] class NetworkResponseMonotask(
         if (isBlockResponse) {
           scheduler.updateIdleTimeOnResponseEnd(NetworkResponseMonotask.this)
         }
+        setFinishTime()
 
         if (future.isSuccess) {
           logDebug(s"Sent result $result to client $remoteAddress")

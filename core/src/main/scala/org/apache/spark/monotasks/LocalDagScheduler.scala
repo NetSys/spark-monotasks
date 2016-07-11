@@ -277,8 +277,8 @@ private[spark] class LocalDagScheduler(
       completedMonotask: Monotask,
       serializedTaskResult: Option[ByteBuffer] = None): Unit = {
     val taskAttemptId = completedMonotask.context.taskAttemptId
-    logDebug(s"Monotask $completedMonotask (id: ${completedMonotask.taskId}) for " +
-      s"macrotask $taskAttemptId has completed.")
+    logInfo(s"$completedMonotask completed in ${completedMonotask.getRuntimeMillis()} ms " +
+      s"(started at ${completedMonotask.getStartTimeMillis}).")
     completedMonotask.cleanup()
     updateMetricsForFinishedMonotask(completedMonotask)
 

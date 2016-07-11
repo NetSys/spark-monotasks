@@ -147,6 +147,7 @@ private[spark] class ComputeScheduler(private val threads: Int) extends Logging 
         val monotask = takeMonotask()
         numRunningTasks.incrementAndGet()
         monotask.context.taskMetrics.incComputeWaitNanos(monotask.getQueueTime())
+        monotask.setStartTime()
         monotask.executeAndHandleExceptions()
         numRunningTasks.decrementAndGet()
       }

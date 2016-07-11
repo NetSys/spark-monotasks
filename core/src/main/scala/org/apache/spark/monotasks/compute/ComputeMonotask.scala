@@ -51,6 +51,7 @@ private[spark] abstract class ComputeMonotask(context: TaskContextImpl)
       TaskContext.setTaskContext(context)
       val result = execute()
       TaskContext.unset()
+      this.setFinishTime()
       SparkEnv.get.localDagScheduler.post(TaskSuccess(this, result))
     } catch {
       case ffe: FetchFailedException => {

@@ -69,7 +69,9 @@ private[spark] class NetworkScheduler(conf: SparkConf) extends Logging {
   private val monotaskLaunchThread = new Thread(new Runnable() {
     override def run(): Unit = {
       while (true) {
-        readyMonotaskQueue.take().execute(NetworkScheduler.this)
+        val monotask = readyMonotaskQueue.take()
+        monotask.setStartTime()
+        monotask.execute(NetworkScheduler.this)
       }
     }
   })
