@@ -407,7 +407,6 @@ abstract class RDD[T: ClassTag](
       nextMonotask: Monotask,
       blockManager: BlockManager = SparkEnv.get.blockManager): Seq[Monotask] = {
     val blockId = new RDDBlockId(this.id, partition.index)
-    val storageLocations = blockManager.getAllStorageLocations(blockId)
     if (blockManager.isStoredLocally(blockId)) {
       // This RDD is stored locally and needs to be loaded into the MemoryStore. Note that it is
       // possible that the RDD is already cached in the MemoryStore, in which case no new Monotasks
@@ -420,7 +419,11 @@ abstract class RDD[T: ClassTag](
         nextMonotask.addDependency(monotask)
         monotask
       }.toSeq
-    } else if (storageLocations.nonEmpty) {
+    } else if (false && storageLevel != StorageLevel.NONE &&
+        blockManager.getAllStorageLocations(blockId).nonEmpty) {
+      // TODO: This check is temporarily disabled, because the getAllStorageLocations call involves
+      // an RPC to the driver, which can take tens of milliseconds, so should be avoided if
+      // possible.
       // If the block is only stored remotely, throw an error. Otherwise, monotasks will silently
       // re-compute the block, which can lead to out-of-memory issues where blocks are stored on
       // multiple machines (and re-computing the block also means that Monotasks behaves differently
