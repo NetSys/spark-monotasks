@@ -76,7 +76,8 @@ private[spark] class ComputeScheduler(private val threads: Int) extends Logging 
         "ComputeScheduler has not been started yet; initialize() must be called to start the " +
         "ComputeScheduler before any tasks are launched.")
     }
-    if (monotask.isInstanceOf[PrepareMonotask]) {
+    if (monotask.isInstanceOf[PrepareMonotask] ||
+        monotask.isInstanceOf[ResultSerializationMonotask]) {
       monotaskQueue.putFirst(monotask)
     } else {
       monotaskQueue.put(monotask)
