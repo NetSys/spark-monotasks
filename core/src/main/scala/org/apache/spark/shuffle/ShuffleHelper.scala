@@ -96,10 +96,18 @@ class ShuffleHelper[K, V, C](
           }
       }
     } else {
-      // Need to read the shuffle data from a remote machine.
-      val networkLoadMonotask =
-        new NetworkRequestMonotask(context, location, blockIdsAndSizes)
-      Seq(networkLoadMonotask)
+      // Need to read the shuffle data from a remote machine. Only read the data that's actually
+      // remote -- it's possible much of the data has already opportunistically been fetched early.
+      // The NetworkRequest will eventually filter out the local blocks, but filtering here allows
+      // us to avoid some network monotasks altogether.
+      val filteredShuffleBlockIdsAndSizes = blockIdsAndSizes.filter { blockIdAndSize =>
+        !SparkEnv.get.blockManager.memoryStore.contains(blockIdAndSize._1)
+      }
+      if (filteredShuffleBlockIdsAndSizes.isEmpty) {
+        Seq.empty[Monotask]
+      } else {
+        Seq(new NetworkRequestMonotask(context, location, blockIdsAndSizes))
+      }
     }
   }
 

@@ -42,7 +42,8 @@ private[spark] class NetworkRequestMonotask(
     private val remoteAddress: BlockManagerId,
     private val shuffleBlockIdsAndSizes: Seq[(ShuffleBlockId, Long)],
     lowPriority: Boolean = false)
-  extends NetworkMonotask(context) with Logging with BlockReceivedCallback {
+  extends NetworkMonotask(context) with Logging with BlockReceivedCallback
+  with Comparable[NetworkRequestMonotask] {
 
   /** Scheduler to notify about bytes received over the network. Set by execute(). */
   private var networkScheduler: Option[NetworkScheduler] = None
@@ -53,6 +54,21 @@ private[spark] class NetworkRequestMonotask(
   val outstandingBlockIdToSize = new HashMap[BlockId, Long]
 
   override def isLowPriority(): Boolean = lowPriority
+
+  /**
+   * ID of the reducer that this monotask corresponds to. This code assumes all of the blocks that
+   * will be fetched by this monotask are for the same reduce task.
+   */
+  val reduceId: Int = shuffleBlockIdsAndSizes(0)._1.reduceId
+
+  override def compareTo(other: NetworkRequestMonotask): Int = {
+    return this.reduceId - other.reduceId
+  }
+
+  override def toString(): String = {
+    s"Monotask ${this.taskId} (${this.getClass().getName()} for macrotask " +
+      s"${context.taskAttemptId} reduce ID $reduceId)}"
+  }
 
   override def execute(scheduler: NetworkScheduler): Unit = {
     // Filter out blocks that are already available locally. This is necessary because when

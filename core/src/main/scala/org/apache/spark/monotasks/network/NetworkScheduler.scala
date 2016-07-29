@@ -16,7 +16,7 @@
 
 package org.apache.spark.monotasks.network
 
-import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.{LinkedBlockingQueue, PriorityBlockingQueue}
 import java.util.concurrent.atomic.AtomicLong
 
 import scala.collection.mutable.{HashMap, HashSet}
@@ -37,10 +37,13 @@ private[spark] class NetworkScheduler(conf: SparkConf) extends Logging {
 
   /**
    * Queue of low priority monotasks that should only be executed when the network scheduler has
-   * no other work to do.
+   * no other work to do. This queue is ordered by the reduce IDs that the monotasks correspond
+   * to.
+   * TODO: Figure out what to do here when there are multiple jobs running concurrently (in which
+   *       cases there will be tasks with the same reduce ID, but corresponding to different jobs).
    */
   private val lowPriorityNetworkRequestMonotaskQueue =
-    new LinkedBlockingQueue[NetworkRequestMonotask]()
+    new PriorityBlockingQueue[NetworkRequestMonotask]()
 
   /**
    * Queue of NetworkRequestMonotasks that can't be sent until a task finishes. This is guaranteed
@@ -50,8 +53,13 @@ private[spark] class NetworkScheduler(conf: SparkConf) extends Logging {
    */
   private val networkRequestMonotaskQueue = new LinkedBlockingQueue[NetworkRequestMonotask]()
 
-  /** For each task with running network requests, the number of outstanding requests. */
-  private val taskIdToNumOutstandingRequests = new HashMap[Long, Int]()
+  /**
+   * For each task with running network requests, the number of outstanding requests. This
+   * mapping is based on the reduce ID (which is different than the task ID -- the reduce ID
+   * starts at 0 for each new stage) so that it can be used for the opportunistic early monotasks,
+   * for which the task ID isn't yet known.
+   */
+  private val reduceIdToNumOutstandingRequests = new HashMap[Long, Int]()
 
   /** Maximum number of tasks that can concurrently have outstanding network requests. */
   private val maxConcurrentTasks = conf.getInt("spark.monotasks.network.maxConcurrentTasks", 4)
@@ -79,6 +87,46 @@ private[spark] class NetworkScheduler(conf: SparkConf) extends Logging {
   monotaskLaunchThread.setName("Network monotask launch thread")
   monotaskLaunchThread.start()
 
+  /**
+   * Launches the new request monotask, if the maximum number of outstanding requests hasn't been
+   * reached, or otherwise queues the monotask.
+   */
+  private def launchOrQueueMonotask(monotask: NetworkRequestMonotask): Unit = {
+    if (maxConcurrentTasks <= 0) {
+      logInfo(s"Launching monotask immediately, because there's no throttling on the number of " +
+        "concurrent tasks")
+      readyMonotaskQueue.put(monotask)
+    } else {
+      reduceIdToNumOutstandingRequests.synchronized {
+        val canLaunch = reduceIdToNumOutstandingRequests.size < maxConcurrentTasks || {
+          val earlierTasksWaiting = (monotask.isLowPriority() &&
+            !lowPriorityNetworkRequestMonotaskQueue.isEmpty &&
+            lowPriorityNetworkRequestMonotaskQueue.peek().reduceId <= monotask.reduceId)
+          reduceIdToNumOutstandingRequests.contains(monotask.reduceId) && !earlierTasksWaiting
+        }
+
+        val taskId = monotask.context.taskAttemptId
+        if (canLaunch) {
+          logInfo(s"Max concurrent tasks $maxConcurrentTasks; launching NetworkRequestMonotask " +
+            s"for $taskId, reduce ${monotask.reduceId}")
+          readyMonotaskQueue.put(monotask)
+          reduceIdToNumOutstandingRequests.put(
+            monotask.reduceId,
+            reduceIdToNumOutstandingRequests.getOrElse(monotask.reduceId, 0) + 1)
+        } else {
+          logInfo(s"$maxConcurrentTasks are already running (or monotasks for lower task IDs are " +
+            s"waiting in the queue), so queueing $monotask (" +
+            s"${if (monotask.isLowPriority()) "low" else "high"} priority)")
+          if (monotask.isLowPriority()) {
+            lowPriorityNetworkRequestMonotaskQueue.put(monotask)
+          } else {
+            networkRequestMonotaskQueue.put(monotask)
+          }
+        }
+      }
+    }
+  }
+
   def submitTask(monotask: NetworkMonotask): Unit = {
     monotask match {
       case networkResponseMonotask: NetworkResponseMonotask =>
@@ -89,34 +137,7 @@ private[spark] class NetworkScheduler(conf: SparkConf) extends Logging {
         readyMonotaskQueue.put(monotask)
 
       case networkRequestMonotask: NetworkRequestMonotask =>
-        if (maxConcurrentTasks <= 0) {
-          logInfo(s"Max concurrent tasks is $maxConcurrentTasks, so launching monotask immediately")
-          readyMonotaskQueue.put(monotask)
-        } else {
-          val taskId = networkRequestMonotask.context.taskAttemptId
-          taskIdToNumOutstandingRequests.synchronized {
-            if (taskIdToNumOutstandingRequests.contains(taskId) ||
-              taskIdToNumOutstandingRequests.size < maxConcurrentTasks) {
-              logInfo(s"Max concurrent tasks $maxConcurrentTasks; launching " +
-                s"NetworkRequestMonotask for $taskId")
-              // Start the monotask and update the counts.
-              readyMonotaskQueue.put(monotask)
-              taskIdToNumOutstandingRequests.put(
-                taskId,
-                taskIdToNumOutstandingRequests.getOrElse(taskId, 0) + 1)
-            } else {
-              logInfo(s"$maxConcurrentTasks tasks are already running, so " +
-                s"queueing $networkRequestMonotask (" +
-                s"${if (networkRequestMonotask.isLowPriority()) "low" else "high"} priority) for " +
-                s"macrotask $taskId")
-              if (networkRequestMonotask.isLowPriority()) {
-                lowPriorityNetworkRequestMonotaskQueue.put(networkRequestMonotask)
-              } else {
-                networkRequestMonotaskQueue.put(networkRequestMonotask)
-              }
-            }
-          }
-        }
+        launchOrQueueMonotask(networkRequestMonotask)
 
       case _ =>
         logError("Unknown type of monotask! " + monotask)
@@ -134,25 +155,23 @@ private[spark] class NetworkScheduler(conf: SparkConf) extends Logging {
       // return.
       return
     }
-    val taskId = monotask.context.taskAttemptId
-    taskIdToNumOutstandingRequests.synchronized {
-      val numOutstandingRequestsForTask = taskIdToNumOutstandingRequests(taskId)
+    val finishedReduceId = monotask.reduceId
+    reduceIdToNumOutstandingRequests.synchronized {
+      val numOutstandingRequestsForTask = reduceIdToNumOutstandingRequests(finishedReduceId)
       if (numOutstandingRequestsForTask > 1) {
-        // Decrement it and don't launch any more network requests for different macrotasks.
-        taskIdToNumOutstandingRequests.put(taskId, numOutstandingRequestsForTask - 1)
+        // Decrement it and don't launch any more network requests for different reduce tasks.
+        reduceIdToNumOutstandingRequests.put(finishedReduceId, numOutstandingRequestsForTask - 1)
       } else {
-        // Remove the macrotask from the outstanding requests and possibly start a new macrotask's
-        // network requests.
-        taskIdToNumOutstandingRequests.remove(taskId)
+        // Remove the reduce ID from the outstanding requests and possibly start the network
+        // requests for a new task.
+        // NB: This may go back to reducers with lower IDs, as map tasks finish.
+        // TODO: With the early reducers, might make more sense to do this by amount of data rather
+        //       than by number of outstanding requests.
+        reduceIdToNumOutstandingRequests.remove(finishedReduceId)
         if (networkRequestMonotaskQueue.size() + lowPriorityNetworkRequestMonotaskQueue.size() >
             0) {
           var tasksStarted = 0
-          // Try to launch all of the network monotasks for a particular macrotask.
-          // TODO: For the low-priority ones, all of a macrotask's monotasks will be fetching data
-          //       from the same machine. This may cause network hotspots, in which case we should
-          //       organize these differently.
-          //       One better strategy would be to have one queue per remote execute, and do
-          //       round-robin on the executors up to some maximum amount of outstanding data.
+          // Try to launch all of the network monotasks for a particular reduce task.
           val monotaskQueue = if (networkRequestMonotaskQueue.size() > 0) {
             logInfo(s"Attempting to launch high priority network monotask")
             networkRequestMonotaskQueue
@@ -163,20 +182,21 @@ private[spark] class NetworkScheduler(conf: SparkConf) extends Logging {
 
           // Thread safety isn't an issue here, because access is synchronized on
           // taskIdToNumOutstandingRequests.
-          val firstTaskId = monotaskQueue.peek().context.taskAttemptId
+          val firstReduceId = monotaskQueue.peek().reduceId
 
           while (monotaskQueue.size() > 0 &&
-              monotaskQueue.peek().context.taskAttemptId == firstTaskId) {
+              monotaskQueue.peek().reduceId == firstReduceId) {
             val networkMonotask = monotaskQueue.remove()
             // TODO: unify networkRequestMonotaskQueue with readyMonotaskQueue. If this method
             //       handles updating taskIdToNumOutstanding, the thread that launches monotasks
             //       can read them directly from networkRequestMonotaskQueue.
-            logInfo(s"Launching network monotask $networkMonotask for task $firstTaskId")
+            logInfo(s"Launching network monotask $networkMonotask for reduce $firstReduceId")
             readyMonotaskQueue.put(networkMonotask)
             tasksStarted += 1
           }
-          logInfo(s"Starting $tasksStarted monotasks")
-          taskIdToNumOutstandingRequests.put(firstTaskId, tasksStarted)
+          reduceIdToNumOutstandingRequests.put(
+            firstReduceId,
+            reduceIdToNumOutstandingRequests.getOrElse(firstReduceId, 0) + tasksStarted)
         }
       }
     }

@@ -258,26 +258,26 @@ private[spark] class BlockManager(
       executor: String,
       host: String,
       port: Int): Unit = {
-    // Create a network request monotask to fetch the newly available blocks, and submit it to
-    // the LocalDagScheduler.  The new monotask has low-priority, so it's only executed if the
-    // scheduler doesn't have any other work.
+    // Create one network request monotask for each of the newly available blocks, and submit them
+    // to the LocalDagScheduler.  The new monotasks have low-priority, so will only be executed if
+    // the scheduler doesn't have any other work.
     val taskContext =
       new TaskContextImpl(taskAttemptId, attemptNumber, taskIsRunningRemotely = true)
     val remoteBlockManagerId = BlockManagerId(executor, host, port)
     logInfo(s"Received notification that blocks ${blockIds.mkString(",")} are available on " +
       s"executor $remoteBlockManagerId; initiating network monotask to fetch them.")
-    val blockIdsAndSizes = blockIds.map { blockIdStr =>
+    val monotasks = blockIds.zip(blockSizes).map { case (blockIdStr, blockSize) =>
       BlockId(blockIdStr) match {
         case shuffleBlockId: ShuffleBlockId =>
-          shuffleBlockId
+          val idAndSizePair = (shuffleBlockId, blockSize.toLong)
+          new NetworkRequestMonotask(
+            taskContext, remoteBlockManagerId, Seq(idAndSizePair), lowPriority = true)
         case _ =>
           throw new SparkException(
             s"Newly available block $blockIdStr is expected to be a shuffle block")
       }
-    }.zip(blockSizes.map(_.toLong))
-    val networkRequestMonotask = new NetworkRequestMonotask(
-      taskContext, remoteBlockManagerId, blockIdsAndSizes, lowPriority = true)
-    localDagScheduler.post(SubmitMonotask(networkRequestMonotask))
+    }
+    localDagScheduler.post(SubmitMonotasks(monotasks))
   }
 
   override def getBlockData(
