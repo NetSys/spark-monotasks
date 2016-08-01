@@ -173,6 +173,13 @@ private[spark] class NetworkRequestMonotask(
       BlockId(blockId), buf, StorageLevel.MEMORY_ONLY, tellMaster = false)
     context.taskMetrics.incDiskNanos(diskReadNanos)
 
+    // Update the metrics about shuffle data fetched.
+    // TODO: This code creates a new read metrics object for each shuffle block. Change this to be
+    //       more efficient.
+    val readMetrics = context.taskMetrics.createShuffleReadMetricsForDependency()
+    readMetrics.incRemoteBlocksFetched(1)
+    readMetrics.incRemoteBytesRead(buf.size())
+
     if (outstandingBlockIdToSize.isEmpty) {
       setFinishTime()
       logInfo(s"Notifying NetworkScheduler of completion of monotask $taskId")

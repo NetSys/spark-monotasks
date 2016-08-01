@@ -151,8 +151,8 @@ class ShuffleHelper[K, V, C](
       buffer
     } else {
       val buffer = blockManager.getSingle(blockId).get.asInstanceOf[ManagedBuffer]
-      readMetrics.incRemoteBlocksFetched(1)
-      readMetrics.incRemoteBytesRead(buffer.size)
+      //readMetrics.incRemoteBlocksFetched(1)
+      //readMetrics.incRemoteBytesRead(buffer.size)
       buffer
     }
 
