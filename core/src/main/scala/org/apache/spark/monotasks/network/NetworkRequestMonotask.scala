@@ -45,6 +45,19 @@ private[spark] class NetworkRequestMonotask(
   extends NetworkMonotask(context) with Logging with BlockReceivedCallback
   with Comparable[NetworkRequestMonotask] {
 
+  /**
+   * Total number of bytes included in shuffleBlockIdsAndSizes. It's possible that this monotask
+   * will fetch less than this number of bytes over the network, because some of the blocks in
+   * shuffleBlockIdsAndSizes may already be present locally.
+   */
+  val totalBytes = shuffleBlockIdsAndSizes.map(_._2).sum
+
+  /**
+   * Bytes that need to be fetched over the network (there may be blocks in shuffleBlockIdsAndSizes
+   * that are already present locally, so don't need to be fetched over the network).
+   */
+  private var filteredTotalBytes: Long = 0L
+
   /** Scheduler to notify about bytes received over the network. Set by execute(). */
   private var networkScheduler: Option[NetworkScheduler] = None
 
@@ -78,15 +91,16 @@ private[spark] class NetworkRequestMonotask(
     val filteredShuffleBlockIdsAndSizes = shuffleBlockIdsAndSizes.filter { blockIdAndSize =>
       !SparkEnv.get.blockManager.memoryStore.contains(blockIdAndSize._1)
     }
+    filteredTotalBytes = filteredShuffleBlockIdsAndSizes.map(_._2).sum
+    // For filtered out blocks, add the bytes back to the scheduler, so it doesn't think
+    // they're outstanding.
+    scheduler.addOutstandingBytes(filteredTotalBytes - totalBytes)
+
     if (filteredShuffleBlockIdsAndSizes.isEmpty) {
       // Mark the monotask as finished.
       logInfo(s"Notifying LocalDagScheduler of completion of monotask $taskId before it fetched " +
         s"any data, because all of its data is already present locally")
       localDagScheduler.post(TaskSuccess(this))
-
-      // Also tell the network scheduler that this task has finished, so it knows it can launch
-      // more.
-      scheduler.handleNetworkRequestSatisfied(this)
     } else {
       // Populate outstandingBlockIdToSize based on which blocks need to be fetched.
       filteredShuffleBlockIdsAndSizes.foreach {
@@ -96,11 +110,9 @@ private[spark] class NetworkRequestMonotask(
       // Issue requests to fetch all of the data.
       val blockIds = filteredShuffleBlockIdsAndSizes.map(_._1)
       val blockIdsAsString = blockIds.mkString(", ")
-      val totalSize = filteredShuffleBlockIdsAndSizes.map(_._2).sum
       logInfo(s"Monotask $taskId: sending request for blocks $blockIdsAsString (total size " +
-        s"(${Utils.bytesToString(totalSize)}}) to $remoteAddress")
+        s"(${Utils.bytesToString(filteredTotalBytes)}}) to $remoteAddress")
       networkScheduler = Some(scheduler)
-      scheduler.addOutstandingBytes(totalSize)
       requestIssueTimeNanos = System.nanoTime()
 
       try {
@@ -114,7 +126,7 @@ private[spark] class NetworkRequestMonotask(
       } catch {
         case NonFatal(t) => {
           logError(s"Failed to initiate fetchBlock for shuffle blocks $blockIdsAsString", t)
-          networkScheduler.get.handleNetworkRequestSatisfied(this)
+          networkScheduler.get.addOutstandingBytes(-filteredTotalBytes)
           // Use the first shuffle block as the failure reason (only one fetch failure will be
           // reported back to the master anyway).
           val failureReason = FetchFailed(
@@ -139,12 +151,6 @@ private[spark] class NetworkRequestMonotask(
     val size = outstandingBlockIdToSize.getOrElse(blockId,
       throw new IllegalStateException(
         s"$callbackMethodName called for block $blockId, which is not outstanding"))
-
-    networkScheduler.map(_.addOutstandingBytes(-size)).orElse {
-      throw new IllegalStateException(
-        s"$callbackMethodName called for block $blockId in monotask $taskId before a " +
-          s"NetworkScheduler was configured")
-    }
     outstandingBlockIdToSize -= blockId
   }
 
@@ -170,7 +176,7 @@ private[spark] class NetworkRequestMonotask(
     if (outstandingBlockIdToSize.isEmpty) {
       setFinishTime()
       logInfo(s"Notifying NetworkScheduler of completion of monotask $taskId")
-      networkScheduler.get.handleNetworkRequestSatisfied(this)
+      networkScheduler.get.addOutstandingBytes(-filteredTotalBytes)
       logInfo(s"Notifying LocalDagScheduler of completion of monotask $taskId")
       localDagScheduler.post(TaskSuccess(this))
     } else {
@@ -184,7 +190,7 @@ private[spark] class NetworkRequestMonotask(
 
     if (outstandingBlockIdToSize.isEmpty) {
       logInfo(s"Notifying NetworkScheduler of completion of monotask $taskId (after failure)")
-      networkScheduler.get.handleNetworkRequestSatisfied(this)
+      networkScheduler.get.addOutstandingBytes(-filteredTotalBytes)
     } else {
       logInfo(s"On failure, monotask $this: blocks still outstanding: " +
         s"${outstandingBlockIdToSize.mkString(", ")}")

@@ -37,6 +37,7 @@ class NetworkSchedulerSuite extends FunSuite with BeforeAndAfterEach {
   private var currentNanos: Long = _
   private val elapsedMillis = 100L
   private val elapsedNanos = elapsedMillis * 1000000
+  private val maxOutstandingBytes = 3
 
   override def beforeEach(): Unit = {
     currentNanos = 0L
@@ -45,9 +46,10 @@ class NetworkSchedulerSuite extends FunSuite with BeforeAndAfterEach {
     val sparkEnv = mock(classOf[SparkEnv])
     localDagScheduler = mock(classOf[LocalDagScheduler])
 
-    // Set the max concurrent tasks to 1, which simplifies testing of handling of task queues.
+    // Set the max outstanding bytes to just 3, to make it easy to test whether that threshold is
+    // being obeyed.
     val sparkConf = new SparkConf(false)
-    sparkConf.set("spark.monotasks.network.maxConcurrentTasks", "1")
+    sparkConf.set("spark.monotasks.network.maxOutstandingBytes", maxOutstandingBytes.toString)
 
     networkScheduler = new NetworkScheduler(sparkConf)
     networkScheduler.initializeIdleTimeMeasurement(startNanos=0L)
@@ -146,11 +148,11 @@ class NetworkSchedulerSuite extends FunSuite with BeforeAndAfterEach {
    * necessary to have this class, rather than using a mock, so that the compareTo method in
    * NetworkRequestMonotask will get used when ordering which requests to run.
    */
-  private class DummyNetworkRequestMonotask(taskId: Int, lowPriority: Boolean)
+  private class DummyNetworkRequestMonotask(taskId: Int, lowPriority: Boolean, size: Int = 1)
     extends NetworkRequestMonotask(
       new TaskContextImpl(taskId, 0),
       null,
-      Seq((ShuffleBlockId(0, 0, taskId), 1)),
+      Seq((ShuffleBlockId(0, 0, taskId), size)),
       lowPriority) {
     var hasExecuted = false
 
@@ -160,12 +162,18 @@ class NetworkSchedulerSuite extends FunSuite with BeforeAndAfterEach {
   }
 
   test("high priority monotasks run before low priority ones") {
-    val lowPriorityMonotask1 = new DummyNetworkRequestMonotask(taskId = 0, lowPriority = true)
-    val lowPriorityMonotask2 = new DummyNetworkRequestMonotask(taskId = 1, lowPriority = true)
-    val lowPriorityMonotask3 = new DummyNetworkRequestMonotask(taskId = 2, lowPriority = true)
-    val highPriorityMonotask1 = new DummyNetworkRequestMonotask(taskId = 3, lowPriority = false)
+    val size = 3
+    val lowPriorityMonotask1 =
+      new DummyNetworkRequestMonotask(taskId = 0, lowPriority = true, size)
+    val lowPriorityMonotask2 =
+      new DummyNetworkRequestMonotask(taskId = 1, lowPriority = true, size)
+    val lowPriorityMonotask3 =
+      new DummyNetworkRequestMonotask(taskId = 2, lowPriority = true, size)
+    val highPriorityMonotask1 =
+      new DummyNetworkRequestMonotask(taskId = 3, lowPriority = false, size)
 
-    // Submit all of the low priority monotasks to the scheduler. Only the first one should be
+    // Submit all of the low priority monotasks to the scheduler. Each of the tasks has the same
+    // size as the maximum number of outstanding bytes, so only one (the first one) should be
     // launched.
     networkScheduler.submitTask(lowPriorityMonotask1)
     networkScheduler.submitTask(lowPriorityMonotask2)
@@ -186,7 +194,7 @@ class NetworkSchedulerSuite extends FunSuite with BeforeAndAfterEach {
 
     // Finish the low priority monotask. This should cause the high priority monotask (and none of
     // the other monotasks) to be launched.
-    networkScheduler.handleNetworkRequestSatisfied(lowPriorityMonotask1)
+    networkScheduler.addOutstandingBytes(-size)
 
     eventually(timeout(3 seconds), interval(10 milliseconds)) {
       assert(highPriorityMonotask1.hasExecuted)
@@ -196,7 +204,7 @@ class NetworkSchedulerSuite extends FunSuite with BeforeAndAfterEach {
     assert(!lowPriorityMonotask3.hasExecuted)
 
     // When the high priority monotask finishes, the next low priority monotask should be launched.
-    networkScheduler.handleNetworkRequestSatisfied(highPriorityMonotask1)
+    networkScheduler.addOutstandingBytes(-size)
     eventually(timeout(3 seconds), interval(10 milliseconds)) {
       assert(lowPriorityMonotask2.hasExecuted)
     }
@@ -205,9 +213,10 @@ class NetworkSchedulerSuite extends FunSuite with BeforeAndAfterEach {
 
   test("monotasks with lowest reduce IDs run first") {
     // Create monotasks for 3 different macrotasks.
-    val monotask1 = new DummyNetworkRequestMonotask(taskId = 1, lowPriority = true)
-    val monotask2 = new DummyNetworkRequestMonotask(taskId = 2, lowPriority = true)
-    val monotask3 = new DummyNetworkRequestMonotask(taskId = 3, lowPriority = true)
+    val size = maxOutstandingBytes
+    val monotask1 = new DummyNetworkRequestMonotask(taskId = 1, lowPriority = true, size)
+    val monotask2 = new DummyNetworkRequestMonotask(taskId = 2, lowPriority = true, size)
+    val monotask3 = new DummyNetworkRequestMonotask(taskId = 3, lowPriority = true, size)
 
     // Submit all of the tasks to the network scheduler.
     networkScheduler.submitTask(monotask3)
@@ -223,66 +232,22 @@ class NetworkSchedulerSuite extends FunSuite with BeforeAndAfterEach {
 
     // Finish the second monotask for 1. This should cause the monotasks for macrotask 2 to be
     // launched.
-    networkScheduler.handleNetworkRequestSatisfied(monotask3)
+    networkScheduler.addOutstandingBytes(-size)
     eventually(timeout(3 seconds), interval(10 milliseconds)) {
       assert(monotask1.hasExecuted)
     }
     assert(!monotask2.hasExecuted)
   }
 
-  test("monotasks are launched if other monotasks for the same macrotask are already running") {
-    // Create monotasks for 3 different macrotasks.
-    val monotask1A = new DummyNetworkRequestMonotask(taskId = 1, lowPriority = true)
-    val monotask1B = new DummyNetworkRequestMonotask(taskId = 1, lowPriority = true)
-    val monotask2A = new DummyNetworkRequestMonotask(taskId = 2, lowPriority = true)
-    val monotask2B = new DummyNetworkRequestMonotask(taskId = 2, lowPriority = true)
-    val monotask3A = new DummyNetworkRequestMonotask(taskId = 3, lowPriority = true)
-    val monotask3B = new DummyNetworkRequestMonotask(taskId = 3, lowPriority = true)
-
-    // Submit all of the tasks to the network scheduler.
-    networkScheduler.submitTask(monotask1A)
-    networkScheduler.submitTask(monotask2A)
-    networkScheduler.submitTask(monotask3A)
-    networkScheduler.submitTask(monotask1B)
-    networkScheduler.submitTask(monotask2B)
-    networkScheduler.submitTask(monotask3B)
-
-    // Both of the monotasks for macrotask 1 should be launched, and no other moontasks.
-    eventually(timeout(3 seconds), interval(10 milliseconds)) {
-      assert(monotask1A.hasExecuted)
-      assert(monotask1B.hasExecuted)
-    }
-    assert(!monotask2A.hasExecuted)
-    assert(!monotask2B.hasExecuted)
-    assert(!monotask3A.hasExecuted)
-    assert(!monotask3B.hasExecuted)
-
-    // Finish one monotask for 1. This shouldn't cause any new ones to be launched.
-    networkScheduler.handleNetworkRequestSatisfied(monotask1A)
-    assert(!monotask2A.hasExecuted)
-    assert(!monotask2B.hasExecuted)
-    assert(!monotask3A.hasExecuted)
-    assert(!monotask3B.hasExecuted)
-
-    // Finish the second monotask for 1. This should cause the monotasks for macrotask 2 to be
-    // launched.
-    networkScheduler.handleNetworkRequestSatisfied(monotask1B)
-    eventually(timeout(3 seconds), interval(10 milliseconds)) {
-      assert(monotask2A.hasExecuted)
-      assert(monotask2B.hasExecuted)
-    }
-    assert(!monotask3A.hasExecuted)
-    assert(!monotask3B.hasExecuted)
-  }
-
   test("monotasks with lowest reduceIds run first: more complex arrival pattern") {
     // Create monotasks for 3 different macrotasks.
-    val monotask1A = new DummyNetworkRequestMonotask(taskId = 1, lowPriority = true)
-    val monotask1B = new DummyNetworkRequestMonotask(taskId = 1, lowPriority = true)
-    val monotask2A = new DummyNetworkRequestMonotask(taskId = 2, lowPriority = true)
-    val monotask2B = new DummyNetworkRequestMonotask(taskId = 2, lowPriority = true)
-    val monotask3A = new DummyNetworkRequestMonotask(taskId = 3, lowPriority = true)
-    val monotask3B = new DummyNetworkRequestMonotask(taskId = 3, lowPriority = true)
+    val size = maxOutstandingBytes
+    val monotask1A = new DummyNetworkRequestMonotask(taskId = 1, lowPriority = true, size)
+    val monotask1B = new DummyNetworkRequestMonotask(taskId = 1, lowPriority = true, size)
+    val monotask2A = new DummyNetworkRequestMonotask(taskId = 2, lowPriority = true, size)
+    val monotask2B = new DummyNetworkRequestMonotask(taskId = 2, lowPriority = true, size)
+    val monotask3A = new DummyNetworkRequestMonotask(taskId = 3, lowPriority = true, size)
+    val monotask3B = new DummyNetworkRequestMonotask(taskId = 3, lowPriority = true, size)
 
     // Submit all of the tasks to the network scheduler. Submit just the A tasks.
     networkScheduler.submitTask(monotask1A)
@@ -297,15 +262,13 @@ class NetworkSchedulerSuite extends FunSuite with BeforeAndAfterEach {
     assert(!monotask3A.hasExecuted)
 
     // Finish one monotask for 1. Now monotask 2A should be launched.
-    networkScheduler.handleNetworkRequestSatisfied(monotask1A)
+    networkScheduler.addOutstandingBytes(-size)
     eventually(timeout(3 seconds), interval(10 milliseconds)) {
       assert(monotask2A.hasExecuted)
     }
     assert(!monotask3A.hasExecuted)
 
-    // Submit all of the B monotasks. Because there's a lower monotask in the queue (for macrotask
-    // 1), monotask 2B shouldn't be started, even though there's currently another monotask running
-    // for macrotask 2.
+    // Submit all of the B monotasks. Nothing should be launched.
     networkScheduler.submitTask(monotask1B)
     networkScheduler.submitTask(monotask2B)
     networkScheduler.submitTask(monotask3B)
@@ -316,12 +279,41 @@ class NetworkSchedulerSuite extends FunSuite with BeforeAndAfterEach {
     assert(!monotask3B.hasExecuted)
 
     // Finish 2A. Now, 1B should be launched.
-    networkScheduler.handleNetworkRequestSatisfied(monotask2A)
+    networkScheduler.addOutstandingBytes(-size)
     eventually(timeout(3 seconds), interval(10 milliseconds)) {
       assert(monotask1B.hasExecuted)
     }
     assert(!monotask2B.hasExecuted)
     assert(!monotask3A.hasExecuted)
     assert(!monotask3B.hasExecuted)
+  }
+
+  test("monotasks launched in order of task ID and in keeping with maxOutstandingBytes") {
+    val monotask1 = new DummyNetworkRequestMonotask(taskId = 1, lowPriority = true)
+    val monotask2 = new DummyNetworkRequestMonotask(taskId = 2, lowPriority = true)
+    val monotask3 = new DummyNetworkRequestMonotask(taskId = 3, lowPriority = true)
+    val monotask4 = new DummyNetworkRequestMonotask(taskId = 4, lowPriority = true)
+    val monotask5 = new DummyNetworkRequestMonotask(taskId = 5, lowPriority = false)
+
+    networkScheduler.submitTask(monotask1)
+    networkScheduler.submitTask(monotask2)
+    networkScheduler.submitTask(monotask3)
+    networkScheduler.submitTask(monotask4)
+    networkScheduler.submitTask(monotask5)
+
+    eventually(timeout(3 seconds), interval(10 milliseconds)) {
+      assert(monotask1.hasExecuted)
+      assert(monotask2.hasExecuted)
+      assert(monotask3.hasExecuted)
+    }
+    assert(!monotask4.hasExecuted)
+    assert(!monotask5.hasExecuted)
+
+    networkScheduler.addOutstandingBytes(-1)
+
+    eventually(timeout(3 seconds)) {
+      assert(monotask5.hasExecuted)
+    }
+    assert(!monotask4.hasExecuted)
   }
 }
