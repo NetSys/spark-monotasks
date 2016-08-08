@@ -112,12 +112,13 @@ def copy_and_zip_all_logs(stringified_parameters, slaves):
   log_directory = path.dirname(log_subdirectory)
 
   # Tar and zip the file so that it can easily be copied out of the cluster.
-  tar_filename = log_directory + ".tar.gz"
+  tar_filename = log_subdirectory + ".tar.gz"
 
   # For some reason, the tar command fails without this.
   subprocess.check_call("touch {}".format(tar_filename), shell=True)
-  subprocess.check_call(
-    "tar czfv {} --directory=/mnt {}".format(tar_filename, log_subdirectory), shell=True)
+  command = "tar czfv {} --directory=/mnt {}".format(tar_filename, log_subdirectory)
+  print command
+  subprocess.check_call(command, shell=True)
 
 def check_if_hdfs_file_exists(hdfs_path):
   """ Returns true if the given HDFS path exists, and false otherwise. """

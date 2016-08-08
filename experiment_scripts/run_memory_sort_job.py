@@ -34,7 +34,7 @@ for num_tasks_multiplier in num_tasks_multipliers:
   stringified_parameters = ["%s" % p for p in parameters]
 
   # Clear the buffer cache, to sidestep issue with machines dying because they've run out of memory.
-  slaves_file = utils.get_full_path("ephemeral-hdfs/sbin/slaves.sh")
+  slaves_file = utils.get_full_path("spark/sbin/slaves.sh")
   clear_cache_file = utils.get_full_path("spark-ec2/clear-cache.sh")
   subprocess.check_call("{} {}".format(slaves_file, clear_cache_file), shell=True)
 
