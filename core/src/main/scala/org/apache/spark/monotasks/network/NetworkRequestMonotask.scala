@@ -151,6 +151,7 @@ private[spark] class NetworkRequestMonotask(
     val size = outstandingBlockIdToSize.getOrElse(blockId,
       throw new IllegalStateException(
         s"$callbackMethodName called for block $blockId, which is not outstanding"))
+    networkScheduler.get.addOutstandingBytes(-size)
     outstandingBlockIdToSize -= blockId
   }
 
@@ -182,8 +183,6 @@ private[spark] class NetworkRequestMonotask(
 
     if (outstandingBlockIdToSize.isEmpty) {
       setFinishTime()
-      logInfo(s"Notifying NetworkScheduler of completion of monotask $taskId")
-      networkScheduler.get.addOutstandingBytes(-filteredTotalBytes)
       logInfo(s"Notifying LocalDagScheduler of completion of monotask $taskId")
       localDagScheduler.post(TaskSuccess(this))
     } else {
