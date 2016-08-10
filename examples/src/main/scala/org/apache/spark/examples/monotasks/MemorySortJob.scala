@@ -34,7 +34,7 @@ object MemorySortJob {
     // Sleep for a few seconds to give all of the executors a chance to register. Without this
     // sleep, the first stage can get scheduled before all of the executors have registered,
     // leading to load imbalance.
-    Thread.sleep(5000)
+    Thread.sleep(10000)
 
     val numMapTasks = if (args.length > 0) args(0).toInt else 16
     val numReduceTasks = if (args.length > 1) args(1).toInt else 128
@@ -88,6 +88,10 @@ object MemorySortJob {
       itemsPerPartition: Int,
       itemsPerValue: Int): RDD[Product2[Long, Array[Long]]] = {
     spark.parallelize(1 to numMapTasks, numMapTasks).flatMap { i =>
+      // Sleep for one second, which helps the tasks (and the associated RDD blocks) to be more
+      // evenly distributed across machines (without the sleep, the tasks finish very quickly
+      // because they don't do any I/O, so often end up unevenly distributed).
+      Thread.sleep(1000)
       val random = new Random(i)
       Array.fill(itemsPerPartition)((random.nextLong, Array.fill(itemsPerValue)(random.nextLong)))
     }
