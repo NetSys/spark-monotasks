@@ -5,7 +5,7 @@ import time
 
 def write_data_in_chunks(total_size):
   start_time = time.time()
-  filename = "/mnt/test_%s_%s.txt" % (total_size, start_time)
+  filename = "/mnt/test_{}_{}.txt".format(total_size, start_time)
   f = open(filename, "wb+")
   chunk = b'\xff'*4048
   for i in range(total_size / 4048):
@@ -32,7 +32,7 @@ if __name__ == "__main__":
   megabyte_in_bytes = 1024 * 1024
   for total_size in [10 * megabyte_in_bytes, 100 * megabyte_in_bytes]:
     filenames = []
-    print "Writing file with %s bytes to disk" % total_size
+    print "Writing file with {} bytes to disk".format(total_size)
     for trial in range(1, 10):
       filenames.append(write_data_in_chunks(total_size))
 
@@ -54,4 +54,3 @@ if __name__ == "__main__":
 
     for filename in filenames:
       os.remove(filename)
-

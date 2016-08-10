@@ -9,8 +9,8 @@ import utils
 
 slaves = [slave_line.strip("\n") for slave_line in open("/root/spark/conf/slaves").readlines()]
 num_machines = len(slaves)
-print "Running experiment with %s slaves: %s" % (num_machines, slaves)
- 
+print "Running experiment with {} slaves: {}".format(num_machines, slaves)
+
 cores_per_machine = 8
 num_disk_tasks = num_machines * 8
 items_per_partition = 10000
@@ -26,10 +26,10 @@ num_concurrent_task_values = [8] #, 4, 2, 1]
 for num_concurrent_tasks in num_concurrent_task_values:
   # Change the number of concurrent tasks by re-setting the Spark config.
   change_cores_command = ("sed -i s/SPARK_WORKER_CORES=.*/SPARK_WORKER_CORES=" +
-    "%s/ spark/conf/spark-env.sh" % num_concurrent_tasks)
+                          "{}/ spark/conf/spark-env.sh".format(num_concurrent_tasks))
   print "Changing the number of Spark cores using command ", change_cores_command
   subprocess.check_call(change_cores_command, shell=True)
-  
+
   copy_config_command = "/root/spark-ec2/copy-dir --delete /root/spark/conf/"
   print "Copying the new configuration to the cluster with command ", copy_config_command
   subprocess.check_call(copy_config_command, shell=True)
@@ -44,10 +44,11 @@ for num_concurrent_tasks in num_concurrent_task_values:
     values_per_item,
     target_seconds,
     available_cores,
-    num_compute_tasks] 
+    num_compute_tasks]
 
-  stringified_parameters = ["%s" % p for p in parameters]
-  command = "/root/spark/bin/run-example DiskAndComputeJobs %s" % " ".join(stringified_parameters)
+  stringified_parameters = ["{}".format(p) for p in parameters]
+  command = ("/root/spark/bin/run-example DiskAndComputeJobs " +
+             " ".join(stringified_parameters))
   print command
   subprocess.check_call(command, shell=True)
 
