@@ -1461,7 +1461,7 @@ class DAGScheduler(
         // If the RDD has a shuffle dependency, use the locations that were pre-determined when the
         // map stage was launched.
         val blockManagerId = s.reduceLocations(partition)
-        return Seq(TaskLocation(blockManagerId.host, blockManagerId.executorId))
+        return Seq(ReduceExecutorTaskLocation(blockManagerId.host, blockManagerId.executorId))
 
       case _ =>
     }

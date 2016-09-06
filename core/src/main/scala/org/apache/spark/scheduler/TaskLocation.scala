@@ -27,6 +27,15 @@ private[spark] sealed trait TaskLocation {
 }
 
 /**
+ * A location for a reduce task, based on the fact that some data may be sent to this executor
+ * before the task starts running. These are interpreted to be very loose constraints: if an
+ * executor becomes available and none of the tasks in the job have a ReduceExecutorTaskLocation for
+ * that executor, one will be scheduled there anyway.
+ */
+private[spark] case class ReduceExecutorTaskLocation(
+    override val host: String, val executorId: String) extends TaskLocation
+
+/**
  * A location that includes both a host and an executor id on that host.
  */
 private [spark] case class ExecutorCacheTaskLocation(override val host: String,

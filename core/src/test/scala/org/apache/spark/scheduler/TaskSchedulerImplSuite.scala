@@ -164,6 +164,44 @@ class TaskSchedulerImplSuite extends FunSuite with LocalSparkContext with Loggin
     assert(taskDescriptions.map(_.executorId) === Seq("executor0"))
   }
 
+  test("Scheduler ignores reduce locality constraints when no local locations are available") {
+    sc = new SparkContext("local", "TaskSchedulerImplSuite")
+    val taskScheduler = new TaskSchedulerImpl(sc)
+    taskScheduler.initialize(new FakeSchedulerBackend)
+    taskScheduler.setDAGScheduler(mock(classOf[DAGScheduler]))
+
+    val taskSet = FakeTask.createTaskSet(3,
+      Seq(ReduceExecutorTaskLocation("host0", "executor0")),
+      Seq(ReduceExecutorTaskLocation("host0", "executor0")),
+      Seq(ReduceExecutorTaskLocation("host1", "executor1")))
+
+    val host0WorkerOffer = Seq(new WorkerOffer("executor0", "host0", freeSlots = 1, totalDisks = 0))
+    val host1WorkerOffer = Seq(new WorkerOffer("executor1", "host1", freeSlots = 1, totalDisks = 0))
+
+    taskScheduler.submitTasks(taskSet)
+
+    // When host0 is offered, the first task should be scheduled on it (since that's the first task
+    // with a locality preference for host0).
+    var taskDescriptions = taskScheduler.resourceOffers(host0WorkerOffer).flatten
+    assert(1 === taskDescriptions.length)
+    assert("executor0" === taskDescriptions(0).executorId)
+    assert(0 === taskDescriptions(0).index)
+
+    // When host1 is offered, the last task should be scheduled on it, since that's the only task
+    // with a locality preference for host1.
+    taskDescriptions = taskScheduler.resourceOffers(host1WorkerOffer).flatten
+    assert(1 === taskDescriptions.length)
+    assert("executor1" === taskDescriptions(0).executorId)
+    assert(2 === taskDescriptions(0).index)
+
+    // When host1 is offered again, there are no tasks with locality preferences for that machine,
+    // so eventually the last remaining task should get assigned to it.
+    taskDescriptions = taskScheduler.resourceOffers(host1WorkerOffer).flatten
+    assert(1 === taskDescriptions.length)
+    assert("executor1" === taskDescriptions(0).executorId)
+    assert(1 === taskDescriptions(0).index)
+  }
+
   test("Scheduler assigns correct number of tasks based on task set's resource requirements " +
       "when using slot-based monotasks scheduler") {
     val conf = new SparkConf(false)

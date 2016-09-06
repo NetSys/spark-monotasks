@@ -168,6 +168,12 @@ private[spark] class TaskSetManager(
     t.epoch = epoch
   }
 
+  // Determine whether this task set is for a shuffle stage, in which case the reduce task locations
+  // should be interpreted more loosely.
+  val isShuffleStage = tasks.headOption.flatMap(_.preferredLocations.headOption).map(
+    _.isInstanceOf[ReduceExecutorTaskLocation]).getOrElse(false)
+  logInfo(s"Task set is shuffle stage? $isShuffleStage")
+
   // Add all our tasks to the pending lists. We do this in reverse order
   // of task index so that tasks with low indices get launched first.
   for (i <- (0 until numTasks).reverse) {
@@ -206,6 +212,8 @@ private[spark] class TaskSetManager(
       loc match {
         case e: ExecutorCacheTaskLocation =>
           addTo(pendingTasksForExecutor.getOrElseUpdate(e.executorId, new ArrayBuffer))
+        case r: ReduceExecutorTaskLocation =>
+          addTo(pendingTasksForExecutor.getOrElseUpdate(r.executorId, new ArrayBuffer))
         case e: HDFSCacheTaskLocation => {
           val exe = sched.getExecutorsAliveOnHost(loc.host)
           exe match {
@@ -228,7 +236,8 @@ private[spark] class TaskSetManager(
       }
     }
 
-    if (tasks(index).preferredLocations == Nil) {
+    if (isShuffleStage || tasks(index).preferredLocations == Nil) {
+      logInfo(s"Adding task to no-prefs list")
       addTo(pendingTasksWithNoPrefs)
     }
 
@@ -324,6 +333,7 @@ private[spark] class TaskSetManager(
         val prefs = tasks(index).preferredLocations
         val executors = prefs.flatMap(_ match {
           case e: ExecutorCacheTaskLocation => Some(e.executorId)
+          case r: ReduceExecutorTaskLocation => Some(r.executorId)
           case _ => None
         });
         if (executors.contains(execId)) {
@@ -891,7 +901,7 @@ private[spark] class TaskSetManager(
         pendingTasksForHost.keySet.exists(sched.hasExecutorsAliveOnHost(_))) {
       levels += NODE_LOCAL
     }
-    if (!pendingTasksWithNoPrefs.isEmpty) {
+    if (isShuffleStage || !pendingTasksWithNoPrefs.isEmpty) {
       levels += NO_PREF
     }
     if (!pendingTasksForRack.isEmpty && getLocalityWait(RACK_LOCAL) != 0 &&
@@ -899,7 +909,7 @@ private[spark] class TaskSetManager(
       levels += RACK_LOCAL
     }
     levels += ANY
-    logDebug("Valid locality levels for " + taskSet + ": " + levels.mkString(", "))
+    logInfo("Valid locality levels for " + taskSet + ": " + levels.mkString(", "))
     levels.toArray
   }
 
