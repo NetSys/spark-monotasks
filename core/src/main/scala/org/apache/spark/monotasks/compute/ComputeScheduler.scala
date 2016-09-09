@@ -114,6 +114,7 @@ private[spark] class ComputeScheduler(private val threads: Int) extends Logging 
         Option(monotaskQueue.poll())
       }
     } else {
+      logWarning(s"Free memory is $freeMemory, so not running any more shuffle map macrotasks")
       // No free memory is available, so only run monotasks that won't generate new in-memory
       // data. For now, we assume that ShuffleMapMonotasks will generate new in-memory data,
       // and that all other types of monotasks do not.
