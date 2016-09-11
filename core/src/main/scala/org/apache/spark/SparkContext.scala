@@ -59,8 +59,6 @@ import org.apache.hadoop.mapreduce.{InputFormat => NewInputFormat, Job}
 import org.apache.hadoop.mapreduce.lib.input.{FileInputFormat => NewFileInputFormat,
   SequenceFileInputFormat, TextInputFormat => NewTextInputFormat}
 
-import org.apache.mesos.MesosNativeLibrary
-
 import org.apache.spark.annotation.{DeveloperApi, Experimental}
 import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.deploy.{LocalSparkCluster, SparkHadoopUtil}
@@ -73,7 +71,6 @@ import org.apache.spark.rdd._
 import org.apache.spark.scheduler._
 import org.apache.spark.scheduler.cluster.{CoarseGrainedSchedulerBackend,
   SparkDeploySchedulerBackend, SimrSchedulerBackend}
-import org.apache.spark.scheduler.cluster.mesos.{CoarseMesosSchedulerBackend, MesosSchedulerBackend}
 import org.apache.spark.scheduler.local.LocalBackend
 import org.apache.spark.storage._
 import org.apache.spark.ui.{SparkUI, ConsoleProgressBar}
@@ -2124,8 +2121,6 @@ object SparkContext extends Logging {
     val LOCAL_CLUSTER_REGEX = """local-cluster\[\s*([0-9]+)\s*,\s*([0-9]+)\s*,\s*([0-9]+)\s*]""".r
     // Regular expression for connecting to Spark deploy clusters
     val SPARK_REGEX = """spark://(.*)""".r
-    // Regular expression for connection to Mesos cluster by mesos:// or zk:// url
-    val MESOS_REGEX = """(mesos|zk)://.*""".r
     // Regular expression for connection to Simr cluster
     val SIMR_REGEX = """simr://(.*)""".r
 
@@ -2241,19 +2236,6 @@ object SparkContext extends Logging {
           }
         }
 
-        scheduler.initialize(backend)
-        (backend, scheduler)
-
-      case mesosUrl @ MESOS_REGEX(_) =>
-        MesosNativeLibrary.load()
-        val scheduler = new TaskSchedulerImpl(sc)
-        val coarseGrained = sc.conf.getBoolean("spark.mesos.coarse", false)
-        val url = mesosUrl.stripPrefix("mesos://") // strip scheme from raw Mesos URLs
-        val backend = if (coarseGrained) {
-          new CoarseMesosSchedulerBackend(scheduler, sc, url)
-        } else {
-          new MesosSchedulerBackend(scheduler, sc, url)
-        }
         scheduler.initialize(backend)
         (backend, scheduler)
 
