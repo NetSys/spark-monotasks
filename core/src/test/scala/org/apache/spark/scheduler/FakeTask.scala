@@ -46,6 +46,8 @@ class FakeTask(stageId: Int, prefLocs: Seq[TaskLocation] = Nil)
 }
 
 object FakeTask {
+  var nextStageId: Int = 0
+
   /**
    * Utility method to create a TaskSet, potentially setting a particular sequence of preferred
    * locations for each task (given as varargs) if this sequence is not empty.
@@ -57,6 +59,8 @@ object FakeTask {
     val tasks = Array.tabulate[Macrotask[_]](numTasks) { i =>
       new FakeTask(i, if (prefLocs.size != 0) prefLocs(i) else Nil)
     }
-    new TaskSet(tasks, 0, 0, 0, null)
+    val stageId = nextStageId
+    nextStageId += 1
+    new TaskSet(tasks, stageId, 0, 0, null)
   }
 }

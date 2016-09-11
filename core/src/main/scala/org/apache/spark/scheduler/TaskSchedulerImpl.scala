@@ -267,8 +267,8 @@ private[spark] class TaskSchedulerImpl(
 
   /**
    * Called by cluster manager to offer resources on slaves. We respond by asking our active task
-   * sets for tasks in order of priority. We fill each node with tasks in a round-robin manner so
-   * that tasks are balanced across the cluster.
+   * sets for tasks in order of task sets that have the fewest running tasks on the machine. We fill
+   * each node with tasks in a round-robin manner so that tasks are balanced across the cluster.
    */
   def resourceOffers(offers: Seq[WorkerOffer]): Seq[Seq[TaskDescription]] = synchronized {
     // Mark each slave as alive and remember its hostname
@@ -291,9 +291,29 @@ private[spark] class TaskSchedulerImpl(
     val shuffledOffers = Random.shuffle(offers)
     // Build a list of tasks to assign to each worker.
     val tasks = shuffledOffers.map(o => new ArrayBuffer[TaskDescription](o.freeSlots))
+
     val availableSlots = shuffledOffers.map(o => o.freeSlots).toArray
-    val sortedTaskSets = rootPool.getSortedTaskSetQueue
-    for (taskSet <- sortedTaskSets) {
+
+    // First, order tasks based on the rootpool.  This is so when the second ordering yields a tie,
+    // the task sets are sorted by the usual order (e.g., by the task set that got submitted first).
+    // Next, order task sets by the ones that have the fewest tasks running on the machine
+    // corresponding to the first offer.  The reason this works is that resource offers gets called
+    // in one of two cases:
+    // (1) A task set has just been added.  In this case, any existing task sets can't launch any
+    //     more tasks on the machines anyway (otherwise they would have already done so), so the
+    //     order of the task sets is irrelevant.
+    // (2) A machine has just completed a task. In this case, only one executor will be offered,
+    //     so ordering the task sets based on the first offer is the right thing to do.
+    val globallySortedTaskSets = rootPool.getSortedTaskSetQueue
+    val sortedTaskSets = globallySortedTaskSets.sortBy { taskSetManager =>
+      if (offers.length > 0) {
+        offers(0).taskSetIdToRunningTasks.getOrElse(taskSetManager.taskSet.id, 0)
+      } else {
+        // There are no offers, so the order doesn't matter.
+        0
+      }
+    }
+    sortedTaskSets.foreach { taskSet =>
       logDebug("parentName: %s, name: %s, runningTasks: %s".format(
         taskSet.parent.name, taskSet.name, taskSet.runningTasks))
       if (newExecAvail) {
@@ -301,10 +321,10 @@ private[spark] class TaskSchedulerImpl(
       }
     }
 
-    // Take each TaskSet in our scheduling order, and then offer it each node in increasing order
-    // of locality levels so that it gets a chance to launch local tasks on all of them.
-    // NOTE: the preferredLocality order: PROCESS_LOCAL, NODE_LOCAL, NO_PREF, RACK_LOCAL, ANY
     var launchedTask = false
+    // Make the offer to the task set in order of increasing locality.
+    // TODO: Is this necessary?  It seems potentially irrelevant since we don't do delay
+    // scheduling or support non-local tasks.
     for (taskSet <- sortedTaskSets; maxLocality <- taskSet.myLocalityLevels) {
       do {
         launchedTask = resourceOfferSingleTaskSet(

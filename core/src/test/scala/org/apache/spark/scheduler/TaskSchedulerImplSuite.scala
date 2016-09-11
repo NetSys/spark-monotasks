@@ -35,6 +35,8 @@ package org.apache.spark.scheduler
 
 import java.util.Properties
 
+import scala.collection.mutable.HashMap
+
 import org.mockito.Mockito.mock
 
 import org.scalatest.FunSuite
@@ -57,8 +59,11 @@ class TaskSchedulerImplSuite extends FunSuite with LocalSparkContext with Loggin
     taskScheduler.setDAGScheduler(mock(classOf[DAGScheduler]))
 
     val numFreeCores = 1
-    val workerOffers = Seq(new WorkerOffer("executor0", "host0", numFreeCores, totalDisks = 0),
-      new WorkerOffer("executor1", "host1", numFreeCores, totalDisks = 0))
+    val workerOffers = Seq(
+      new WorkerOffer(
+        "executor0", "host0", numFreeCores, totalDisks = 0, HashMap.empty[String, Int]),
+      new WorkerOffer(
+        "executor1", "host1", numFreeCores, totalDisks = 0, HashMap.empty[String, Int]))
     // Repeatedly try to schedule a 1-task job, and make sure that it doesn't always
     // get scheduled on the same executor. While there is a chance this test will fail
     // because the task randomly gets placed on the first executor all 1000 times, the
@@ -88,8 +93,8 @@ class TaskSchedulerImplSuite extends FunSuite with LocalSparkContext with Loggin
 
     // Give zero core offers. Should not generate any tasks
     val zeroCoreWorkerOffers = Seq(
-      new WorkerOffer("executor0", "host0", freeSlots = 0, totalDisks = 0),
-      new WorkerOffer("executor1", "host1", freeSlots = 0, totalDisks = 0))
+      new WorkerOffer("executor0", "host0", freeSlots = 0, totalDisks = 0, HashMap.empty[String, Int]),
+      new WorkerOffer("executor1", "host1", freeSlots = 0, totalDisks = 0, HashMap.empty[String, Int]))
     val taskSet = FakeTask.createTaskSet(1)
     taskScheduler.submitTasks(taskSet)
     var taskDescriptions = taskScheduler.resourceOffers(zeroCoreWorkerOffers).flatten
@@ -98,8 +103,8 @@ class TaskSchedulerImplSuite extends FunSuite with LocalSparkContext with Loggin
     // No tasks should run as we only have 1 core free.
     val numFreeCores = 1
     val singleCoreWorkerOffers = Seq(
-      new WorkerOffer("executor0", "host0", numFreeCores, totalDisks = 0),
-      new WorkerOffer("executor1", "host1", numFreeCores, totalDisks = 0))
+      new WorkerOffer("executor0", "host0", numFreeCores, totalDisks = 0, HashMap.empty[String, Int]),
+      new WorkerOffer("executor1", "host1", numFreeCores, totalDisks = 0, HashMap.empty[String, Int]))
     taskScheduler.submitTasks(taskSet)
     taskDescriptions = taskScheduler.resourceOffers(singleCoreWorkerOffers).flatten
     assert(0 === taskDescriptions.length)
@@ -107,8 +112,8 @@ class TaskSchedulerImplSuite extends FunSuite with LocalSparkContext with Loggin
     // Now change the offers to have 2 cores in one executor and verify if it
     // is chosen.
     val multiCoreWorkerOffers = Seq(
-      new WorkerOffer("executor0", "host0", taskCpus, totalDisks = 0),
-      new WorkerOffer("executor1", "host1", numFreeCores, totalDisks = 0))
+      new WorkerOffer("executor0", "host0", taskCpus, totalDisks = 0, HashMap.empty[String, Int]),
+      new WorkerOffer("executor1", "host1", numFreeCores, totalDisks = 0, HashMap.empty[String, Int]))
     taskScheduler.submitTasks(taskSet)
     taskDescriptions = taskScheduler.resourceOffers(multiCoreWorkerOffers).flatten
     assert(1 === taskDescriptions.length)
@@ -129,8 +134,9 @@ class TaskSchedulerImplSuite extends FunSuite with LocalSparkContext with Loggin
       new NotSerializableFakeTask(1, 0),
       new NotSerializableFakeTask(0, 1)), 0, 0, 0, null)
     val multiCoreWorkerOffers = Seq(
-      new WorkerOffer("executor0", "host0", taskCpus, totalDisks = 0),
-      new WorkerOffer("executor1", "host1", numFreeCores, totalDisks = 0))
+      new WorkerOffer("executor0", "host0", taskCpus, totalDisks = 0, HashMap.empty[String, Int]),
+      new WorkerOffer(
+        "executor1", "host1", numFreeCores, totalDisks = 0, HashMap.empty[String, Int]))
     taskScheduler.submitTasks(taskSet)
     var taskDescriptions = taskScheduler.resourceOffers(multiCoreWorkerOffers).flatten
     assert(0 === taskDescriptions.length)
@@ -155,8 +161,10 @@ class TaskSchedulerImplSuite extends FunSuite with LocalSparkContext with Loggin
       Seq(ReduceExecutorTaskLocation("host0", "executor0")),
       Seq(ReduceExecutorTaskLocation("host1", "executor1")))
 
-    val host0WorkerOffer = Seq(new WorkerOffer("executor0", "host0", freeSlots = 1, totalDisks = 0))
-    val host1WorkerOffer = Seq(new WorkerOffer("executor1", "host1", freeSlots = 1, totalDisks = 0))
+    val host0WorkerOffer = Seq(new WorkerOffer(
+      "executor0", "host0", freeSlots = 1, totalDisks = 0, HashMap.empty[String, Int]))
+    val host1WorkerOffer = Seq(new WorkerOffer(
+      "executor1", "host1", freeSlots = 1, totalDisks = 0, HashMap.empty[String, Int]))
 
     taskScheduler.submitTasks(taskSet)
 
@@ -182,8 +190,57 @@ class TaskSchedulerImplSuite extends FunSuite with LocalSparkContext with Loggin
     assert(1 === taskDescriptions(0).index)
   }
 
+  test("Scheduler offers resources to task set with fewest tasks running on machine first") {
+    sc = new SparkContext("local", "TaskSchedulerImplSuite")
+    val taskScheduler = new TaskSchedulerImpl(sc)
+    taskScheduler.initialize(new FakeSchedulerBackend)
+    taskScheduler.setDAGScheduler(mock(classOf[DAGScheduler]))
+
+    val taskSet1 = FakeTask.createTaskSet(3)
+
+    val host0WorkerOffer = Seq(new WorkerOffer(
+      "executor0", "host0", freeSlots = 1, totalDisks = 0, HashMap.empty[String, Int]))
+
+    taskScheduler.submitTasks(taskSet1)
+
+    // At this point, there's only one outstanding task set, so the offer should be accepted by
+    // that task set.
+    var taskDescriptions = taskScheduler.resourceOffers(host0WorkerOffer).flatten
+    assert(1 === taskDescriptions.length)
+    assert("executor0" === taskDescriptions(0).executorId)
+    assert(taskSet1.id === taskScheduler.taskIdToTaskSetId(taskDescriptions(0).taskId))
+
+    // When another offer is made on the same machine, it should again be accepted by taskSet1,
+    // because there are no other task sets.
+    host0WorkerOffer(0).taskSetIdToRunningTasks(taskSet1.id) = 1
+    taskDescriptions = taskScheduler.resourceOffers(host0WorkerOffer).flatten
+    assert(1 === taskDescriptions.length)
+    assert("executor0" === taskDescriptions(0).executorId)
+    assert(taskSet1.id === taskScheduler.taskIdToTaskSetId(taskDescriptions(0).taskId))
+
+    val taskSet2 = FakeTask.createTaskSet(2)
+    taskScheduler.submitTasks(taskSet2)
+
+    // Another offer on worker0 should go to taskSet2, because it doesn't have any tasks running
+    // on the machine.
+    host0WorkerOffer(0).taskSetIdToRunningTasks(taskSet1.id) = 2
+    taskDescriptions = taskScheduler.resourceOffers(host0WorkerOffer).flatten
+    assert(1 === taskDescriptions.length)
+    assert("executor0" === taskDescriptions(0).executorId)
+    assert(taskSet2.id === taskScheduler.taskIdToTaskSetId(taskDescriptions(0).taskId))
+
+    // Now offer a spot on worker 1.  Since neither task set has anything running there, it
+    // should go to the task set that was submitted first.
+    val host1WorkerOffer = Seq(new WorkerOffer(
+      "executor1", "host1", freeSlots = 1, totalDisks = 0, HashMap.empty[String, Int]))
+    taskDescriptions = taskScheduler.resourceOffers(host1WorkerOffer).flatten
+    assert(1 === taskDescriptions.length)
+    assert("executor1" === taskDescriptions(0).executorId)
+    assert(taskSet1.id === taskScheduler.taskIdToTaskSetId(taskDescriptions(0).taskId))
+  }
+
   test("Scheduler assigns correct number of tasks based on task set's resource requirements " +
-      "when using slot-based monotasks scheduler") {
+    "when using slot-based monotasks scheduler") {
     val conf = new SparkConf(false)
     conf.set("spark.monotasks.scheduler", "slot")
     sc = new SparkContext("local", "TaskSchedulerImplSuite", conf)
@@ -193,12 +250,8 @@ class TaskSchedulerImplSuite extends FunSuite with LocalSparkContext with Loggin
 
     // Offer one worker that has 5 free slots and 3 total disks to task sets with
     // different resource requirements.
-    val workerOffers = Seq(new WorkerOffer("executor0", "host0", freeSlots = 5, totalDisks = 3))
-
-    def createTaskSet(numTasks: Int, usesDisk: Boolean, usesNetwork: Boolean): TaskSet = {
-      val tasks = Array.tabulate[Macrotask[_]](numTasks)(new FakeTask(_, Nil))
-      new TaskSet(tasks, 0, 0, 0, null, usesDisk, usesNetwork)
-    }
+    val workerOffers = Seq(new WorkerOffer(
+      "executor0", "host0", freeSlots = 5, totalDisks = 3, HashMap.empty[String, Int]))
 
     def verifyNumberOfOffersAccepted(
         numTasksInTaskSet: Int,

@@ -35,6 +35,7 @@ package org.apache.spark.scheduler.local
 
 import java.nio.ByteBuffer
 
+import scala.collection.mutable.HashMap
 import scala.concurrent.duration._
 
 import akka.actor.{Actor, ActorRef, Props}
@@ -97,8 +98,15 @@ private[spark] class LocalActor(
     // won't ever use the network, and this is just a hack to counterract the fact that
     // TaskSchedulerImpl will only assign (freeSlots - 1) tasks when tasks don't use the network.
     // TODO: Update this code to correctly set the number of disks.
-    val offers = Seq(
-      new WorkerOffer(localExecutorId, localExecutorHostname, freeCores + 1, totalDisks = 0))
+    val offers = Seq(new WorkerOffer(
+      localExecutorId,
+      localExecutorHostname,
+      freeCores + 1,
+      totalDisks = 0,
+      // In local mode, since there's only one executor, it's unnecessary to pass in the number
+      // of tasks running on each executor, because the default order returned by the rootpool
+      // is already a per-executor ordering.
+      HashMap.empty[String, Int]))
     val tasks = scheduler.resourceOffers(offers).flatten
     for (task <- tasks) {
       freeCores -= scheduler.CPUS_PER_TASK

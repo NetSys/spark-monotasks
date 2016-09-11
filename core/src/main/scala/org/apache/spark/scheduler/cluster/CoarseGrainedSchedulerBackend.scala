@@ -118,11 +118,18 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
         }
 
       case StatusUpdate(executorId, taskId, state, data) =>
+        val taskSetId = scheduler.taskIdToTaskSetId.getOrElse(taskId, "invalid")
         scheduler.statusUpdate(taskId, state, data.value)
         if (TaskState.isFinished(state)) {
           executorDataMap.get(executorId) match {
             case Some(executorInfo) =>
               executorInfo.freeSlots += scheduler.CPUS_PER_TASK
+              val numRunningTasks = executorInfo.taskSetIdToRunningTasks(taskSetId)
+              if (numRunningTasks > 1) {
+                executorInfo.taskSetIdToRunningTasks.put(taskSetId, numRunningTasks - 1)
+              } else {
+                executorInfo.taskSetIdToRunningTasks.remove(taskSetId)
+              }
               makeOffers(executorId)
             case None =>
               // Ignoring the update since we don't know about the executor.
@@ -173,7 +180,8 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
           id,
           executorData.executorHost,
           executorData.freeSlots,
-          executorData.totalDisks)
+          executorData.totalDisks,
+          executorData.taskSetIdToRunningTasks)
       }.toSeq))
     }
 
@@ -185,7 +193,8 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
           executorId,
           executorData.executorHost,
           executorData.freeSlots,
-          executorData.totalDisks))))
+          executorData.totalDisks,
+          executorData.taskSetIdToRunningTasks))))
     }
 
     // Launch tasks returned by a set of resource offers
@@ -193,8 +202,8 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
       for (task <- tasks.flatten) {
         val ser = SparkEnv.get.closureSerializer.newInstance()
         val serializedTask = ser.serialize(task)
+        val taskSetId = scheduler.taskIdToTaskSetId(task.taskId)
         if (serializedTask.limit >= akkaFrameSize - AkkaUtils.reservedSizeBytes) {
-          val taskSetId = scheduler.taskIdToTaskSetId(task.taskId)
           scheduler.activeTaskSets.get(taskSetId).foreach { taskSet =>
             try {
               var msg = "Serialized task %s:%d was %d bytes, which exceeds max allowed: " +
@@ -211,6 +220,11 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
         else {
           val executorData = executorDataMap(task.executorId)
           executorData.freeSlots -= scheduler.CPUS_PER_TASK
+          val runningTasksOnExecutorForTaskSet =
+            executorData.taskSetIdToRunningTasks.getOrElse(taskSetId, 0)
+          executorData.taskSetIdToRunningTasks.put(taskSetId, runningTasksOnExecutorForTaskSet + 1)
+          logInfo(s"After task ${task.taskId} started on ${task.executorId}, " +
+            s"taskIdToRunningTasks is ${executorData.taskSetIdToRunningTasks}")
           executorData.executorActor ! LaunchTask(new SerializableBuffer(serializedTask))
         }
       }

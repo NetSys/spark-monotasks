@@ -33,6 +33,8 @@
 
 package org.apache.spark.scheduler.cluster
 
+import scala.collection.mutable.HashMap
+
 import akka.actor.{Address, ActorRef}
 
 /**
@@ -55,4 +57,6 @@ private[cluster] class ExecutorData(
   // Each executor can run at most (# cores) + (# disks) + (# network slots = 1) monotasks
   // concurrently, so cap the number of concurrent macrotasks per executor at this value.
   var freeSlots = totalCores + totalDisks + 1
+
+  val taskSetIdToRunningTasks = new HashMap[String, Int]()
 }
