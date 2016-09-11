@@ -26,7 +26,8 @@ private[spark] sealed trait RunningTasksUpdate
 private[spark] object TaskStarted extends RunningTasksUpdate
 private[spark] object TaskCompleted extends RunningTasksUpdate
 
-private[spark] class ComputeScheduler(private val threads: Int) extends Logging {
+private[spark] class ComputeScheduler(
+    private val threads: Int = Runtime.getRuntime.availableProcessors()) extends Logging {
   private var memoryStore: Option[MemoryStore] = None
 
   /**

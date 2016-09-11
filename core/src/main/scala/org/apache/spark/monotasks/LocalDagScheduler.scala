@@ -40,10 +40,7 @@ import org.apache.spark.util.{EventLoop, SparkUncaughtExceptionHandler}
  * loop.  The only exception to this is monitoring functions (to get the number of running tasks,
  * for example), which are not processed by the event loop.
  */
-private[spark] class LocalDagScheduler(
-    blockFileManager: BlockFileManager,
-    conf: SparkConf,
-    private val numCores: Int = Runtime.getRuntime().availableProcessors())
+private[spark] class LocalDagScheduler(blockFileManager: BlockFileManager, conf: SparkConf)
   extends EventLoop[LocalDagSchedulerEvent]("local-dag-scheduler-event-loop") with Logging {
 
   /**
@@ -54,11 +51,11 @@ private[spark] class LocalDagScheduler(
 
   /**
    * Backend to send notifications to when macrotasks complete successfully. Set by
-   * initialize().
+   * setExecutorBackend().
    */
   private var executorBackend: Option[ExecutorBackend] = None
 
-  private val computeScheduler = new ComputeScheduler(numCores)
+  private val computeScheduler = new ComputeScheduler
   private val networkScheduler = new NetworkScheduler(conf)
   private val diskScheduler = new DiskScheduler(blockFileManager, conf)
 
@@ -115,10 +112,6 @@ private[spark] class LocalDagScheduler(
   /** Returns the number of disks on the worker. */
   def getNumDisks(): Int = {
     diskScheduler.diskIds.size
-  }
-
-  def getNumCores(): Int = {
-    return numCores
   }
 
   def getNumRunningComputeMonotasks(): Int = {
@@ -211,7 +204,6 @@ private[spark] class LocalDagScheduler(
     val taskAttemptId = monotask.context.taskAttemptId
     logDebug(s"Submitting monotask $monotask (id: ${monotask.taskId}) for macrotask $taskAttemptId")
 
-
     if (monotask.context.taskIsRunningRemotely) {
       remoteMacrotaskAttemptIdToRemainingMonotasks.put(
         taskAttemptId,
@@ -284,8 +276,7 @@ private[spark] class LocalDagScheduler(
 
     if (localMacrotaskAttemptIds.contains(taskAttemptId) ||
         remoteMacrotaskAttemptIdToRemainingMonotasks.contains(taskAttemptId)) {
-      val scheduledMonotasks = scheduleReadyMonotasks(completedMonotask)
-      completedMonotask.context.updateQueueTracking(completedMonotask, scheduledMonotasks)
+      scheduleReadyMonotasks(completedMonotask)
 
       if (completedMonotask.context.taskIsRunningRemotely) {
         remoteMacrotaskAttemptIdToRemainingMonotasks.get(taskAttemptId).foreach { numMonotasks =>

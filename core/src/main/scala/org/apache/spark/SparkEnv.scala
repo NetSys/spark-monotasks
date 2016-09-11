@@ -48,7 +48,6 @@ import org.apache.spark.broadcast.BroadcastManager
 import org.apache.spark.executor.DependencyManager
 import org.apache.spark.metrics.MetricsSystem
 import org.apache.spark.monotasks.LocalDagScheduler
-import org.apache.spark.monotasks.scheduler.MonotasksScheduler
 import org.apache.spark.network.BlockTransferService
 import org.apache.spark.network.netty.NettyBlockTransferService
 import org.apache.spark.scheduler.{OutputCommitCoordinator, LiveListenerBus}
@@ -87,7 +86,6 @@ class SparkEnv (
     val outputCommitCoordinator: OutputCommitCoordinator,
     val dependencyManager: DependencyManager,
     val localDagScheduler: LocalDagScheduler,
-    val monotasksScheduler: MonotasksScheduler,
     val conf: SparkConf) extends Logging {
 
   /**
@@ -331,12 +329,7 @@ object SparkEnv extends Logging {
     val blockFileManager = new BlockFileManager(conf)
 
     // NB: localDagScheduler is not valid until initialize() is called later.
-    val localDagScheduler = new LocalDagScheduler(blockFileManager, conf, numUsableCores)
-
-    // This code assumes that the number of disks and cores on the master is the same as it will
-    // be on all of the workers.
-    val monotasksScheduler = MonotasksScheduler.getScheduler(
-      conf, localDagScheduler.getNumDisks(), localDagScheduler.getNumCores())
+    val localDagScheduler = new LocalDagScheduler(blockFileManager, conf)
 
     // NB: blockManager is not valid until initialize() is called later.
     val blockManager = new BlockManager(
@@ -422,7 +415,6 @@ object SparkEnv extends Logging {
       outputCommitCoordinator,
       dependencyManager,
       localDagScheduler,
-      monotasksScheduler,
       conf)
   }
 

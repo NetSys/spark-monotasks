@@ -24,9 +24,7 @@ import org.scalatest.FunSuite
 
 class CoarseGrainedSchedulerBackendSuite extends FunSuite with LocalSparkContext {
 
-  // This test does not currently work because monotasks doesn't handle failures and concurrent
-  // jobs properly.
-  ignore("serialized task larger than akka frame size") {
+  test("serialized task larger than akka frame size") {
     val conf = new SparkConf
     conf.set("spark.akka.frameSize","1")
     conf.set("spark.default.parallelism","1")

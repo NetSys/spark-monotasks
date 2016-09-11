@@ -41,7 +41,7 @@ import org.apache.mesos.protobuf.ByteString
 import org.apache.mesos.{Executor => MesosExecutor, ExecutorDriver, MesosExecutorDriver}
 import org.apache.mesos.Protos.{TaskStatus => MesosTaskStatus, _}
 
-import org.apache.spark.{Logging, SparkConf, SparkEnv, SparkException, TaskState}
+import org.apache.spark.{Logging, TaskState, SparkConf, SparkEnv}
 import org.apache.spark.TaskState.TaskState
 import org.apache.spark.deploy.SparkHadoopUtil
 import org.apache.spark.scheduler.cluster.mesos.{MesosTaskLaunchData}
@@ -62,11 +62,6 @@ private[spark] class MesosExecutorBackend
       .setState(TaskState.toMesos(state))
       .setData(ByteString.copyFrom(data))
       .build())
-  }
-
-  override def requestTasks(numTasks: Int) {
-    throw new SparkException(
-      s"MesosExecutorBackend does not support requestTasks() and cannot be used with monotasks.")
   }
 
   override def registered(

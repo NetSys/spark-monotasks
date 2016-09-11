@@ -45,7 +45,7 @@ private[spark] object CoarseGrainedClusterMessages {
   case object RetrieveSparkProps extends CoarseGrainedClusterMessage
 
   // Driver to executors
-  case class LaunchTask(epoch: Int, data: SerializableBuffer) extends CoarseGrainedClusterMessage
+  case class LaunchTask(data: SerializableBuffer) extends CoarseGrainedClusterMessage
 
   case class KillTask(taskId: Long, executor: String, interruptThread: Boolean)
     extends CoarseGrainedClusterMessage
@@ -75,9 +75,6 @@ private[spark] object CoarseGrainedClusterMessages {
       StatusUpdate(executorId, taskId, state, new SerializableBuffer(data))
     }
   }
-
-  case class RequestTasks(epoch: Int, executorId: String, numTasks: Int)
-    extends CoarseGrainedClusterMessage
 
   // Internal messages in driver
   case object ReviveOffers extends CoarseGrainedClusterMessage

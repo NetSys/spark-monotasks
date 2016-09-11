@@ -91,7 +91,6 @@ private[spark] class Executor(
 
   private val localDagScheduler = env.localDagScheduler
   localDagScheduler.initialize(executorBackend, env.blockManager.memoryStore)
-  env.monotasksScheduler.setExecutorBackend(executorBackend)
 
   private val continuousMonitor = new ContinuousMonitor(
     conf,
