@@ -34,6 +34,9 @@ import org.apache.spark.util.LongArrayWritable
 object SortJob extends Logging {
   def main(args: Array[String]) {
     val conf = new SparkConf().setAppName("Sort Job")
+    // Manually set Spark to write to disk, to overwrite any existing configuration that specifies
+    // that shuffle data should be stored in-memory.
+    conf.set("spark.shuffle.writeToDisk", "true")
     val spark = new SparkContext(conf)
 
     val numMapTasks = if (args.length > 0) args(0).toInt else 16
