@@ -773,7 +773,7 @@ private[spark] class BlockManager(
    * block can be written to disk by a DiskWriteMonotask).
    */
   def removeBlockFromMemory(blockId: BlockId, tellMaster: Boolean = true): Unit = {
-    logInfo(s"Removing block $blockId from the MemoryStore")
+    logDebug(s"Removing block $blockId from the MemoryStore")
     blockInfo.get(blockId).foreach { info =>
       info.synchronized {
         // Removals are idempotent in memory store. At worst, we get a warning.
@@ -782,7 +782,7 @@ private[spark] class BlockManager(
           val status = getStatus(blockId, info)
           if (status.storageLevel == StorageLevel.NONE) {
             blockInfo.remove(blockId)
-            logInfo(s"Block $blockId is no longer stored locally, so the BlockManager discarded " +
+            logDebug(s"Block $blockId is no longer stored locally, so the BlockManager discarded " +
               "its metadata.")
           } else {
             info.deserialized = false
