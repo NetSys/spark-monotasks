@@ -61,7 +61,7 @@ private[spark] class DiskScheduler(
    * of the disk; otherwise, assigns DiskWriteMonotasks to disks in round-robin order.
    */
   private val loadBalanceDiskWrites = conf.getBoolean(
-    "spark.monotasks.loadBalanceDiskWrites", true)
+    "spark.monotasks.loadBalanceDiskWrites", false)
 
   addShutdownHook()
   buildDiskAccessors(conf)
