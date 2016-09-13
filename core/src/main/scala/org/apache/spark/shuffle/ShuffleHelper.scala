@@ -19,6 +19,7 @@ package org.apache.spark.shuffle
 import org.apache.spark.{InterruptibleIterator, Logging, ShuffleDependency, SparkEnv,
   TaskContextImpl}
 import org.apache.spark.monotasks.Monotask
+import org.apache.spark.monotasks.disk.DiskReadMonotask
 import org.apache.spark.monotasks.network.NetworkRequestMonotask
 import org.apache.spark.network.buffer.ManagedBuffer
 import org.apache.spark.serializer.Serializer
@@ -54,7 +55,7 @@ class ShuffleHelper[K, V, C](
     shuffleDependency.shuffleId, reduceId, System.currentTimeMillis - startTime))
 
   def getReadMonotasks(): Seq[Monotask] = {
-    statusesByExecutorId.flatMap {
+    val readMonotasks = statusesByExecutorId.flatMap {
       case (blockManagerId, blockIdsAndSizes) =>
         val nonZeroBlockIdsAndSizes = blockIdsAndSizes.filter(_._2 > 0)
         if (nonZeroBlockIdsAndSizes.size > 0) {
@@ -63,6 +64,11 @@ class ShuffleHelper[K, V, C](
           None
         }
     }
+    readMonotasks.foreach(_.virtualSize = 1.0 / readMonotasks.length)
+    val totalLocal = readMonotasks.filter(_.isInstanceOf[DiskReadMonotask]).map(_.virtualSize).sum
+    val totalAll = readMonotasks.map(_.virtualSize).sum
+    logInfo(s"Total virtual size for local monotasks is $totalLocal and overall total is $totalAll")
+    readMonotasks
   }
 
   /**
@@ -154,8 +160,8 @@ class ShuffleHelper[K, V, C](
       buffer
     } else {
       val buffer = blockManager.getSingle(blockId).get.asInstanceOf[ManagedBuffer]
-      //readMetrics.incRemoteBlocksFetched(1)
       //readMetrics.incRemoteBytesRead(buffer.size)
+      //readMetrics.incRemoteBlocksFetched(1)
       buffer
     }
 

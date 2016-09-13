@@ -28,9 +28,11 @@ import io.netty.channel.Channel;
  */
 public abstract class BlockFetcher {
   public abstract void getBlockData(
-    String[] blockIds, Channel channel, long taskAttemptId, int attemptNumber);
+    String[] blockIds, double totalVirtualSize, String remoteName, Channel channel,
+    long taskAttemptId, int attemptNumber);
 
   public abstract void signalBlocksAvailable(
+    String remoteName,
     String[] blockIds,
     int[] blockSizes,
     long taskAttemptId,

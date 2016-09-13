@@ -79,7 +79,7 @@ public class ProtocolSuite {
 
   @Test
   public void requests() {
-    testClientToServer(new BlockFetchRequest(new String[]{"rdd_1_2"}, 0L, 0));
+    testClientToServer(new BlockFetchRequest(new String[]{"rdd_1_2"}, 1, 0L, 0));
   }
 
   @Test

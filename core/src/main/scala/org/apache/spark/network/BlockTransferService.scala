@@ -90,6 +90,7 @@ abstract class BlockTransferService extends Closeable with Logging {
       host: String,
       port: Int,
       blockIds: Array[String],
+      totalVirtualSize: Double,
       taskAttemptId: Long,
       attemptNumber: Int,
       blockReceivedCallback: BlockReceivedCallback): Unit
@@ -106,7 +107,7 @@ abstract class BlockTransferService extends Closeable with Logging {
   def fetchBlockSync(host: String, port: Int, blockId: String): ManagedBuffer = {
     // A monitor for the thread to wait on.
     val result = Promise[ManagedBuffer]()
-    fetchBlocks(host, port, Array(blockId), -1L, -1,
+    fetchBlocks(host, port, Array(blockId), 1, -1L, -1,
       new BlockReceivedCallback {
         override def onFailure(blockId: String, exception: Throwable): Unit = {
           result.failure(exception)

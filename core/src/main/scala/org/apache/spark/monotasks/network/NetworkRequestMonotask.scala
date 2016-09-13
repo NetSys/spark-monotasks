@@ -120,6 +120,7 @@ private[spark] class NetworkRequestMonotask(
           remoteAddress.host,
           remoteAddress.port,
           blockIds.map(_.toString).toArray,
+          virtualSize,
           context.taskAttemptId,
           context.attemptNumber,
           this)

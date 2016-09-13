@@ -44,11 +44,14 @@ import io.netty.buffer.ByteBuf;
  */
 public final class BlockFetchRequest implements RequestMessage {
   public final String[] blockIds;
+  public final double totalVirtualSize;
   public final Long taskAttemptId;
   public final int attemptNumber;
 
-  public BlockFetchRequest(String[] blockIds, Long taskAttemptId, int attemptNumber) {
+  public BlockFetchRequest(
+      String[] blockIds, double totalVirtualSize, Long taskAttemptId, int attemptNumber) {
     this.blockIds = blockIds;
+    this.totalVirtualSize = totalVirtualSize;
     this.taskAttemptId = taskAttemptId;
     this.attemptNumber = attemptNumber;
   }
@@ -60,21 +63,23 @@ public final class BlockFetchRequest implements RequestMessage {
 
   @Override
   public int encodedLength() {
-    return Encoders.StringArrays.encodedLength(blockIds) + 8 + 4;
+    return Encoders.StringArrays.encodedLength(blockIds) + 8 + 8 + 4;
   }
 
   @Override
   public void encode(ByteBuf buf) {
     Encoders.StringArrays.encode(buf, blockIds);
+    buf.writeDouble(totalVirtualSize);
     buf.writeLong(taskAttemptId);
     buf.writeInt(attemptNumber);
   }
 
   public static BlockFetchRequest decode(ByteBuf buf) {
     String[] blockIds = Encoders.StringArrays.decode(buf);
+    double totalVirtualSize = buf.readDouble();
     Long taskAttemptId = buf.readLong();
     int attemptNumber = buf.readInt();
-    return new BlockFetchRequest(blockIds, taskAttemptId, attemptNumber);
+    return new BlockFetchRequest(blockIds, totalVirtualSize, taskAttemptId, attemptNumber);
 
   }
 
@@ -82,8 +87,8 @@ public final class BlockFetchRequest implements RequestMessage {
   public boolean equals(Object other) {
     if (other instanceof BlockFetchRequest) {
       BlockFetchRequest o = (BlockFetchRequest) other;
-      return ((Arrays.equals(blockIds, o.blockIds)) && (taskAttemptId == o.taskAttemptId) &&
-        (attemptNumber == o.attemptNumber));
+      return ((Arrays.equals(blockIds, o.blockIds)) && (totalVirtualSize == o.totalVirtualSize) &&
+        (taskAttemptId == o.taskAttemptId) && (attemptNumber == o.attemptNumber));
     }
     return false;
   }
@@ -92,6 +97,7 @@ public final class BlockFetchRequest implements RequestMessage {
   public String toString() {
     return Objects.toStringHelper(this)
       .add("blockIds", Arrays.toString(blockIds))
+      .add("totalVirtualSize", totalVirtualSize)
       .add("taskAttemptId", taskAttemptId)
       .add("attemptNumber", attemptNumber)
       .toString();

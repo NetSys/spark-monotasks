@@ -120,7 +120,7 @@ class LocalDagSchedulerSuite extends FunSuite with BeforeAndAfterEach with Local
 
   test("updateMetricsForStartedMonotask and updateMetricsForFinishedMonotask ignore remote " +
     "monotasks") {
-    val remoteMacrotaskContext = new TaskContextImpl(0, 0, taskIsRunningRemotely = true)
+    val remoteMacrotaskContext = new TaskContextImpl(0, 0, remoteName = "1.2.3.4")
     // Setup one monotask for the remote macrotask.
     val networkMonotask = mock(classOf[NetworkMonotask])
     when(networkMonotask.dependencies).thenReturn(HashSet.empty[Monotask])

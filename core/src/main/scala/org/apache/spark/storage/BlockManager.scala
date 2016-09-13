@@ -251,6 +251,7 @@ private[spark] class BlockManager(
   }
 
   override def signalBlocksAvailable(
+      remoteName: String,
       blockIds: Array[String],
       blockSizes: Array[Int],
       taskAttemptId: Long,
@@ -262,7 +263,7 @@ private[spark] class BlockManager(
     // to the LocalDagScheduler.  The new monotasks have low-priority, so will only be executed if
     // the scheduler doesn't have any other work.
     val taskContext =
-      new TaskContextImpl(taskAttemptId, attemptNumber, taskIsRunningRemotely = true)
+      new TaskContextImpl(taskAttemptId, attemptNumber, remoteName = remoteName)
     val remoteBlockManagerId = BlockManagerId(executor, host, port)
     logInfo(s"Received notification that blocks ${blockIds.mkString(",")} are available on " +
       s"executor $remoteBlockManagerId; initiating network monotask to fetch them.")
@@ -282,11 +283,12 @@ private[spark] class BlockManager(
 
   override def getBlockData(
       blockIdStrs: Array[String],
+      totalVirtualSize: Double,
+      remoteName: String,
       channel: Channel,
       taskAttemptId: Long,
       attemptNumber: Int): Unit = {
-    val taskContext =
-      new TaskContextImpl(taskAttemptId, attemptNumber, taskIsRunningRemotely = true)
+    val taskContext = new TaskContextImpl(taskAttemptId, attemptNumber, remoteName = remoteName)
     blockIdStrs.foreach { blockIdStr =>
       val blockId = BlockId(blockIdStr)
 
@@ -299,6 +301,7 @@ private[spark] class BlockManager(
         // Try to load the block from disk.
         getBlockLoadMonotask(blockId, taskContext) match {
           case Some(blockLoadMonotask) =>
+            blockLoadMonotask.virtualSize = totalVirtualSize / blockIdStrs.length
             blockLoadMonotask.addAlternateFailureHandler { failureReason: TaskFailedReason =>
               networkResponseMonotask.markAsFailed(failureReason.toErrorString)
             }

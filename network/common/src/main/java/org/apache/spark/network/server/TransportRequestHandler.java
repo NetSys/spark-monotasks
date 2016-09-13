@@ -90,13 +90,18 @@ public class TransportRequestHandler extends MessageHandler<RequestMessage> {
   private void processFetchRequest(final BlockFetchRequest req) {
     final String client = NettyUtils.getRemoteAddress(channel);
 
-    logger.info("Received req from {} to fetch blocks {}", client, Arrays.toString(req.blockIds));
+    logger.debug("Received req from {} to fetch blocks {}", client, Arrays.toString(req.blockIds));
 
-    blockFetcher.getBlockData(req.blockIds, channel, req.taskAttemptId, req.attemptNumber);
+    blockFetcher.getBlockData(
+        req.blockIds, req.totalVirtualSize, client, channel, req.taskAttemptId, req.attemptNumber);
   }
 
   private void processBlocksAvailable(final BlocksAvailable blocksAvailable) {
+    // Need to get the remote name here so that, when the TaskContextImpl is created, it has a
+    // consistent remote name with ones used above.
+    final String remoteName = NettyUtils.getRemoteAddress(channel);
     blockFetcher.signalBlocksAvailable(
+        remoteName,
         blocksAvailable.blockIds,
         blocksAvailable.blockSizes,
         blocksAvailable.taskAttemptId,

@@ -37,6 +37,15 @@ private[spark] abstract class Monotask(val context: TaskContextImpl) extends Log
   /** Whether this monotask has finished executing. */
   var isFinished = false
 
+  /** The virtual size is used for deficit round robin queueing.
+    *
+    * This is used to ensure that the scheduler gives each phase of a multitask's execution equal
+    * time, and should be set to (1 / # monotasks in phase).  For example, when a multitask writes
+    * to disk with a single monotask, this should be set to 1.  If a multitask is reading from
+    * disk using 10 monotasks, this should be set to 1/10.
+    */
+  var virtualSize: Double = 1
+
   /**
    * The BlockId with which this monotask stored temporary data in the BlockManager for use by its
    * dependencies, or None if the monotask did not store any temporary data.

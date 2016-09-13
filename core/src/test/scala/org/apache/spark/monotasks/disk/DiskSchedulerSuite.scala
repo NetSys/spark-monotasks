@@ -95,7 +95,7 @@ class DiskSchedulerSuite extends FunSuite with BeforeAndAfter with Timeouts {
     }
   }
 
-  test("DiskMonotasks pertaining to the same disk start executing in FIFO order") {
+  test("DiskMonotasks for the same disk and of the same type execute in FIFO order") {
     initializeDiskScheduler(1)
     val monotasks = (1 to numBlocks).map(i =>
       new DummyDiskWriteMonotask(taskContext, new TestBlockId(i.toString), 100))

@@ -108,6 +108,7 @@ public class TransportClient implements Closeable {
    */
   public void fetchBlocks(
       final String[] rawBlockIds,
+      double totalVirtualSize,
       Long taskAttemptId,
       int attemptNumber,
       final BlockReceivedCallback callback) {
@@ -129,7 +130,8 @@ public class TransportClient implements Closeable {
     final long startTime = System.currentTimeMillis();
     logger.debug("Sending request for blocks {} to {}", blockIdsAsStrings, serverAddr);
 
-    BlockFetchRequest request = new BlockFetchRequest(blockIds, taskAttemptId, attemptNumber);
+    BlockFetchRequest request =
+        new BlockFetchRequest(blockIds, totalVirtualSize, taskAttemptId, attemptNumber);
     channel.writeAndFlush(request).addListener(
       new ChannelFutureListener() {
         @Override

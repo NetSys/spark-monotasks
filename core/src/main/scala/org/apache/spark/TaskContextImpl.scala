@@ -41,16 +41,15 @@ import org.apache.spark.util.{TaskCompletionListener, TaskCompletionListenerExce
 /**
  * Stores metadata about a macrotask, including metrics.
  *
- * @param taskIsRunningRemotely Whether this TaskContextImpl is for a macrotask that is running on
- *                              a remote executor (this will be true when a TaskContextImpl is
- *                              created for the monotasks that fetch shuffle data, for example).
  * @param runningLocally Whether the task is running in the same JVM as the Spark Master.
+ * @param remoteName If the TaskContextImpl is for a macrotask that is running on a remote executor,
+ *                   the name of that executor.
  */
 private[spark] class TaskContextImpl(
     override val taskAttemptId: Long,
     override val attemptNumber: Int,
-    val taskIsRunningRemotely: Boolean = false,
     val runningLocally: Boolean = false,
+    val remoteName: String = "localhost",
     val taskMetrics: TaskMetrics = TaskMetrics.empty)
   extends TaskContext
   with Logging {
@@ -74,6 +73,8 @@ private[spark] class TaskContextImpl(
 
   // Whether the task has completed.
   @volatile private var completed: Boolean = false
+
+  def taskIsRunningRemotely: Boolean = !(remoteName.equals("localhost"))
 
   def initialize(stageId: Int, partitionId: Int) {
     this.stageId = stageId
