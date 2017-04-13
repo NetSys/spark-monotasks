@@ -159,7 +159,6 @@ private[spark] class NetworkScheduler(conf: SparkConf) extends Logging {
     }
     runningResponseMonotasks -= response.taskId
   }
-
   /**
    * Configure the time that the transmission idle time measurements should treat as the time that
    * this NetworkScheduler was created. Must be called before this NetworkScheduler is used.
