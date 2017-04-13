@@ -60,8 +60,8 @@ VALID_SPARK_VERSIONS = set([
     "1.3.0",
 ])
 
-DEFAULT_SPARK_VERSION = "master"
-DEFAULT_SPARK_GITHUB_REPO = "https://github.com/NetSys/spark-monotasks"
+DEFAULT_SPARK_VERSION = "monotasks"
+DEFAULT_SPARK_GITHUB_REPO = "https://github.com/kayousterhout/spark-1"
 MESOS_SPARK_EC2_BRANCH = "branch-1.3"
 
 # A URL prefix from which to fetch AMI information
