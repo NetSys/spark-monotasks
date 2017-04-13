@@ -879,7 +879,7 @@ class DAGScheduler(
         shuffleDependency.assignReduceTasksToExecutors(blockManagerMaster)
       val executorIdToReduceIdsStr = executorIdToReduceIds.map(
         pair => s"${pair._1}: ${pair._2.mkString(",")}").mkString("; ")
-      logInfo(s"For shuffle dep $shuffleDependency, ossible assignment of reduce tasks to " +
+      logInfo(s"For shuffle dep $shuffleDependency, possible assignment of reduce tasks to " +
         s"executors: $executorIdToReduceIdsStr")
       partitionsToCompute.map { id =>
         val locs = getPreferredLocs(stage.rdd, id)
@@ -1063,11 +1063,14 @@ class DAGScheduler(
         currentRdd.dependencies.foreach {
           case shuffleDependency: ShuffleDependency[_, _, _] =>
             val shuffleId = shuffleDependency.shuffleId
-            logInfo(s"Deleting shuffle data for shuffle $shuffleId because $stage finished.")
-            mapOutputTracker.unregisterShuffle(shuffleId)
-            blockManagerMaster.removeShuffle(shuffleId, blocking = true)
-            logInfo(s"Done deleting shuffle data")
-
+            // Delete the shuffle data, if this stage didn't fail (if there was a fetch failure,
+            // we want to keep around the old data).
+            if (errorMessage.isEmpty) {
+              logInfo(s"Deleting shuffle data for shuffle $shuffleId because $stage finished.")
+              mapOutputTracker.unregisterShuffle(shuffleId)
+              blockManagerMaster.removeShuffle(shuffleId, blocking = true)
+              logInfo(s"Done deleting shuffle data")
+            }
           case dep: Dependency[_] =>
             waitingForVisit.push(dep.rdd)
         }
@@ -1459,9 +1462,12 @@ class DAGScheduler(
 
       case s: ShuffleDependency[_, _, _] =>
         // If the RDD has a shuffle dependency, use the locations that were pre-determined when the
-        // map stage was launched.
+        // map stage was launched, if they are defined (they won't be defined if the job is running
+        // in local mode, e.g., during unit tests).
         val blockManagerId = s.reduceLocations(partition)
-        return Seq(ReduceExecutorTaskLocation(blockManagerId.host, blockManagerId.executorId))
+        if (blockManagerId != null) {
+          return Seq(ReduceExecutorTaskLocation(blockManagerId.host, blockManagerId.executorId))
+        }
 
       case _ =>
     }

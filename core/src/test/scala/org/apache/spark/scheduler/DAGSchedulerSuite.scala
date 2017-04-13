@@ -37,7 +37,7 @@ import scala.collection.mutable.{ArrayBuffer, HashSet, HashMap, Map}
 import scala.language.reflectiveCalls
 import scala.util.control.NonFatal
 
-import org.scalatest.{BeforeAndAfter, FunSuiteLike}
+import org.scalatest.{BeforeAndAfterEach, FunSuiteLike}
 import org.scalatest.concurrent.Timeouts
 import org.scalatest.time.SpanSugar._
 
@@ -76,17 +76,20 @@ class MyRDD(
   override def getPartitions = (0 until numPartitions).map(i => new Partition {
     override def index = i
   }).toArray
-  override def getPreferredLocations(split: Partition): Seq[String] =
-    if (locations.isDefinedAt(split.index))
+  override def getPreferredLocations(split: Partition): Seq[String] = {
+    if (locations.isDefinedAt(split.index)) {
       locations(split.index)
-    else
+    } else {
       Nil
+    }
+  }
   override def toString: String = "DAGSchedulerSuiteRDD " + id
 }
 
 class DAGSchedulerSuiteDummyException extends Exception
 
-class DAGSchedulerSuite extends FunSuiteLike  with BeforeAndAfter with LocalSparkContext with Timeouts {
+class DAGSchedulerSuite extends FunSuiteLike  with BeforeAndAfterEach with LocalSparkContext
+    with Timeouts {
 
   val conf = new SparkConf
   /** Set of TaskSets the DAGScheduler has requested executed. */
@@ -129,6 +132,7 @@ class DAGSchedulerSuite extends FunSuiteLike  with BeforeAndAfter with LocalSpar
         failedStages += stageInfo.stageId
       }
     }
+
   }
 
   var mapOutputTracker: MapOutputTrackerMaster = null
@@ -141,18 +145,6 @@ class DAGSchedulerSuite extends FunSuiteLike  with BeforeAndAfter with LocalSpar
    * list of cache locations silently.
    */
   val cacheLocations = new HashMap[(Int, Int), Seq[BlockManagerId]]
-  // stub out BlockManagerMaster.getLocations to use our cacheLocations
-  val blockManagerMaster = new BlockManagerMaster(null, conf, true) {
-      override def getLocations(blockIds: Array[BlockId]): Seq[Seq[BlockManagerId]] = {
-        blockIds.map {
-          _.asRDDId.map(id => (id.rddId -> id.splitIndex)).flatMap(key => cacheLocations.get(key)).
-            getOrElse(Seq())
-        }.toSeq
-      }
-      override def removeExecutor(execId: String) {
-        // don't need to propagate to the driver, which we don't have
-      }
-    }
 
   /** The list of results that DAGScheduler has collected. */
   val results = new HashMap[Int, Any]()
@@ -162,7 +154,7 @@ class DAGSchedulerSuite extends FunSuiteLike  with BeforeAndAfter with LocalSpar
     override def jobFailed(exception: Exception) = { failure = exception }
   }
 
-  before {
+  override def beforeEach() {
     // Enable local execution for this test
     val conf = new SparkConf().set("spark.localExecution.enabled", "true")
     sc = new SparkContext("local", "DAGSchedulerSuite", conf)
@@ -175,6 +167,20 @@ class DAGSchedulerSuite extends FunSuiteLike  with BeforeAndAfter with LocalSpar
     cacheLocations.clear()
     results.clear()
     mapOutputTracker = new MapOutputTrackerMaster(conf)
+    // stub out BlockManagerMaster.getLocations to use our cacheLocations
+    val blockManagerMaster = new BlockManagerMaster(
+        sc.env.blockManager.master.driverActor, conf, true) {
+      override def getLocations(blockIds: Array[BlockId]): Seq[Seq[BlockManagerId]] = {
+        logInfo(s"Getting locations for ${blockIds}")
+        blockIds.map {
+          _.asRDDId.map(id => (id.rddId -> id.splitIndex)).flatMap(key => cacheLocations.get(key)).
+            getOrElse(Seq())
+        }.toSeq
+      }
+      override def removeExecutor(execId: String) {
+        // don't need to propagate to the driver, which we don't have
+      }
+    }
     scheduler = new DAGScheduler(
         sc,
         taskScheduler,
@@ -188,6 +194,11 @@ class DAGSchedulerSuite extends FunSuiteLike  with BeforeAndAfter with LocalSpar
       }
     }
     dagEventProcessLoopTester = new DAGSchedulerEventProcessLoopTester(scheduler)
+  }
+
+  override def afterEach() {
+    scheduler.activeJobs.clear()
+    super.afterEach()
   }
 
   override def afterAll() {
@@ -224,7 +235,8 @@ class DAGSchedulerSuite extends FunSuiteLike  with BeforeAndAfter with LocalSpar
     assert(taskSet.tasks.size >= results.size)
     for ((result, i) <- results.zipWithIndex) {
       if (i < taskSet.tasks.size) {
-        runEvent(CompletionEvent(taskSet.tasks(i), result._1, result._2, null, createFakeTaskInfo(), null))
+        runEvent(CompletionEvent(
+          taskSet.tasks(i), result._1, result._2, null, createFakeTaskInfo(), null))
       }
     }
   }
@@ -296,7 +308,8 @@ class DAGSchedulerSuite extends FunSuiteLike  with BeforeAndAfter with LocalSpar
       override def toString = "DAGSchedulerSuite Local RDD"
     }
     val jobId = scheduler.nextJobId.getAndIncrement()
-    runEvent(JobSubmitted(jobId, rdd, jobComputeFunc, Array(0), true, CallSite("", ""), jobListener))
+    runEvent(
+      JobSubmitted(jobId, rdd, jobComputeFunc, Array(0), true, CallSite("", ""), jobListener))
     assert(results === Map(0 -> 42))
     assertDataStructuresEmpty
   }
@@ -408,7 +421,7 @@ class DAGSchedulerSuite extends FunSuiteLike  with BeforeAndAfter with LocalSpar
       noKillTaskScheduler,
       sc.listenerBus,
       mapOutputTracker,
-      blockManagerMaster,
+      sc.env.blockManager.master,
       sc.env) {
       override def runLocally(job: ActiveJob) {
         // don't bother with the thread while unit testing
@@ -433,9 +446,10 @@ class DAGSchedulerSuite extends FunSuiteLike  with BeforeAndAfter with LocalSpar
 
   test("run trivial shuffle") {
     val shuffleMapRdd = new MyRDD(sc, 2, Nil)
-    val shuffleDep = new ShuffleDependency(shuffleMapRdd, null)
+    val numReducePartitions = 1
+    val shuffleDep = new ShuffleDependency(shuffleMapRdd, new HashPartitioner(numReducePartitions))
     val shuffleId = shuffleDep.shuffleId
-    val reduceRdd = new MyRDD(sc, 1, List(shuffleDep))
+    val reduceRdd = new MyRDD(sc, numReducePartitions, List(shuffleDep))
     submit(reduceRdd, Array(0))
     complete(taskSets(0), Seq(
         (Success, makeMapStatus("hostA", 1)),
@@ -449,9 +463,10 @@ class DAGSchedulerSuite extends FunSuiteLike  with BeforeAndAfter with LocalSpar
 
   test("run trivial shuffle with fetch failure") {
     val shuffleMapRdd = new MyRDD(sc, 2, Nil)
-    val shuffleDep = new ShuffleDependency(shuffleMapRdd, null)
+    val numReducePartitions = 2
+    val shuffleDep = new ShuffleDependency(shuffleMapRdd, new HashPartitioner(numReducePartitions))
     val shuffleId = shuffleDep.shuffleId
-    val reduceRdd = new MyRDD(sc, 2, List(shuffleDep))
+    val reduceRdd = new MyRDD(sc, numReducePartitions, List(shuffleDep))
     submit(reduceRdd, Array(0, 1))
     complete(taskSets(0), Seq(
         (Success, makeMapStatus("hostA", 1)),
@@ -476,9 +491,10 @@ class DAGSchedulerSuite extends FunSuiteLike  with BeforeAndAfter with LocalSpar
 
   test("trivial shuffle with multiple fetch failures") {
     val shuffleMapRdd = new MyRDD(sc, 2, Nil)
-    val shuffleDep = new ShuffleDependency(shuffleMapRdd, null)
+    val numReducePartitions = 2
+    val shuffleDep = new ShuffleDependency(shuffleMapRdd, new HashPartitioner(numReducePartitions))
     val shuffleId = shuffleDep.shuffleId
-    val reduceRdd = new MyRDD(sc, 2, List(shuffleDep))
+    val reduceRdd = new MyRDD(sc, numReducePartitions, List(shuffleDep))
     submit(reduceRdd, Array(0, 1))
     complete(taskSets(0), Seq(
       (Success, makeMapStatus("hostA", 1)),
@@ -513,9 +529,10 @@ class DAGSchedulerSuite extends FunSuiteLike  with BeforeAndAfter with LocalSpar
 
   test("ignore late map task completions") {
     val shuffleMapRdd = new MyRDD(sc, 2, Nil)
-    val shuffleDep = new ShuffleDependency(shuffleMapRdd, null)
+    val numReducePartitions = 2
+    val shuffleDep = new ShuffleDependency(shuffleMapRdd, new HashPartitioner(numReducePartitions))
     val shuffleId = shuffleDep.shuffleId
-    val reduceRdd = new MyRDD(sc, 2, List(shuffleDep))
+    val reduceRdd = new MyRDD(sc, numReducePartitions, List(shuffleDep))
     submit(reduceRdd, Array(0, 1))
     // pretend we were told hostA went away
     val oldEpoch = mapOutputTracker.getEpoch
@@ -541,8 +558,9 @@ class DAGSchedulerSuite extends FunSuiteLike  with BeforeAndAfter with LocalSpar
 
   test("run shuffle with map stage failure") {
     val shuffleMapRdd = new MyRDD(sc, 2, Nil)
-    val shuffleDep = new ShuffleDependency(shuffleMapRdd, null)
-    val reduceRdd = new MyRDD(sc, 2, List(shuffleDep))
+    val numReducePartitions = 2
+    val shuffleDep = new ShuffleDependency(shuffleMapRdd, new HashPartitioner(numReducePartitions))
+    val reduceRdd = new MyRDD(sc, numReducePartitions, List(shuffleDep))
     submit(reduceRdd, Array(0, 1))
 
     // Fail the map stage.  This should cause the entire job to fail.
@@ -577,12 +595,15 @@ class DAGSchedulerSuite extends FunSuiteLike  with BeforeAndAfter with LocalSpar
    */
   test("failure of stage used by two jobs") {
     val shuffleMapRdd1 = new MyRDD(sc, 2, Nil)
-    val shuffleDep1 = new ShuffleDependency(shuffleMapRdd1, null)
+    val numReducePartitions = 2
+    val shuffleDep1 =
+      new ShuffleDependency(shuffleMapRdd1, new HashPartitioner(numReducePartitions))
     val shuffleMapRdd2 = new MyRDD(sc, 2, Nil)
-    val shuffleDep2 = new ShuffleDependency(shuffleMapRdd2, null)
+    val shuffleDep2 =
+      new ShuffleDependency(shuffleMapRdd2, new HashPartitioner(numReducePartitions))
 
-    val reduceRdd1 = new MyRDD(sc, 2, List(shuffleDep1))
-    val reduceRdd2 = new MyRDD(sc, 2, List(shuffleDep1, shuffleDep2))
+    val reduceRdd1 = new MyRDD(sc, numReducePartitions, List(shuffleDep1))
+    val reduceRdd2 = new MyRDD(sc, numReducePartitions, List(shuffleDep1, shuffleDep2))
 
     // We need to make our own listeners for this test, since by default submit uses the same
     // listener for all jobs, and here we want to capture the failure for each job separately.
@@ -614,9 +635,10 @@ class DAGSchedulerSuite extends FunSuiteLike  with BeforeAndAfter with LocalSpar
 
   test("run trivial shuffle with out-of-band failure and retry") {
     val shuffleMapRdd = new MyRDD(sc, 2, Nil)
-    val shuffleDep = new ShuffleDependency(shuffleMapRdd, null)
+    val numReducePartitions = 1
+    val shuffleDep = new ShuffleDependency(shuffleMapRdd, new HashPartitioner(numReducePartitions))
     val shuffleId = shuffleDep.shuffleId
-    val reduceRdd = new MyRDD(sc, 1, List(shuffleDep))
+    val reduceRdd = new MyRDD(sc, numReducePartitions, List(shuffleDep))
     submit(reduceRdd, Array(0))
     // blockManagerMaster.removeExecutor("exec-hostA")
     // pretend we were told hostA went away
@@ -637,10 +659,14 @@ class DAGSchedulerSuite extends FunSuiteLike  with BeforeAndAfter with LocalSpar
 
   test("recursive shuffle failures") {
     val shuffleOneRdd = new MyRDD(sc, 2, Nil)
-    val shuffleDepOne = new ShuffleDependency(shuffleOneRdd, null)
-    val shuffleTwoRdd = new MyRDD(sc, 2, List(shuffleDepOne))
-    val shuffleDepTwo = new ShuffleDependency(shuffleTwoRdd, null)
-    val finalRdd = new MyRDD(sc, 1, List(shuffleDepTwo))
+    val numReducePartitionsOne = 2
+    val shuffleDepOne =
+      new ShuffleDependency(shuffleOneRdd, new HashPartitioner(numReducePartitionsOne))
+    val shuffleTwoRdd = new MyRDD(sc, numReducePartitionsOne, List(shuffleDepOne))
+    val numReducePartitionsTwo = 1
+    val shuffleDepTwo =
+      new ShuffleDependency(shuffleTwoRdd, new HashPartitioner(numReducePartitionsTwo))
+    val finalRdd = new MyRDD(sc, numReducePartitionsTwo, List(shuffleDepTwo))
     submit(finalRdd, Array(0))
     // have the first stage complete normally
     complete(taskSets(0), Seq(
@@ -666,10 +692,14 @@ class DAGSchedulerSuite extends FunSuiteLike  with BeforeAndAfter with LocalSpar
 
   test("cached post-shuffle") {
     val shuffleOneRdd = new MyRDD(sc, 2, Nil)
-    val shuffleDepOne = new ShuffleDependency(shuffleOneRdd, null)
-    val shuffleTwoRdd = new MyRDD(sc, 2, List(shuffleDepOne))
-    val shuffleDepTwo = new ShuffleDependency(shuffleTwoRdd, null)
-    val finalRdd = new MyRDD(sc, 1, List(shuffleDepTwo))
+    val numReducePartitions1 = 2
+    val shuffleDepOne = new ShuffleDependency(
+      shuffleOneRdd, new HashPartitioner(numReducePartitions1))
+    val shuffleTwoRdd = new MyRDD(sc, numReducePartitions1, List(shuffleDepOne))
+    val numReducePartitions2 = 1
+    val shuffleDepTwo = new ShuffleDependency(
+      shuffleTwoRdd, new HashPartitioner(numReducePartitions2))
+    val finalRdd = new MyRDD(sc, numReducePartitions2, List(shuffleDepTwo))
     submit(finalRdd, Array(0))
     cacheLocations(shuffleTwoRdd.id -> 0) = Seq(makeBlockManagerId("hostD"))
     cacheLocations(shuffleTwoRdd.id -> 1) = Seq(makeBlockManagerId("hostC"))
