@@ -140,7 +140,7 @@ private[spark] class LocalDagScheduler(blockFileManager: BlockFileManager, conf:
     localMacrotaskAttemptIds.size
   }
 
-  def getDiskNameToNumRunningAndQueuedDiskMonotasks(): HashMap[String, Int] = {
+  def getDiskNameToNumRunningAndQueuedDiskMonotasks(): HashMap[String, (Int, Int, Int, Int)] = {
     diskScheduler.getDiskNameToNumRunningAndQueuedDiskMonotasks
   }
 

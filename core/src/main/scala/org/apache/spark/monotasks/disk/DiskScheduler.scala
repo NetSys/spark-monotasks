@@ -115,9 +115,11 @@ private[spark] class DiskScheduler(
 
   /**
    * Returns a mapping of physical disk name to the number of running and queued disk monotasks on
-   * that disk.
+   * that disk.  The first count is the number of running and queued disk monotasks (total), the
+   * next is the number of queued read monotasks, then the number of queued remove monotasks, and
+   * finally the number of queued write monotasks.
    */
-  def getDiskNameToNumRunningAndQueuedDiskMonotasks: HashMap[String, Int] = {
+  def getDiskNameToNumRunningAndQueuedDiskMonotasks: HashMap[String, (Int, Int, Int, Int)] = {
     diskAccessors.map {
       case (_, diskAccessor) =>
         (diskAccessor.diskName, diskAccessor.getNumRunningAndQueuedDiskMonotasks)
@@ -261,6 +263,10 @@ private[spark] class DiskScheduler(
 
     private val numRunningAndQueuedDiskMonotasks = new AtomicInteger(0)
 
+    private val numQueuedReadMonotasks = new AtomicInteger(0)
+    private val numQueuedWriteMonotasks = new AtomicInteger(0)
+    private val numQueuedRemoveMonotasks = new AtomicInteger(0)
+
     /**
      * An array of threads that are concurrently executing DiskMonotasks from this DiskAccessor's
      * task queue.
@@ -277,11 +283,41 @@ private[spark] class DiskScheduler(
     def submitMonotask(monotask: DiskMonotask): Unit = {
       taskQueue.put(monotask)
       numRunningAndQueuedDiskMonotasks.incrementAndGet()
+
+      updateCounters(1, monotask)
+    }
+
+    /** Update the counts of queued monotasks when a monotask is added or removed from the queue. */
+    private def updateCounters(change: Int, monotask: DiskMonotask): Unit = {
+      monotask match {
+        case _: HdfsReadMonotask =>
+          numQueuedReadMonotasks.addAndGet(change)
+
+        case _: DiskReadMonotask =>
+          numQueuedReadMonotasks.addAndGet(change)
+
+        case _: HdfsWriteMonotask =>
+          numQueuedWriteMonotasks.addAndGet(change)
+
+        case _: DiskWriteMonotask =>
+          numQueuedWriteMonotasks.addAndGet(change)
+
+        case _: DiskRemoveMonotask =>
+          numQueuedRemoveMonotasks.addAndGet(change)
+
+        case _ =>
+          logWarning(s"Could  not update counters for unknown type of monotask: $monotask")
+      }
+
     }
 
     // TODO: Write monotasks get put in the queue for all disks, so this
     //       includes some monotasks that are also queued on other disks. Fix this.
-    def getNumRunningAndQueuedDiskMonotasks: Int = numRunningAndQueuedDiskMonotasks.get()
+    def getNumRunningAndQueuedDiskMonotasks: (Int, Int, Int, Int) =
+      (numRunningAndQueuedDiskMonotasks.get(),
+        numQueuedReadMonotasks.get(),
+        numQueuedRemoveMonotasks.get(),
+        numQueuedWriteMonotasks.get())
 
     /** Continuously executes DiskMonotasks from the task queue. */
     def run(): Unit = {
@@ -291,6 +327,7 @@ private[spark] class DiskScheduler(
       try {
         while (!currentThread.isInterrupted()) {
           val diskMonotask = taskQueue.take()
+          updateCounters(-1, diskMonotask)
           var monotaskNotYetRun = true
           if (loadBalanceDiskWrites && diskMonotask.isInstanceOf[DiskWriteMonotask]) {
             // assignToDisk will return false if the task has already been completed by another disk

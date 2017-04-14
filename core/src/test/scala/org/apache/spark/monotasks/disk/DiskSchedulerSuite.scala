@@ -227,7 +227,7 @@ class DiskSchedulerSuite extends FunSuite with BeforeAndAfter with Timeouts {
 
     val diskNames = diskScheduler.diskIds.map(BlockFileManager.getDiskNameFromPath(_))
     for (diskName <- diskNames) {
-      assert(diskScheduler.getDiskNameToNumRunningAndQueuedDiskMonotasks(diskName) === 0)
+      assert(diskScheduler.getDiskNameToNumRunningAndQueuedDiskMonotasks(diskName)._1 === 0)
     }
   }
 
