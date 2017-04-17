@@ -19,7 +19,7 @@ package org.apache.spark.monotasks.network
 import java.util.concurrent.{LinkedBlockingQueue, PriorityBlockingQueue}
 import java.util.concurrent.atomic.AtomicLong
 
-import scala.collection.mutable.HashSet
+import scala.collection.mutable.{HashMap, HashSet}
 
 import org.apache.spark.{Logging, SparkConf, SparkException}
 
@@ -53,9 +53,16 @@ private[spark] class NetworkScheduler(conf: SparkConf) extends Logging {
    */
   private val networkRequestMonotaskQueue = new LinkedBlockingQueue[NetworkRequestMonotask]()
 
-  /** Maximum number of bytes that can be outstanding over the network at once. */
-  private val maxOutstandingBytes =
-    conf.getInt("spark.monotasks.network.maxOutstandingBytes", 3 * 1024 * 1024)
+  /**
+   * For each task with running network requests, the number of outstanding requests. This
+   * mapping is based on the reduce ID (which is different than the task ID -- the reduce ID
+   * starts at 0 for each new stage) so that it can be used for the opportunistic early monotasks,
+   * for which the task ID isn't yet known.
+   */
+  private val reduceIdToNumOutstandingRequests = new HashMap[Long, Int]()
+
+  /** Maximum number of tasks that can concurrently have outstanding network requests. */
+  private val maxConcurrentTasks = conf.getInt("spark.monotasks.network.maxConcurrentTasks", 4)
 
   /** Ids of NetworkResponseMonotasks that are currently transmitting data over the network. */
   private val runningResponseMonotasks = new HashSet[Long]()
@@ -80,18 +87,43 @@ private[spark] class NetworkScheduler(conf: SparkConf) extends Logging {
   monotaskLaunchThread.setName("Network monotask launch thread")
   monotaskLaunchThread.start()
 
-  private def maybeLaunchMonotasks(): Unit = synchronized {
-    while (currentOutstandingBytes.get() < maxOutstandingBytes &&
-      !(lowPriorityNetworkRequestMonotaskQueue.isEmpty && networkRequestMonotaskQueue.isEmpty)) {
-      val monotask = if (!networkRequestMonotaskQueue.isEmpty) {
-        networkRequestMonotaskQueue.take()
-      } else {
-        lowPriorityNetworkRequestMonotaskQueue.take()
-      }
-      logDebug(s"Launching NetworkRequestMonotask $monotask when current outstanding bytes " +
-        s"is ${currentOutstandingBytes.get()} and max outstanding bytes is $maxOutstandingBytes.")
-      addOutstandingBytes(monotask.totalBytes)
+  /**
+   * Launches the new request monotask, if the maximum number of outstanding requests hasn't been
+   * reached, or otherwise queues the monotask.
+   */
+  private def launchOrQueueMonotask(monotask: NetworkRequestMonotask): Unit = {
+    if (maxConcurrentTasks <= 0) {
+      logInfo(s"Launching monotask immediately, because there's no throttling on the number of " +
+        "concurrent tasks")
       readyMonotaskQueue.put(monotask)
+    } else {
+      reduceIdToNumOutstandingRequests.synchronized {
+        val canLaunch = reduceIdToNumOutstandingRequests.size < maxConcurrentTasks || {
+          val earlierTasksWaiting = (monotask.isLowPriority() &&
+            !lowPriorityNetworkRequestMonotaskQueue.isEmpty &&
+            lowPriorityNetworkRequestMonotaskQueue.peek().reduceId <= monotask.reduceId)
+          reduceIdToNumOutstandingRequests.contains(monotask.reduceId) && !earlierTasksWaiting
+        }
+
+        val taskId = monotask.context.taskAttemptId
+        if (canLaunch) {
+          logInfo(s"Max concurrent tasks $maxConcurrentTasks; launching NetworkRequestMonotask " +
+            s"for $taskId, reduce ${monotask.reduceId}")
+          readyMonotaskQueue.put(monotask)
+          reduceIdToNumOutstandingRequests.put(
+            monotask.reduceId,
+            reduceIdToNumOutstandingRequests.getOrElse(monotask.reduceId, 0) + 1)
+        } else {
+          logInfo(s"$maxConcurrentTasks are already running (or monotasks for lower task IDs are " +
+            s"waiting in the queue), so queueing $monotask (" +
+            s"${if (monotask.isLowPriority()) "low" else "high"} priority)")
+          if (monotask.isLowPriority()) {
+            lowPriorityNetworkRequestMonotaskQueue.put(monotask)
+          } else {
+            networkRequestMonotaskQueue.put(monotask)
+          }
+        }
+      }
     }
   }
 
@@ -105,12 +137,7 @@ private[spark] class NetworkScheduler(conf: SparkConf) extends Logging {
         readyMonotaskQueue.put(monotask)
 
       case networkRequestMonotask: NetworkRequestMonotask =>
-        if (networkRequestMonotask.isLowPriority()) {
-          lowPriorityNetworkRequestMonotaskQueue.put(networkRequestMonotask)
-        } else {
-          networkRequestMonotaskQueue.put(networkRequestMonotask)
-        }
-        maybeLaunchMonotasks()
+        launchOrQueueMonotask(networkRequestMonotask)
 
       case _ =>
         logError("Unknown type of monotask! " + monotask)
@@ -118,14 +145,68 @@ private[spark] class NetworkScheduler(conf: SparkConf) extends Logging {
     }
   }
 
+    /**
+     * Updates metadata about which tasks are currently using the network, and possibly launches
+     * more network requests.
+     */
+  def handleNetworkRequestSatisfied(monotask: NetworkRequestMonotask): Unit = {
+    if (maxConcurrentTasks <= 0) {
+      // We're not doing any throttling of how many network monotasks run concurrently, so just
+      // return.
+      return
+    }
+    val finishedReduceId = monotask.reduceId
+    reduceIdToNumOutstandingRequests.synchronized {
+      val numOutstandingRequestsForTask = reduceIdToNumOutstandingRequests(finishedReduceId)
+      if (numOutstandingRequestsForTask > 1) {
+        // Decrement it and don't launch any more network requests for different reduce tasks.
+        reduceIdToNumOutstandingRequests.put(finishedReduceId, numOutstandingRequestsForTask - 1)
+      } else {
+        // Remove the reduce ID from the outstanding requests and possibly start the network
+        // requests for a new task.
+        // NB: This may go back to reducers with lower IDs, as map tasks finish.
+        // TODO: With the early reducers, might make more sense to do this by amount of data rather
+        //       than by number of outstanding requests.
+        reduceIdToNumOutstandingRequests.remove(finishedReduceId)
+        if (networkRequestMonotaskQueue.size() + lowPriorityNetworkRequestMonotaskQueue.size() >
+            0) {
+          var tasksStarted = 0
+          // Try to launch all of the network monotasks for a particular reduce task.
+          val monotaskQueue = if (networkRequestMonotaskQueue.size() > 0) {
+            logInfo(s"Attempting to launch high priority network monotask")
+            networkRequestMonotaskQueue
+          } else {
+            logInfo(s"Attempting to launch low priority network monotask")
+            lowPriorityNetworkRequestMonotaskQueue
+          }
+
+          // Thread safety isn't an issue here, because access is synchronized on
+          // taskIdToNumOutstandingRequests.
+          val firstReduceId = monotaskQueue.peek().reduceId
+
+          while (monotaskQueue.size() > 0 &&
+              monotaskQueue.peek().reduceId == firstReduceId) {
+            val networkMonotask = monotaskQueue.remove()
+            // TODO: unify networkRequestMonotaskQueue with readyMonotaskQueue. If this method
+            //       handles updating taskIdToNumOutstanding, the thread that launches monotasks
+            //       can read them directly from networkRequestMonotaskQueue.
+            logInfo(s"Launching network monotask $networkMonotask for reduce $firstReduceId")
+            readyMonotaskQueue.put(networkMonotask)
+            tasksStarted += 1
+          }
+          reduceIdToNumOutstandingRequests.put(
+            firstReduceId,
+            reduceIdToNumOutstandingRequests.getOrElse(firstReduceId, 0) + tasksStarted)
+        }
+      }
+    }
+  }
+
   /**
    * Used to keep track of the bytes outstanding over the network. Can be called with a negative
    * value to indicate bytes that are no longer outstanding.
    */
-  def addOutstandingBytes(bytes: Long) = {
-    currentOutstandingBytes.addAndGet(bytes)
-    maybeLaunchMonotasks()
-  }
+  def addOutstandingBytes(bytes: Long) = currentOutstandingBytes.addAndGet(bytes)
 
   def getOutstandingBytes: Long = currentOutstandingBytes.get()
 
