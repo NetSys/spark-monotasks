@@ -96,6 +96,14 @@ def copy_all_logs(stringified_parameters, slaves):
   subprocess.check_call("cp {} {}/".format(configuration_filename,
                                            log_directory_name),
                         shell=True)
+
+  # Save the last 10 git commits for easy reference later.
+  commit_filename = os.path.join(log_directory_name, "git_commit_history")
+  spark_directory = get_full_path("spark")
+  git_commit_command = ("git --git-dir={}/.git --work-tree={} " +
+      "log -n 10 >> {}").format(spark_directory, spark_directory, commit_filename)
+  print git_commit_command
+  subprocess.check_call(git_commit_command, shell=True)
   print "Finished copying results to {}".format(log_directory_name)
   return log_directory_name
 
