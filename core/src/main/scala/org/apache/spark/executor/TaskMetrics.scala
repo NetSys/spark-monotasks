@@ -106,6 +106,10 @@ class TaskMetrics extends Serializable {
   def diskNanos: Long = _diskNanos
   private[spark] def incDiskNanos(value: Long) = _diskNanos += value
 
+  private var _diskReadNanos: Long = _
+  def diskReadNanos: Long = _diskReadNanos
+  private[spark] def incDiskReadNanos(value: Long) = _diskReadNanos += value
+
   /**
    * Total time tht disk monotasks for this macrotask spent queued.
    */

@@ -81,10 +81,12 @@ private[spark] class DiskReadMonotask(
     val buffer = ByteBuffer.allocate(bytesToRead)
 
     try {
-      val startTimeMillis = System.currentTimeMillis()
+      val startTimeNanos = System.nanoTime()
       channel.read(buffer)
+      val totalTime = System.nanoTime() - startTimeNanos
+      context.taskMetrics.incDiskReadNanos(totalTime)
       logDebug(s"Block $blockId (size: ${Utils.bytesToString(bytesToRead)}) read from " +
-        s"disk $diskId in ${System.currentTimeMillis - startTimeMillis} ms into $buffer")
+        s"disk $diskId in ${totalTime / 1.0e6} ms into $buffer")
     } finally {
       channel.close()
       stream.close()

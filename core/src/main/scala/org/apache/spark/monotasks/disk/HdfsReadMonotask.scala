@@ -47,6 +47,7 @@ private[spark] class HdfsReadMonotask(
     val stream = path.getFileSystem(hadoopConf).open(path)
     val sizeBytes = hadoopSplit.getLength().toInt
     val buffer = new Array[Byte](sizeBytes)
+    val startTime = System.nanoTime()
 
     try {
       stream.readFully(hadoopSplit.getStart(), buffer)
@@ -56,6 +57,7 @@ private[spark] class HdfsReadMonotask(
 
     SparkEnv.get.blockManager.cacheBytes(
       getResultBlockId(), ByteBuffer.wrap(buffer), StorageLevel.MEMORY_ONLY_SER, false)
+    context.taskMetrics.incDiskReadNanos(System.nanoTime() - startTime)
     context.taskMetrics.getInputMetricsForReadMethod(DataReadMethod.Hadoop).incBytesRead(sizeBytes)
   }
 }

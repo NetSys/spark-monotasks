@@ -309,6 +309,7 @@ private[spark] object JsonProtocol {
     ("Computation Nanos" -> taskMetrics.computationNanos) ~
     ("Compute Wait Nanos" -> taskMetrics.computeWaitNanos) ~
     ("Disk Nanos" -> taskMetrics.diskNanos) ~
+    ("Disk Read Nanos" -> taskMetrics.diskReadNanos) ~
     ("Disk Wait Nanos" -> taskMetrics.diskWaitNanos) ~
     ("HDFS Deserialization/Decompression Millis" ->
       taskMetrics.hdfsDeserializationDecompressionMillis) ~
