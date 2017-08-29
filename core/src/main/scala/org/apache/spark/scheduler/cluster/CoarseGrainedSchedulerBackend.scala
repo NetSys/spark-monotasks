@@ -61,6 +61,9 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
     conf.getInt("spark.scheduler.maxRegisteredResourcesWaitingTime", 30000)
   val createTime = System.currentTimeMillis()
 
+  // This is a backdoor, to allow setting the number of concurrent tasks for testing purposes.
+  var numConcurrentTasks = conf.getInt("spark.scheduler.concurrentTasks", -1)
+
   private val executorDataMap = new HashMap[String, ExecutorData]
 
   // Number of executors requested from the cluster manager that have not registered yet
@@ -103,6 +106,9 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
           val totalDiskConcurrency = disks * numThreadsPerDisk
           val data = new ExecutorData(
               sender, sender.path.address, host, totalDiskConcurrency, cores, logUrls)
+          if (numConcurrentTasks != -1) {
+            data.freeSlots = numConcurrentTasks
+          }
           // This must be synchronized because variables mutated
           // in this block are read when requesting executors
           CoarseGrainedSchedulerBackend.this.synchronized {
