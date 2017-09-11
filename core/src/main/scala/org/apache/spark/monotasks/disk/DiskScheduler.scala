@@ -21,8 +21,6 @@ import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.atomic.AtomicInteger
 
 import scala.collection.mutable.HashMap
-import scala.language.postfixOps
-import scala.sys.process._
 import scala.util.control.NonFatal
 
 import org.apache.spark.{Logging, SparkConf, SparkEnv, SparkException}
@@ -64,9 +62,6 @@ private[spark] class DiskScheduler(
   private val loadBalanceDiskWrites = conf.getBoolean(
     "spark.monotasks.loadBalanceDiskWrites", false)
 
-  private val flushIntervalNanos =
-    conf.getLong("spark.monotasks.diskFlushIntervalMinutes", 1) * 60L * 1e9
-
   addShutdownHook()
   buildDiskAccessors(conf)
   launchHdfsWriteMonotaskSubmitterThread()
@@ -81,12 +76,9 @@ private[spark] class DiskScheduler(
    */
   private def buildDiskAccessors(conf: SparkConf) {
     val numThreadsPerDisk = conf.getInt("spark.monotasks.threadsPerDisk", 1)
-    // Set just one of the disk accessors to handle flushing the buffer cache.
-    var diskAccessorShouldFlush = true
     diskIds.foreach { diskId =>
       logInfo(s"Creating $numThreadsPerDisk threads for disk $diskId")
-      diskAccessors(diskId) = new DiskAccessor(diskId, numThreadsPerDisk, diskAccessorShouldFlush)
-      diskAccessorShouldFlush = false
+      diskAccessors(diskId) = new DiskAccessor(diskId, numThreadsPerDisk)
     }
   }
 
@@ -248,8 +240,7 @@ private[spark] class DiskScheduler(
    * @param concurrency The maximum number of DiskMonotasks that will be executed concurrently on
    *                    each disk.
    */
-  private class DiskAccessor(
-      diskId: String, concurrency: Int, flushCache: Boolean) extends Runnable {
+  private class DiskAccessor(diskId: String, concurrency: Int) extends Runnable {
 
     /** The name of the physical disk on which this DiskAccessor will operate. */
     val diskName = BlockFileManager.getDiskNameFromPath(diskId)
@@ -262,9 +253,6 @@ private[spark] class DiskScheduler(
      * accumulate and temporarily starve requests from other machines.
      */
     private val taskQueue = new DeficitRoundRobinQueue[Class[_]]()
-
-    /** Last time that the buffer cache was flushed. Used to decide when to flush next. */
-    private var lastFlushTimeNanos = System.nanoTime()
 
     private val numRunningAndQueuedDiskMonotasks = new AtomicInteger(0)
 
@@ -347,14 +335,6 @@ private[spark] class DiskScheduler(
           // TODO: If the monotask already ran, we should treat the queue differently: rather than
           // doing round-robin, we should select from the same queue again!
           numRunningAndQueuedDiskMonotasks.decrementAndGet()
-
-          if (flushCache && ((System.nanoTime() - lastFlushTimeNanos) > flushIntervalNanos)) {
-            val startTime = System.nanoTime()
-            logInfo(s"Started clearing buffer cache because $flushIntervalNanos ns has elapsed")
-            "/root/spark-ec2/clear-cache.sh".!
-            lastFlushTimeNanos = System.nanoTime()
-            logInfo(s"Cleared buffer cache in ${(lastFlushTimeNanos - startTime) / 1.0e6}ms")
-          }
         }
       } catch {
         case _: InterruptedException => {
