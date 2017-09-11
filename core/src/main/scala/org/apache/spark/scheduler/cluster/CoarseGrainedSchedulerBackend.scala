@@ -28,9 +28,10 @@ import akka.pattern.ask
 import akka.remote.{DisassociatedEvent, RemotingLifecycleEvent}
 
 import org.apache.spark.{ExecutorAllocationClient, Logging, SparkEnv, SparkException, TaskState}
+import org.apache.spark.monotasks.network.NetworkScheduler
 import org.apache.spark.scheduler._
 import org.apache.spark.scheduler.cluster.CoarseGrainedClusterMessages._
-import org.apache.spark.util.{ActorLogReceive, SerializableBuffer, AkkaUtils, Utils}
+import org.apache.spark.util.{ActorLogReceive, AkkaUtils, SerializableBuffer, Utils}
 
 /**
  * A scheduler backend that waits for coarse grained executors to connect to it through Akka.
@@ -95,7 +96,9 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
           sender ! RegisterExecutorFailed("Duplicate executor ID: " + executorId)
         } else {
           val numThreadsPerDisk = conf.getInt("spark.monotasks.threadsPerDisk", 1)
-          logInfo(s"Registered executor: $sender with ID $executorId, $cores cores, $disks " +
+          val networkConcurrency = NetworkScheduler.getMaxConcurrentTasks(conf)
+          logInfo(s"Registered executor: $sender with ID $executorId, $cores cores, " +
+            s"$networkConcurrency network concurrency, $disks " +
             s"disks, and $numThreadsPerDisk threads per disk")
           sender ! RegisteredExecutor
 
@@ -104,8 +107,8 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
           totalRegisteredExecutors.addAndGet(1)
           val (host, _) = Utils.parseHostPort(hostPort)
           val totalDiskConcurrency = disks * numThreadsPerDisk
-          val data = new ExecutorData(
-              sender, sender.path.address, host, totalDiskConcurrency, cores, logUrls)
+          val data = new ExecutorData(sender, sender.path.address, host, totalDiskConcurrency,
+            networkConcurrency, cores, logUrls)
           if (numConcurrentTasks != -1) {
             data.freeSlots = numConcurrentTasks
           }
@@ -186,7 +189,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
           id,
           executorData.executorHost,
           executorData.freeSlots,
-          executorData.totalDisks,
+          executorData.totalDiskConcurrency,
           executorData.taskSetIdToRunningTasks)
       }.toSeq))
     }
@@ -199,7 +202,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, val actorSyste
           executorId,
           executorData.executorHost,
           executorData.freeSlots,
-          executorData.totalDisks,
+          executorData.totalDiskConcurrency,
           executorData.taskSetIdToRunningTasks))))
     }
 

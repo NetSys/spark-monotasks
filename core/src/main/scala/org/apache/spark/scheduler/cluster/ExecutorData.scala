@@ -43,22 +43,19 @@ import akka.actor.{Address, ActorRef}
  * @param executorActor The ActorRef representing this executor
  * @param executorAddress The network address of this executor
  * @param executorHost The hostname that this executor is running on
- * @param totalDisks The total number of disks available to the executor
+ * @param totalDiskConcurrency The total number of disk slots available for monotasks to run in
  * @param totalCores The total number of cores available to the executor
  */
 private[cluster] class ExecutorData(
-   val executorActor: ActorRef,
-   val executorAddress: Address,
-   override val executorHost: String,
-   val totalDisks: Int,
-   override val totalCores: Int,
-   override val logUrlMap: Map[String, String]
+    val executorActor: ActorRef,
+    val executorAddress: Address,
+    override val executorHost: String,
+    val totalDiskConcurrency: Int,
+    val totalNetworkConcurrency: Int,
+    override val totalCores: Int,
+    override val logUrlMap: Map[String, String]
 ) extends ExecutorInfo(executorHost, totalCores, logUrlMap) {
-  // The total number of slots should be 2 * (max concurrency of any resource) + the sum of
-  // the concurrency of all of the other resources - 1.  This is equal to the sum of the
-  // concurrency of each resource + the max concurrency of any resource - 1 (there's no -1 here
-  // because the network has concurrency 1).
-  var freeSlots = math.max(totalCores, totalDisks) + totalCores + totalDisks
+  var freeSlots = totalNetworkConcurrency + totalCores + totalDiskConcurrency + 1
 
   val taskSetIdToRunningTasks = new HashMap[String, Int]()
 }

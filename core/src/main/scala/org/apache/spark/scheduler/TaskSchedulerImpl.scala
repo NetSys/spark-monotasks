@@ -30,6 +30,7 @@ import scala.util.Random
 
 import org.apache.spark._
 import org.apache.spark.TaskState.TaskState
+import org.apache.spark.monotasks.network.NetworkScheduler
 import org.apache.spark.scheduler.SchedulingMode.SchedulingMode
 import org.apache.spark.scheduler.TaskLocality.TaskLocality
 import org.apache.spark.util.Utils
@@ -71,6 +72,8 @@ private[spark] class TaskSchedulerImpl(
   // TODO: This isn't used correctly currently, because on the worker, the ComputeScheduler always
   //       runs one task per CPU.
   val CPUS_PER_TASK = conf.getInt("spark.task.cpus", 1)
+
+  val taskNetworkConcurrency = NetworkScheduler.getMaxConcurrentTasks(conf)
 
   // TaskSetManagers are not thread safe, so any access to one should be synchronized
   // on this class.
@@ -237,7 +240,7 @@ private[spark] class TaskSchedulerImpl(
       // can run fewer monotasks concrrently).
       val usableSlots = {
         val unusableDiskSlots = if (taskSet.taskSet.usesDisk) 0 else shuffledOffers(i).totalDisks
-        val unusableNetworkSlots = if (taskSet.taskSet.usesNetwork) 0 else 1
+        val unusableNetworkSlots = if (taskSet.taskSet.usesNetwork) 0 else taskNetworkConcurrency
         availableSlots(i) - unusableDiskSlots - unusableNetworkSlots
       }
 
