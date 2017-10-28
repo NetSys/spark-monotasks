@@ -5,7 +5,7 @@ that decomposes jobs into monotasks rather than regular, multi-resource tasks.
 For more information about monotasks, refer to the research paper.
 
 This code is not suitable for production use, and does not implement a number of
-features that are available in Apache Spark.  It is based on version 1.6 of Apache
+features that are available in Apache Spark.  It is based on version 1.3 of Apache
 Spark. For more information about Apache Spark, refer to the
 [Spark web page](http://spark.apache.org).
 
